@@ -1,0 +1,118 @@
+// Project CRUD on top of DNFS. Global: Projects.
+// A project is a folder under projects/ with the standard layout and a project-config.json.
+//   await Projects.list()                       [config...]
+//   await Projects.create({ name, owner, ... }) config (folder made from the name)
+//   await Projects.update(folder, patch)        config
+//   await Projects.rename(folder, newName)      config (folder renamed too)
+//   await Projects.trash(folder)                moves it to projects/.trash/
+const Projects = (() => {
+  const ROOT = 'projects';
+  const LAYOUT = ['data/source', 'data/staged', 'data/cache', 'pipeline', 'dashboard', 'publish', 'archives', 'logs'];
+  const MODULES = ['import', 'pipeline', 'dashboard', 'publish', 'update', 'archives'];
+  // Option lists: [stored value, label]. The value is also the badge class.
+  const PHASE = [['not-started', 'Not Started'], ['planning', 'Planning'], ['development', 'Development'], ['testing', 'Testing'], ['production', 'Production']];
+  const STATUS = [0, 25, 50, 75, 100].map(n => [n, n + '%']); // percent complete
+  const CLASSIFICATION = [['unclassified', 'UNCLASSIFIED'], ['unnpi', 'UNNPI'], ['cui', 'CUI']];
+  const label = (list, v) => (list.find(([k]) => String(k) === String(v)) || [, v ?? ''])[1];
+  // Older configs: status was a word (active/complete/planning...), classification public/internal/confidential/restricted.
+  const migrate = c => {
+    if (typeof c.status !== 'number') {
+      const old = String(c.status ?? '');
+      if (!c.phase || !PHASE.some(([k]) => k === c.phase)) c.phase = PHASE.some(([k]) => k === old) ? old : old === 'complete' ? 'production' : 'not-started';
+      c.status = Number.isFinite(+old) && old !== '' ? +old : old === 'complete' || old === 'production' ? 100 : 0;
+    }
+    if (c.handling === 'unnpi' && c.classification !== 'cui') c.classification = 'unnpi'; // handling was folded into classification
+    delete c.handling;
+    if (!CLASSIFICATION.some(([k]) => k === c.classification)) c.classification = ['confidential', 'restricted'].includes(c.classification) ? 'cui' : 'unclassified';
+    return c;
+  };
+  const cfgPath = folder => `${ROOT}/${folder}/project-config.json`;
+
+  // "Sales Q3 2026!" -> "sales-q3-2026"
+  const slug = name => name.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  const validName = name => {
+    if (!name || !name.trim()) return 'A name is required.';
+    if (!slug(name)) return 'The name needs at least one letter or digit.';
+    return '';
+  };
+  const id = () => [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, '0')).join('');
+
+  async function list() {
+    let dirs = [];
+    try { dirs = (await DNFS.list(ROOT)).filter(e => e.dir); } catch (e) { if (e.status !== 404) throw e; await DNFS.mkdir(ROOT); }
+    const out = [];
+    for (const d of dirs) {
+      try { out.push(migrate(await DNFS.readJSON(cfgPath(d.name)))); }
+      catch { out.push({ folder: d.name, name: d.name, broken: true, status: 'archived', modified: d.modified }); }
+    }
+    return out;
+  }
+  const get = async folder => migrate(await DNFS.readJSON(cfgPath(folder)));
+  async function save(cfg) { cfg.modified = new Date().toISOString(); await DNFS.writeJSON(cfgPath(cfg.folder), cfg); return cfg; }
+
+  async function create({ name, owner = '', developers = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified', tags = [] }) {
+    const err = validName(name); if (err) throw new Error(err);
+    const folder = slug(name);
+    if (await DNFS.exists(`${ROOT}/${folder}`)) throw new Error(`A project folder "${folder}" already exists.`);
+    for (const d of LAYOUT) await DNFS.mkdir(`${ROOT}/${folder}/${d}`);
+    const now = new Date().toISOString();
+    const cfg = {
+      schemaVersion: 1, id: id(), name: name.trim(), folder, description, owner, developers, phase, status: +status || 0, classification, tags,
+      created: now, modified: now,
+      modules: Object.fromEntries(MODULES.map(m => [m, { lastRun: null }])),
+      datasets: [], settings: {},
+    };
+    await DNFS.writeJSON(cfgPath(folder), cfg);
+    await ProjectLog.write(folder, 'project', `Project created: ${cfg.name}`);
+    return cfg;
+  }
+
+  async function update(folder, patch) {
+    const cfg = await get(folder);
+    for (const k of ['name', 'owner', 'developers', 'description', 'phase', 'status', 'classification', 'tags', 'settings', 'datasets', 'modules']) if (k in patch) cfg[k] = patch[k];
+    return save(cfg);
+  }
+
+  // Rename: new display name, and the folder follows the new name.
+  async function rename(folder, name) {
+    const err = validName(name); if (err) throw new Error(err);
+    const to = slug(name);
+    if (to !== folder) {
+      if (await DNFS.exists(`${ROOT}/${to}`)) throw new Error(`A project folder "${to}" already exists.`);
+      await DNFS.move(`${ROOT}/${folder}`, `${ROOT}/${to}`);
+    }
+    const cfg = await get(to);
+    cfg.name = name.trim(); cfg.folder = to;
+    await save(cfg);
+    await ProjectLog.write(to, 'project', `Renamed to ${cfg.name}${to !== folder ? ` (folder ${folder} -> ${to})` : ''}`);
+    return cfg;
+  }
+
+  // Moves the project to projects/.trash/<folder>-<timestamp> (server call: dot-folders are off-limits to DNFS).
+  async function trash(folder) {
+    const r = await fetch(`/api/project/trash?folder=${encodeURIComponent(folder)}`, { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || `Delete failed (${r.status})`);
+    return j;
+  }
+
+  // Record that a module ran (shown on the home page).
+  async function touchModule(folder, module, info = {}) {
+    const cfg = await get(folder);
+    cfg.modules ||= {};
+    cfg.modules[module] = { ...cfg.modules[module], lastRun: new Date().toISOString(), ...info };
+    return save(cfg);
+  }
+
+  // Datasets registered by Import: { name, path, rows, columns: [{ name, type }], source, imported }
+  async function upsertDataset(folder, ds) {
+    const cfg = await get(folder);
+    cfg.datasets ||= [];
+    const i = cfg.datasets.findIndex(d => d.name === ds.name);
+    if (i >= 0) cfg.datasets[i] = { ...cfg.datasets[i], ...ds }; else cfg.datasets.push(ds);
+    return save(cfg);
+  }
+  const dir = folder => `${ROOT}/${folder}`;
+
+  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, touchModule, upsertDataset, dir };
+})();

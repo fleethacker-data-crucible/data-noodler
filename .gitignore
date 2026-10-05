@@ -1,0 +1,9 @@
+.server/.profile*/
+.server/logs/
+.server/.pid
+test-data/
+temp/
+.trash/
+js/duckdb/bench.*
+projects/*
+!projects/sales-demo/

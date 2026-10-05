@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "steps": [
+    {
+      "id": "0136f14e-5346-4e30-8c3e-a715dd7f6a83",
+      "name": "derive_1",
+      "type": "derive",
+      "config": {
+        "input": "orders",
+        "exprs": "order_year = year(order_date)\nis_big = total > 1000"
+      },
+      "output": false
+    },
+    {
+      "id": "b9cba99c-56b1-48c2-a6cd-75b28d540a08",
+      "name": "sales_by_region_year",
+      "type": "aggregate",
+      "config": {
+        "input": "derive_1",
+        "group": "region, order_year",
+        "aggs": "orders = count(*)\nrevenue = sum(total)\nbig_orders = count(*) FILTER (WHERE is_big)"
+      },
+      "output": true
+    },
+    {
+      "id": "4eef03db-f08a-4e33-9b3b-9bc8731fb87f",
+      "name": "sql_1",
+      "type": "sql",
+      "config": {
+        "query": "SELECT region, sum(revenue) AS revenue, sum(orders) AS orders FROM sales_by_region_year GROUP BY 1 ORDER BY 2 DESC"
+      },
+      "output": false
+    }
+  ],
+  "updated": "2026-10-04T19:54:53.081Z"
+}

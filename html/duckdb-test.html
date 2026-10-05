@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DuckDB Engine Test</title>
+<style>
+  body { font: 14px system-ui; margin: 20px; }
+  button { margin: 4px 4px 4px 0; }
+  input { width: 360px; }
+  textarea { width: 100%; height: 70px; font-family: monospace; }
+  #log { background: #f4f4f4; padding: 8px; white-space: pre-wrap; font-family: monospace; }
+  table { border-collapse: collapse; margin-top: 10px; }
+  td, th { border: 1px solid #ccc; padding: 3px 6px; }
+  .ok { color: green; } .err { color: red; }
+</style>
+</head>
+<body>
+<div><input id="path" value="test-data/sales_1m.parquet"> <button id="open" disabled>Use project file</button></div>
+<button id="run" disabled>Run SQL</button>
+<button id="save" disabled>Write query to test-data/export.parquet</button>
+<textarea id="sql">SELECT 42 AS answer</textarea>
+<div id="log"></div>
+<div id="out"></div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/duckdb-engine.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const log = (msg, cls = '') => { const d = document.createElement('div'); d.className = cls; d.textContent = msg; $('log').append(d); };
+const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };
+
+guard(async () => {
+  const i = await DuckEngine.init();
+  log(`DuckDB ${i.version} ready (${i.build}, ${i.threads} threads)`, 'ok');
+  ['open', 'run', 'save'].forEach(id => $(id).disabled = false);
+})();
+$('open').onclick = guard(async () => {
+  const name = await DuckEngine.source($('path').value);
+  log(`Using ${name}`, 'ok');
+  $('sql').value = `SELECT * FROM '${name}' LIMIT 100`;
+});
+$('run').onclick = guard(async () => {
+  const { cols, rows, ms } = await DuckEngine.query($('sql').value);
+  $('out').innerHTML = '<table><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>' +
+    rows.slice(0, 200).map(r => '<tr>' + r.map(v => `<td>${v ?? ''}</td>`).join('') + '</tr>').join('') + '</table>';
+  log(`Query: ${rows.length} rows in ${Math.round(ms)} ms`, 'ok');
+});
+$('save').onclick = guard(async () => {
+  const r = await DuckEngine.writeProjectFile($('sql').value, 'test-data/export.parquet');
+  log(`Wrote ${r.path}: ${(r.bytes / 1048576).toFixed(2)} MB in ${Math.round(r.ms)} ms`, 'ok');
+});
+</script>
+</body>
+</html>

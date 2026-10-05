@@ -1,0 +1,26 @@
+[
+  {
+    "at": "2026-10-01T06:09:59.541Z",
+    "outputs": [
+      {
+        "name": "sales_by_region_year",
+        "rows": 20,
+        "before": null
+      }
+    ],
+    "ok": true,
+    "ms": 209
+  },
+  {
+    "at": "2026-10-01T06:11:33.366Z",
+    "outputs": [
+      {
+        "name": "sales_by_region_year",
+        "rows": 20,
+        "before": 20
+      }
+    ],
+    "ok": true,
+    "ms": 395
+  }
+]

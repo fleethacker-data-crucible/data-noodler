@@ -1,0 +1,33 @@
+2026-10-01T06:06:57.355Z  INFO  project   Project created: Sales Demo
+2026-10-01T06:07:47.257Z  INFO  import    Imported orders.csv → orders: 1,000,000 rows, 9 columns, 11.9 MB in 5.80 s
+2026-10-01T06:09:32.207Z  INFO  import    Imported legacy.sqlite:t → legacy_orders: 1,000,000 rows, 9 columns, 12.5 MB in 3.66 s
+2026-10-01T06:09:37.663Z  INFO  import    Imported gen_sample.parquet → gen_sample: 62,500 rows, 50 columns, 5.8 MB in 1.29 s
+2026-10-01T06:09:59.599Z  INFO  pipeline  Writing sales_by_region_year…
+2026-10-01T06:09:59.751Z  INFO  pipeline  sales_by_region_year: 20 rows, 1 KB
+2026-10-01T06:09:59.827Z  INFO  pipeline  Pipeline run finished in 209 ms
+2026-10-01T06:10:35.678Z  INFO  dashboard Widget added: Revenue by region
+2026-10-01T06:11:00.025Z  INFO  publish   Published dashboard → projects/sales-demo/publish/dashboard-20261001-061059.html (29 KB)
+2026-10-01T06:11:04.032Z  INFO  publish   Exported sales_by_region_year as CSV (30 ms)
+2026-10-01T06:11:29.790Z  INFO  update    Re-importing orders…
+2026-10-01T06:11:33.360Z  INFO  update    orders: 1,000,000 → 1,001,000 rows
+2026-10-01T06:11:33.366Z  INFO  update    Re-running the pipeline…
+2026-10-01T06:11:33.465Z  INFO  update    Writing sales_by_region_year…
+2026-10-01T06:11:33.761Z  INFO  update    sales_by_region_year: 20 rows, 1 KB
+2026-10-01T06:11:55.183Z  INFO  archives  Snapshot taken: 20261001-061155 (Before cleanup), 30.2 MB
+2026-10-01T06:12:03.133Z  INFO  archives  Snapshot taken: 20261001-061203 (Before restoring 20261001-061155), 30.2 MB
+2026-10-01T06:12:03.258Z  INFO  archives  Restored snapshot 20261001-061155
+2026-10-01T12:03:45.656Z  INFO  project   Details edited
+2026-10-01T12:04:59.223Z  INFO  project   Details edited
+2026-10-01T14:53:25.231Z  INFO  project   Details edited
+2026-10-01T15:00:31.656Z  INFO  project   Details edited
+2026-10-01T15:16:42.851Z  INFO  project   Details edited
+2026-10-01T15:23:57.806Z  INFO  project   Details edited
+2026-10-01T15:24:11.090Z  INFO  project   Details edited
+2026-10-01T15:36:58.531Z  INFO  project   Details edited
+2026-10-01T15:39:33.130Z  INFO  project   Details edited
+2026-10-03T01:55:32.954Z  INFO  pipeline  Writing sales_by_region_year…
+2026-10-03T01:55:33.315Z  INFO  pipeline  sales_by_region_year: 20 rows, 1 KB
+2026-10-03T01:55:33.372Z  INFO  pipeline  Pipeline run finished in 408 ms
+2026-10-04T19:54:53.279Z  INFO  pipeline  Writing sales_by_region_year…
+2026-10-04T19:54:53.657Z  INFO  pipeline  sales_by_region_year: 20 rows, 1 KB
+2026-10-04T19:54:53.708Z  INFO  pipeline  Pipeline run finished in 559 ms

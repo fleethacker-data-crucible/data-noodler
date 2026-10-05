@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Publish</title>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  .list div { display: flex; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .list div span:first-child { flex: 1; }
+  .opts { display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">DN</span><div><h1 id="title">Publish</h1><div class="sub" id="sub"></div></div></div>
+  </header>
+  <div class="main stack">
+    <div class="grid2">
+      <section class="box stack">
+        <h3>Dashboard as a web page</h3>
+        <div class="muted">One self-contained HTML file with the current results built in: it opens anywhere, without the server or the data.</div>
+        <label class="field">Name<input id="dName" type="text" value="dashboard"></label>
+        <button id="pubDash" class="go">Publish dashboard</button>
+      </section>
+      <section class="box stack">
+        <h3>Datasets</h3>
+        <div class="muted">Copies of staged datasets for other tools.</div>
+        <div class="opts" id="dsOpts"></div>
+        <label class="field">Format<select id="fmt"><option value="csv">CSV (with header)</option><option value="parquet">Parquet (ZSTD)</option></select></label>
+        <button id="pubData" class="go">Export selected</button>
+      </section>
+    </div>
+    <h2>Published</h2>
+    <div class="list" id="pubs"></div>
+    <h2>Activity</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/duckdb-engine.js"></script>
+<script src="../js/duckdb-pool.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/module-page.js"></script>
+<script src="../js/core/data-engine.js"></script>
+<script src="../js/dashboard/widgets.js"></script>
+<script>
+const { $, esc } = UI;
+let ctx;
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').replace(/(\d{8})(\d{6})/, '$1-$2');
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
+
+async function listPubs() {
+  let items = [];
+  try { items = await DNFS.list(`${ctx.dir}/publish`, { recursive: true }); } catch {}
+  const files = items.filter(f => !f.dir).sort((a, b) => b.modified.localeCompare(a.modified));
+  $('pubs').innerHTML = files.map(f => `<div><span class="mono">${esc(f.path.replace(`${ctx.dir}/publish/`, ''))}</span><span class="muted">${UI.bytes(f.size)} · ${UI.date(f.modified)}</span>${f.name.endsWith('.html') ? `<a class="btn" href="/${esc(f.path)}" target="_blank">Open</a>` : ''}<button class="danger small" data-del="${esc(f.path)}">Delete</button></div>`).join('') || '<div class="muted">Nothing published yet.</div>';
+}
+$('pubs').onclick = UI.guard(async ev => {
+  const p = ev.target.dataset.del; if (!p) return;
+  if (!await UI.confirm(`Delete ${p.split('/').pop()}?`, { danger: true, ok: 'Delete' })) return;
+  await DNFS.remove(p); ctx.log(`Deleted published file ${p}`); listPubs();
+});
+
+// ---- dashboard page: results computed now, embedded as JSON; renderer, theme and helpers inlined ----
+$('pubDash').onclick = UI.guard(async () => {
+  let dash; try { dash = await DNFS.readJSON(`${ctx.dir}/dashboard/dashboard.json`); } catch { throw new Error('No dashboard yet. Build one in the Dashboard module first.'); }
+  if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
+  $('pubDash').disabled = true;
+  try {
+    await DataEngine.loadProfile();
+    const results = [];
+    for (const w of dash.widgets) {
+      const d = ctx.cfg.datasets.find(x => x.name === w.dataset);
+      if (!d) { results.push({ w, error: `Dataset ${w.dataset} not found` }); continue; }
+      let r;
+      if (w.type === 'table') { const e = await DataEngine.main(); r = await e.query(Widgets.tableQuery(w, `read_parquet('${e.url(d.path)}')`)); }
+      else { const a = Widgets.aggQuery(w); r = await DataEngine.parallel({ path: d.path, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final }); }
+      results.push({ w, cols: r.cols, rows: r.rows });
+    }
+    const [css, ui, widgets] = await Promise.all(['/css/theme.css', '/js/core/ui.js', '/js/dashboard/widgets.js'].map(async u => (await fetch(u)).text()));
+    const data = JSON.stringify({ project: ctx.cfg.name, at: new Date().toISOString(), results }).replace(/</g, '\\u003c');
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(ctx.cfg.name)} · Dashboard</title>
+<style>${css.replace(/@font-face[^}]+}/g, '')}
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px}.card.wide{grid-column:1/-1}.card .body{overflow:auto;max-height:420px}</style></head>
+<body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>${esc(ctx.cfg.name)}</h1><div class="sub" id="sub"></div></div></div></header>
+<div class="main"><div class="board" id="board"></div></div></div>
+<script>${ui}<\/script><script>${widgets}<\/script>
+<script>const D = ${data};
+document.getElementById('sub').textContent = 'Dashboard published ' + new Date(D.at).toLocaleString() + ' (classification: ${esc(ctx.cfg.classification || '')})';
+const b = document.getElementById('board');
+D.results.forEach((r, i) => { const c = document.createElement('div'); c.className = 'card' + (r.w.type === 'table' || r.w.type === 'line' ? ' wide' : '');
+  c.innerHTML = '<h3>' + UI.esc(r.w.title) + '</h3><div class="body"></div>'; b.append(c);
+  r.error ? c.lastChild.textContent = r.error : Widgets.render(c.lastChild, r.w, r); });<\/script></body></html>`;
+    const name = slug($('dName').value), path = `${ctx.dir}/publish/${name}-${stamp()}.html`;
+    await DNFS.writeText(path, html);
+    await Projects.touchModule(ctx.folder, 'publish');
+    ctx.log(`Published dashboard → ${path} (${UI.bytes(html.length)})`, 'ok'); UI.toast('Dashboard published', 'ok');
+    await listPubs();
+  } finally { $('pubDash').disabled = false; }
+});
+
+// ---- dataset exports ----
+$('pubData').onclick = UI.guard(async () => {
+  const names = [...document.querySelectorAll('#dsOpts input:checked')].map(c => c.value);
+  if (!names.length) throw new Error('Tick at least one dataset.');
+  const fmt = $('fmt').value, e = await DataEngine.main(), dir = `${ctx.dir}/publish/data-${stamp()}`;
+  $('pubData').disabled = true;
+  try {
+    for (const n of names) {
+      const d = ctx.cfg.datasets.find(x => x.name === n), t0 = performance.now();
+      if (fmt === 'parquet') await DNFS.copy(d.path, `${dir}/${n}.parquet`);
+      else await e.writeProjectFile(`SELECT * FROM read_parquet('${e.url(d.path)}')`, `${dir}/${n}.csv`, 'FORMAT CSV, HEADER');
+      ctx.log(`Exported ${n} as ${fmt.toUpperCase()} (${UI.ms(performance.now() - t0)})`, 'ok');
+    }
+    await Projects.touchModule(ctx.folder, 'publish');
+    UI.toast('Export finished', 'ok'); await listPubs();
+  } finally { $('pubData').disabled = false; }
+});
+
+(async () => {
+  try {
+    ctx = await ModulePage.init('publish', 'Publish');
+    $('dsOpts').innerHTML = (ctx.cfg.datasets || []).map(d => `<label class="row"><input type="checkbox" value="${esc(d.name)}"> ${esc(d.name)} <span class="muted">${UI.rows(d.rows)} rows · ${UI.bytes(d.bytes)}</span></label>`).join('') || '<span class="muted">No datasets yet.</span>';
+    await listPubs();
+  } catch (e) { UI.toast(e.message, 'err'); }
+})();
+</script>
+</body>
+</html>

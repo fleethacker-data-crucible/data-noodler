@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dashboard</title>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
+  .card.wide { grid-column: 1 / -1; }
+  .card.kpi-card { min-height: 0; }
+  .card .head { display: flex; align-items: center; gap: 8px; }
+  .card .head h3 { margin: 0; flex: 1; }
+  .card .foot { font-size: 11.5px; color: var(--muted); }
+  .card .body { overflow: auto; max-height: 420px; }
+  .empty { color: var(--muted); padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">DN</span><div><h1 id="title">Dashboard</h1><div class="sub" id="sub"></div></div></div>
+    <div class="spacer"></div>
+    <label class="row"><input type="checkbox" id="useCache" checked> Use cache</label>
+    <button id="refresh" class="ghost">Refresh all</button>
+    <button id="add" class="go">Add widget</button>
+  </header>
+  <div class="main stack">
+    <div class="board" id="board"></div>
+    <h2>Activity</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/duckdb-engine.js"></script>
+<script src="../js/duckdb-pool.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/module-page.js"></script>
+<script src="../js/core/data-engine.js"></script>
+<script src="../js/dashboard/widgets.js"></script>
+<script>
+const { $, esc } = UI, W = Widgets;
+let ctx, dash = { widgets: [] };
+const FILE = () => `${ctx.dir}/dashboard/dashboard.json`;
+const cachePath = w => `${ctx.dir}/data/cache/widget-${w.id}.json`;
+const dsOf = name => (ctx.cfg.datasets || []).find(d => d.name === name);
+const save = async () => { dash.updated = new Date().toISOString(); await DNFS.writeJSON(FILE(), dash); };
+
+// Cache key: the widget definition + when its dataset was last written. Either changing invalidates the cache.
+const keyOf = w => JSON.stringify({ ...w, title: undefined, imported: dsOf(w.dataset)?.imported });
+
+async function compute(w) {
+  const d = dsOf(w.dataset); if (!d) throw new Error(`Dataset "${w.dataset}" not found.`);
+  if ($('useCache').checked) {
+    try { const c = await DNFS.readJSON(cachePath(w)); if (c.key === keyOf(w)) return { ...c.res, cached: true }; } catch {}
+  }
+  const t0 = performance.now();
+  let res;
+  if (w.type === 'table') {
+    const e = await DataEngine.main();
+    res = { ...(await e.query(W.tableQuery(w, `read_parquet('${e.url(d.path)}')`))), engines: 1, from: 'single' };
+  } else {
+    const a = W.aggQuery(w);
+    res = await DataEngine.parallel({ path: d.path, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final });
+  }
+  res.ms = performance.now() - t0;
+  const out = { cols: res.cols, rows: res.rows, ms: res.ms, engines: res.engines, from: res.from };
+  DNFS.writeJSON(cachePath(w), { key: keyOf(w), at: new Date().toISOString(), res: out }).catch(() => {});
+  return out;
+}
+
+function card(w) {
+  return `<div class="card ${w.type === 'table' || w.type === 'line' ? 'wide' : ''} ${w.type === 'kpi' ? 'kpi-card' : ''}" data-id="${w.id}">
+    <div class="head"><h3>${esc(w.title || 'Untitled')}</h3><button class="ghost small" data-act="edit">Edit</button><button class="ghost small" data-act="refresh">↻</button><button class="danger small" data-act="del">✕</button></div>
+    <div class="body" id="b-${w.id}"><span class="muted">Loading…</span></div><div class="foot" id="f-${w.id}"></div></div>`;
+}
+async function draw(w) {
+  const body = $(`b-${w.id}`), foot = $(`f-${w.id}`);
+  try {
+    const r = await compute(w);
+    W.render(body, w, r);
+    foot.textContent = `${w.dataset} · ${r.cached ? 'from cache' : `${UI.ms(r.ms)} on ${r.engines} engine${r.engines > 1 ? 's' : ''}${r.from === 'profile' ? ' (profile)' : ''}`}`;
+  } catch (e) { body.innerHTML = `<span class="err">${esc(e.message.split('\n')[0])}</span>`; foot.textContent = ''; }
+}
+async function drawAll() {
+  $('board').innerHTML = dash.widgets.map(card).join('') || '<div class="empty">No widgets yet. Click <b>Add widget</b>.</div>';
+  for (const w of dash.widgets) await draw(w); // one at a time: they share the engines
+}
+
+async function editWidget(w) {
+  const ds = ctx.cfg.datasets || [];
+  if (!ds.length) throw new Error('No datasets. Import data first.');
+  const pick = w?.dataset || ds[0].name;
+  const cols = name => (dsOf(name)?.columns || []).map(c => c.name);
+  const v = await UI.form(w ? 'Edit widget' : 'Add widget', [
+    { name: 'title', label: 'Title', value: w?.title || '' },
+    { name: 'type', label: 'Type', type: 'select', options: Object.entries(W.TYPES), value: w?.type || 'bar' },
+    { name: 'dataset', label: 'Dataset', type: 'select', options: ds.map(d => d.name), value: pick },
+    { name: 'dim', label: 'Group by column (bar / line)', type: 'select', options: ['', ...cols(pick)], value: w?.dim || '' },
+    { name: 'agg', label: 'Measure', type: 'select', options: W.AGGS, value: w?.agg || 'count' },
+    { name: 'col', label: 'Of column (blank for count of rows)', type: 'select', options: ['', ...cols(pick)], value: w?.col || '' },
+    { name: 'where', label: 'Filter (SQL condition, optional)', value: w?.where || '' },
+    { name: 'sort', label: 'Sort: "value", "label", or for tables an ORDER BY', value: w?.sort || 'value' },
+    { name: 'limit', label: 'Max rows / bars', type: 'number', value: w?.limit || 20 },
+  ], { ok: w ? 'Save' : 'Add' });
+  if (!v) return null;
+  if (v.dataset !== pick && (v.dim || v.col) && !cols(v.dataset).includes(v.dim || v.col)) UI.toast('Columns refer to the old dataset; edit again to pick columns of the new one.', 'err');
+  if ((v.type === 'bar' || v.type === 'line') && !v.dim) throw new Error('Bar and line charts need a "Group by" column.');
+  if (v.agg !== 'count' && !v.col) throw new Error(`"${v.agg}" needs a column.`);
+  return { id: w?.id || crypto.randomUUID().slice(0, 8), ...v, title: v.title || `${v.agg}${v.col ? ` of ${v.col}` : ''}${v.dim ? ` by ${v.dim}` : ''}` };
+}
+
+$('add').onclick = UI.guard(async () => {
+  const w = await editWidget(); if (!w) return;
+  dash.widgets.push(w); await save(); ctx.log(`Widget added: ${w.title}`);
+  $('board').querySelector('.empty')?.remove();
+  $('board').insertAdjacentHTML('beforeend', card(w)); await draw(w);
+});
+$('board').onclick = UI.guard(async ev => {
+  const b = ev.target.closest('[data-act]'); if (!b) return;
+  const id = b.closest('.card').dataset.id, i = dash.widgets.findIndex(x => x.id === id), w = dash.widgets[i];
+  if (b.dataset.act === 'refresh') { await DNFS.remove(cachePath(w)).catch(() => {}); return draw(w); }
+  if (b.dataset.act === 'del') {
+    if (!await UI.confirm(`Remove widget "${w.title}"?`, { danger: true, ok: 'Remove' })) return;
+    dash.widgets.splice(i, 1); await save(); await DNFS.remove(cachePath(w)).catch(() => {}); return drawAll();
+  }
+  const nw = await editWidget(w); if (!nw) return;
+  dash.widgets[i] = nw; await save(); await drawAll();
+});
+$('refresh').onclick = UI.guard(async () => { await ctx.reload(); await drawAll(); await Projects.touchModule(ctx.folder, 'dashboard'); });
+
+(async () => {
+  try {
+    ctx = await ModulePage.init('dashboard', 'Dashboard');
+    await DataEngine.loadProfile();
+    try { dash = await DNFS.readJSON(FILE()); } catch { dash = { version: 1, widgets: [] }; }
+    await drawAll();
+  } catch (e) { UI.toast(e.message, 'err'); $('board').innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
+})();
+window.addEventListener('beforeunload', () => DataEngine.close());
+</script>
+</body>
+</html>

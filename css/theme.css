@@ -1,0 +1,182 @@
+/* Data Noodler universal theme. Dark, shared by every page.
+   Fonts: Exo 2 (UI), Syne Mono (logs, data, code). Buttons: 25px, blue, 4px corners. */
+@font-face { font-family: 'Exo 2'; font-weight: 400; src: url(../assets/fonts/exo2-400.ttf) format('truetype'); }
+@font-face { font-family: 'Exo 2'; font-weight: 600; src: url(../assets/fonts/exo2-600.ttf) format('truetype'); }
+@font-face { font-family: 'Syne Mono'; src: url(../assets/fonts/SyneMono-Regular.ttf) format('truetype'); }
+
+:root {
+  color-scheme: dark;
+  --bg: #1a1a19; --panel: #242422; --panel-2: #2c2c2a; --border: #3a3936; --sel: #44433f;
+  --text: #ffffff; --text-2: #c3c2b7; --muted: #8d8b82;
+  --blue: #3987e5; --blue-h: #5a9cec; --ok: #4cc27f; --warn: #d9b343; --err: #e24c4c;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c9a227; --c5: #9b6bd6; --c6: #d6529a; --c7: #5fb0c9; --c8: #8d8b82;
+  --mono: 'Syne Mono', ui-monospace, Consolas, monospace;
+  --pink: #f27ab8; --lerr: #ff9090; --time: #aeaca4;
+  --radius: 4px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px 'Exo 2', system-ui, sans-serif; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #3a3936; border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #55534e; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+a { color: var(--blue); }
+h1 { font-size: 20px; margin: 0; font-weight: 600; }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin: 18px 0 10px; display: flex; align-items: center; gap: 10px; }
+h3 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }
+code, .mono, pre { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); } .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+[hidden] { display: none !important; }
+
+/* ---- layout ---- */
+.app { display: flex; flex-direction: column; height: 100%; }
+/* Same header as the server panel: DN logo, title, sub line. */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 12px; }
+.logo { width: 40px; height: 40px; border-radius: 8px; display: grid; place-items: center; background: var(--blue); color: #fff; font-weight: 600; font-size: 16px; flex: none; }
+.sub { color: var(--muted); font-size: 12px; }
+.topbar .spacer { flex: 1; }
+.main { flex: 1; overflow: auto; padding: 20px; }
+/* Stats like the server panel: small muted label over a big value. */
+.stats { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.stat label { display: block; font-size: 12px; color: var(--muted); }
+.stat b { display: block; font-size: 18px; font-weight: 600; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 5px; }
+.row.end { justify-content: flex-end; }
+.stack > * + * { margin-top: 10px; }
+.box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+.split { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 14px; min-height: 0; }
+.split > * { min-width: 0; }
+@media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
+
+/* ---- buttons ---- */
+button, .btn {
+  text-transform: capitalize; /* every word starts with a capital, site-wide */
+  height: 25px; line-height: 1; padding: 0 14px 2px; border: 0; border-radius: var(--radius);
+  background: var(--blue); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none;
+}
+button:hover, .btn:hover { background: var(--blue-h); }
+button:disabled, .btn.disabled { background: var(--sel); color: var(--muted); cursor: not-allowed; }
+/* ghost = the server panel's cancel button */
+button.ghost { background: var(--sel); color: var(--text); }
+button.ghost:hover { background: var(--border); }
+button.ghost:disabled { color: var(--muted); }
+button.danger { background: var(--err); }
+button.danger:hover { background: var(--err); filter: brightness(1.1); }
+button.go { background: var(--ok); }
+button.go:hover { background: var(--ok); filter: brightness(1.1); }
+button.small { height: 21px; padding: 0 8px; font-size: 12px; }
+
+/* ---- inputs ---- */
+input, select, textarea {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0 8px; height: 25px;
+}
+textarea { font-family: var(--mono); height: auto; min-height: 80px; padding: 6px 8px; width: 100%; resize: vertical; }
+select[multiple] { height: auto; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
+input[type=checkbox] { min-height: 0; accent-color: var(--blue); }
+label.field { display: flex; flex-direction: column; gap: 4px; color: var(--text-2); }
+label.field > input, label.field > select, label.field > textarea { width: 100%; }
+.search { width: 240px; }
+
+/* ---- tables ---- */
+.table-wrap { position: relative; }
+.table-wrap::-webkit-scrollbar { width: 0; }
+.table-wrap:not(.near)::-webkit-scrollbar-thumb { background: transparent; }
+.table-wrap .vthumb { position: absolute; width: 6px; border-radius: 3px; background: #3a3936; z-index: 2; opacity: 0; transition: opacity .15s; cursor: default; }
+.table-wrap .vthumb:hover, .table-wrap .vthumb.drag { background: #55534e; }
+.table-wrap.near .vthumb, .table-wrap .vthumb.drag { opacity: 1; }
+.table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+table.grid { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.grid th, table.grid td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.grid th { background: var(--panel); color: var(--text-2); font-weight: 600; position: sticky; top: 0; z-index: 1; }
+table.grid th.sort { cursor: pointer; user-select: none; }
+table.grid th.sort:hover { color: var(--text); }
+table.grid tr.click { cursor: pointer; }
+table.grid tr.click:hover td { background: var(--panel-2); }
+table.grid tr.open td { background: var(--panel-2); }
+table.grid td.num, table.grid th.num { text-align: right; }
+table.data td { font-family: var(--mono); font-size: 12px; }
+table.data td.null { color: var(--muted); font-style: italic; }
+
+/* ---- badges ----
+   A badge colour sets --bc: border + bold text in that colour, background the same colour 50% darker. */
+.badge {
+  --bc: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+  height: 20px; padding: 0 8px 2px; border: 1px solid var(--bc); border-radius: 3px; /* bottom 2px lifts the text */
+  background: color-mix(in srgb, var(--bc) 50%, #000); color: var(--bc);
+  font-size: 11px; font-weight: 600; line-height: 1; text-transform: uppercase; letter-spacing: .04em;
+  white-space: nowrap; vertical-align: middle;
+}
+.badge.green,  .badge.production, .badge.public     { --bc: #4cc27f; }
+.badge.yellow, .badge.internal                      { --bc: #e8c547; }
+.badge.blue,   .badge.on-hold                       { --bc: #5a9cec; }
+.badge.orange, .badge.confidential                  { --bc: #f08a3c; }
+.badge.red,    .badge.restricted                    { --bc: #ff5c5c; }
+.badge.pink                                         { --bc: #f27ab8; }
+.badge.purple                                       { --bc: #b38ae6; }
+/* Phase: white not started -> pink planning -> gold development -> blue testing -> green production. */
+.badge.white,  .badge.not-started                  { --bc: #ffffff; }
+.badge.planning                                     { --bc: #f27ab8; }
+.badge.gold,   .badge.development                   { --bc: #d4a72c; }
+.badge.testing                                      { --bc: #5a9cec; }
+.badge.light-blue                                   { --bc: #7cc4f5; }
+.badge.lime                                         { --bc: #a6cf3f; }
+/* Classification */
+.badge.unclassified, .badge.unnpi                   { --bc: #4cc27f; }
+.badge.cui                                          { --bc: #b38ae6; }
+.badge.grey,   .badge.archived                      { --bc: #8d8b82; }
+
+/* ---- dialogs and toasts ---- */
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0; width: min(520px, 94vw); box-shadow: 0 12px 40px #0009; }
+dialog::backdrop { background: #0008; }
+dialog header { padding: 18px 24px 0; font-size: 16px; font-weight: 600; }
+dialog .body { padding: 14px 24px; display: grid; gap: 12px; }
+dialog footer { padding: 4px 24px 20px; display: flex; justify-content: flex-end; gap: 5px; }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 50; }
+.toast { background: var(--panel-2); border: 1px solid var(--border); border-left: 4px solid var(--blue); border-radius: 6px; padding: 8px 12px; min-width: 240px; max-width: 420px; box-shadow: 0 6px 20px #0008; font-size: 13px; }
+.toast.ok { border-left-color: var(--ok); color: var(--text); }
+.toast.err { border-left-color: var(--err); color: var(--text); }
+
+/* ---- progress, logs ---- */
+.progress { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress > i { display: block; height: 100%; width: 0; background: var(--blue); transition: width .2s; }
+.log { font-family: var(--mono); font-size: 13px; line-height: 1.6; color: var(--text-2); max-height: 180px; overflow: auto; white-space: pre-wrap; }
+.log .t { color: var(--time); } .log .err { color: var(--lerr); } .log .ok { color: var(--ok); } .log .sys { color: var(--pink); }
+
+/* ---- module buttons row (home page) ---- */
+.modules { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 0; }
+
+/* ---- charts ---- */
+svg text { fill: var(--text-2); font-size: 11px; font-family: 'Exo 2', system-ui, sans-serif; }
+svg .gridline { stroke: var(--border); stroke-width: 1; }
+.tip { position: fixed; pointer-events: none; background: var(--text); color: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 12px; z-index: 60; display: none; }
+.kpi { font-size: 28px; font-weight: 600; }
+.kpi-label { font-size: 12px; color: var(--text-2); }
+
+/* ---- user pickers (js/core/user-picker.js) ---- */
+.upick .ubox { position: relative; }
+.upick .usel { width: 100%; justify-content: space-between; background: var(--bg); color: var(--text); border: 1px solid var(--border); font-weight: 400; padding: 0 8px; }
+.upick .usel:hover { background: var(--panel-2); }
+.upick .usel i { font-style: normal; color: var(--muted); }
+.umenu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 6px 20px #0008; padding: 6px; }
+.umenu .uq { width: 100%; margin-bottom: 6px; }
+.uitems { max-height: 260px; overflow-y: scroll; overscroll-behavior: contain; } /* 10 rows x 26px */
+.uitems > div { height: 26px; line-height: 26px; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 4px; cursor: pointer; color: var(--text); }
+.uitems > div:hover { background: var(--panel-2); }
+.uitems > div.sel { background: var(--sel); }
+.uitems > div.empty { cursor: default; color: var(--muted); }
+.upick .chips { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; margin-top: 5px; }
+.upick .chips:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 25px; padding: 0 4px 0 10px; border-radius: 4px; background: var(--sel); color: var(--text); }
+.chip button { height: 19px; padding: 0 6px; background: none; color: var(--muted); }
+.chip button:hover { background: var(--err); color: #fff; }
+.upick.multi .ubox { align-self: flex-start; }
+dialog { overflow: visible; }

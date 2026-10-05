@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "id": "7106206e7b36d355",
+  "name": "Sales Demo",
+  "folder": "sales-demo",
+  "description": "Prototype test project",
+  "owner": "Staggs, Christopher C. CIV",
+  "status": 75,
+  "classification": "unclassified",
+  "tags": [
+    "demo",
+    "test"
+  ],
+  "created": "2026-10-01T06:06:57.344Z",
+  "modified": "2026-10-04T19:54:53.682Z",
+  "modules": {
+    "import": {
+      "lastRun": "2026-10-01T06:09:37.654Z"
+    },
+    "pipeline": {
+      "lastRun": "2026-10-04T19:54:53.682Z",
+      "ok": true
+    },
+    "dashboard": {
+      "lastRun": "2026-10-01T12:03:17.803Z"
+    },
+    "publish": {
+      "lastRun": "2026-10-01T06:11:04.037Z"
+    },
+    "update": {
+      "lastRun": "2026-10-01T06:11:33.829Z",
+      "datasets": 1
+    },
+    "archives": {
+      "lastRun": null
+    }
+  },
+  "datasets": [
+    {
+      "name": "orders",
+      "path": "projects/sales-demo/data/staged/orders.parquet",
+      "rows": 1001000,
+      "bytes": 12534725,
+      "columns": [
+        {
+          "name": "id",
+          "type": "BIGINT"
+        },
+        {
+          "name": "order_date",
+          "type": "DATE"
+        },
+        {
+          "name": "customer_id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "region",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "category",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "quantity",
+          "type": "BIGINT"
+        },
+        {
+          "name": "unit_price",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "discount",
+          "type": "BIGINT"
+        },
+        {
+          "name": "total",
+          "type": "DECIMAL(18,2)"
+        }
+      ],
+      "imported": "2026-10-01T06:11:33.346Z",
+      "source": {
+        "path": "projects/sales-demo/data/source/orders.csv",
+        "table": null,
+        "kind": "csv",
+        "select": "\"id\" AS \"id\", \"order_date\" AS \"order_date\", TRY_CAST(\"customer_id\" AS INTEGER) AS \"customer_id\", \"region\" AS \"region\", \"category\" AS \"category\", \"quantity\" AS \"quantity\", \"unit_price\" AS \"unit_price\", \"discount\" AS \"discount\", TRY_CAST(\"total\" AS DECIMAL(18,2)) AS \"total\"",
+        "size": 57992164,
+        "modified": "2026-10-01T06:11:23.1636519Z"
+      }
+    },
+    {
+      "name": "legacy_orders",
+      "path": "projects/sales-demo/data/staged/legacy_orders.parquet",
+      "rows": 1000000,
+      "bytes": 13122116,
+      "columns": [
+        {
+          "name": "id",
+          "type": "BIGINT"
+        },
+        {
+          "name": "order_date",
+          "type": "DATE"
+        },
+        {
+          "name": "customer_id",
+          "type": "BIGINT"
+        },
+        {
+          "name": "region",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "category",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "quantity",
+          "type": "BIGINT"
+        },
+        {
+          "name": "unit_price",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "discount",
+          "type": "BIGINT"
+        },
+        {
+          "name": "total",
+          "type": "DOUBLE"
+        }
+      ],
+      "imported": "2026-10-01T06:09:32.162Z",
+      "source": {
+        "path": "projects/sales-demo/data/source/legacy.sqlite",
+        "table": "t",
+        "kind": "sqlite",
+        "select": "\"id\" AS \"id\", TRY_CAST(\"order_date\" AS DATE) AS \"order_date\", \"customer_id\" AS \"customer_id\", \"region\" AS \"region\", \"category\" AS \"category\", \"quantity\" AS \"quantity\", \"unit_price\" AS \"unit_price\", \"discount\" AS \"discount\", \"total\" AS \"total\"",
+        "size": 61734912,
+        "modified": "2026-10-01T06:07:15.5474787Z"
+      }
+    },
+    {
+      "name": "gen_sample",
+      "path": "projects/sales-demo/data/staged/gen_sample.parquet",
+      "rows": 62500,
+      "bytes": 6040847,
+      "columns": [
+        {
+          "name": "id",
+          "type": "BIGINT"
+        },
+        {
+          "name": "order_date",
+          "type": "DATE"
+        },
+        {
+          "name": "ship_date",
+          "type": "DATE"
+        },
+        {
+          "name": "order_ts",
+          "type": "TIMESTAMP"
+        },
+        {
+          "name": "customer_id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "product_id",
+          "type": "INTEGER"
+        },
+        {
+          "name": "store_id",
+          "type": "SMALLINT"
+        },
+        {
+          "name": "employee_id",
+          "type": "SMALLINT"
+        },
+        {
+          "name": "region",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "country",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "category",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "subcategory",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "channel",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "status",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "payment",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "segment",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "priority",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "warehouse",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "currency",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "quantity",
+          "type": "INTEGER"
+        },
+        {
+          "name": "unit_price",
+          "type": "DECIMAL(10,2)"
+        },
+        {
+          "name": "discount",
+          "type": "INTEGER"
+        },
+        {
+          "name": "total",
+          "type": "DECIMAL(14,2)"
+        },
+        {
+          "name": "cost",
+          "type": "DECIMAL(14,2)"
+        },
+        {
+          "name": "tax",
+          "type": "DECIMAL(14,2)"
+        },
+        {
+          "name": "shipping",
+          "type": "DECIMAL(8,2)"
+        },
+        {
+          "name": "margin",
+          "type": "DECIMAL(14,2)"
+        },
+        {
+          "name": "weight_kg",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "rating",
+          "type": "TINYINT"
+        },
+        {
+          "name": "score",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "latitude",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "longitude",
+          "type": "DOUBLE"
+        },
+        {
+          "name": "is_member",
+          "type": "BOOLEAN"
+        },
+        {
+          "name": "is_returned",
+          "type": "BOOLEAN"
+        },
+        {
+          "name": "is_gift",
+          "type": "BOOLEAN"
+        },
+        {
+          "name": "has_coupon",
+          "type": "BOOLEAN"
+        },
+        {
+          "name": "session_seconds",
+          "type": "INTEGER"
+        },
+        {
+          "name": "page_views",
+          "type": "SMALLINT"
+        },
+        {
+          "name": "age",
+          "type": "TINYINT"
+        },
+        {
+          "name": "income",
+          "type": "INTEGER"
+        },
+        {
+          "name": "zip_code",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "sku",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "email",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "notes",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "created_at",
+          "type": "TIMESTAMP"
+        },
+        {
+          "name": "updated_at",
+          "type": "TIMESTAMP"
+        },
+        {
+          "name": "fiscal_quarter",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "batch_no",
+          "type": "INTEGER"
+        },
+        {
+          "name": "ref_code",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "checksum",
+          "type": "BIGINT"
+        }
+      ],
+      "imported": "2026-10-01T06:09:37.631Z",
+      "source": {
+        "path": "projects/sales-demo/data/source/gen_sample.parquet",
+        "table": null,
+        "kind": "parquet",
+        "select": "\"id\" AS \"id\", \"order_date\" AS \"order_date\", \"ship_date\" AS \"ship_date\", \"order_ts\" AS \"order_ts\", \"customer_id\" AS \"customer_id\", \"product_id\" AS \"product_id\", \"store_id\" AS \"store_id\", \"employee_id\" AS \"employee_id\", \"region\" AS \"region\", \"country\" AS \"country\", \"category\" AS \"category\", \"subcategory\" AS \"subcategory\", \"channel\" AS \"channel\", \"status\" AS \"status\", \"payment\" AS \"payment\", \"segment\" AS \"segment\", \"priority\" AS \"priority\", \"warehouse\" AS \"warehouse\", \"currency\" AS \"currency\", \"quantity\" AS \"quantity\", \"unit_price\" AS \"unit_price\", \"discount\" AS \"discount\", \"total\" AS \"total\", \"cost\" AS \"cost\", \"tax\" AS \"tax\", \"shipping\" AS \"shipping\", \"margin\" AS \"margin\", \"weight_kg\" AS \"weight_kg\", \"rating\" AS \"rating\", \"score\" AS \"score\", \"latitude\" AS \"latitude\", \"longitude\" AS \"longitude\", \"is_member\" AS \"is_member\", \"is_returned\" AS \"is_returned\", \"is_gift\" AS \"is_gift\", \"has_coupon\" AS \"has_coupon\", \"session_seconds\" AS \"session_seconds\", \"page_views\" AS \"page_views\", \"age\" AS \"age\", \"income\" AS \"income\", \"zip_code\" AS \"zip_code\", \"sku\" AS \"sku\", \"email\" AS \"email\", \"notes\" AS \"notes\", \"created_at\" AS \"created_at\", \"updated_at\" AS \"updated_at\", \"fiscal_quarter\" AS \"fiscal_quarter\", \"batch_no\" AS \"batch_no\", \"ref_code\" AS \"ref_code\", \"checksum\" AS \"checksum\"",
+        "size": 6040847,
+        "modified": "2026-10-01T06:07:15.3693155Z"
+      }
+    },
+    {
+      "name": "sales_by_region_year",
+      "path": "projects/sales-demo/data/staged/sales_by_region_year.parquet",
+      "rows": 20,
+      "bytes": 1297,
+      "columns": [
+        {
+          "name": "region",
+          "type": "VARCHAR"
+        },
+        {
+          "name": "order_year",
+          "type": "BIGINT"
+        },
+        {
+          "name": "orders",
+          "type": "BIGINT"
+        },
+        {
+          "name": "revenue",
+          "type": "DECIMAL(38,2)"
+        },
+        {
+          "name": "big_orders",
+          "type": "BIGINT"
+        }
+      ],
+      "imported": "2026-10-04T19:54:53.642Z",
+      "source": {
+        "kind": "pipeline",
+        "step": "b9cba99c-56b1-48c2-a6cd-75b28d540a08"
+      }
+    }
+  ],
+  "settings": {},
+  "developers": [
+    "Cheng, Kevin T. CIV",
+    "Gerdes, Jeremy D. CIV"
+  ],
+  "phase": "not-started"
+}

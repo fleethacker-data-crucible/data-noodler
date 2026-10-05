@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-01T06:11:55.159Z",
+  "note": "Before cleanup",
+  "bytes": 31712068,
+  "datasets": [
+    {
+      "name": "orders",
+      "rows": 1001000,
+      "columns": 9
+    },
+    {
+      "name": "legacy_orders",
+      "rows": 1000000,
+      "columns": 9
+    },
+    {
+      "name": "gen_sample",
+      "rows": 62500,
+      "columns": 50
+    },
+    {
+      "name": "sales_by_region_year",
+      "rows": 20,
+      "columns": 5
+    }
+  ]
+}

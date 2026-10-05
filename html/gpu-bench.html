@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU Benchmark</title>
+<style>
+  @font-face { font-family: 'Exo 2'; font-weight: 400; src: url(../assets/fonts/exo2-400.ttf) format('truetype'); }
+  @font-face { font-family: 'Exo 2'; font-weight: 600; src: url(../assets/fonts/exo2-600.ttf) format('truetype'); }
+  :root {
+    color-scheme: light;
+    --bg: #fcfcfb; --panel: #f4f4f2; --border: #dddcd6;
+    --text: #0b0b0b; --text-2: #52514e; --muted: #85837c;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #c9a227;
+    --ok: #0a7a3d; --err: #c42b2b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #1a1a19; --panel: #242422; --border: #3a3936;
+      --text: #ffffff; --text-2: #c3c2b7; --muted: #8d8b82;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c9a227;
+      --ok: #4cc27f; --err: #ff7b7b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px 20px; font: 14px 'Exo 2', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  h2 { font-size: 14px; margin: 18px 0 6px; color: var(--text-2); font-weight: 600; }
+  button, input, select { font: inherit; }
+  button { padding: 4px 10px; }
+  input[type=number] { width: 52px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px; }
+  .box { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  #env { display: flex; flex-wrap: wrap; gap: 4px 22px; font-size: 13px; color: var(--text-2); margin-bottom: 10px; }
+  #env b { color: var(--text); font-weight: 600; }
+  #bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin: 6px 0; }
+  #fill { height: 100%; width: 0; background: var(--s1); transition: width .15s; }
+  #msg { font-family: ui-monospace, Consolas, monospace; font-size: 13px; color: var(--text-2); }
+  #log { font: 12px ui-monospace, Consolas, monospace; max-height: 140px; overflow: auto; color: var(--muted); white-space: pre-wrap; }
+  .err { color: var(--err); } .ok { color: var(--ok); }
+  .chart { margin-top: 12px; }
+  .chart h3 { margin: 0 0 4px; font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { fill: var(--text-2); font-size: 11px; }
+  svg .grid { stroke: var(--border); stroke-width: 1; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--text-2); font-weight: 600; }
+  .scroll { overflow-x: auto; }
+  #tip { position: fixed; pointer-events: none; background: var(--text); color: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 12px; display: none; z-index: 9; }
+</style>
+</head>
+<body>
+<h1>GPU benchmark: WebGPU vs DuckDB on the same columns</h1>
+<div id="env">Checking for WebGPU…</div>
+
+<div class="row">
+  <label>Data <select id="data">
+    <option value="test-data/sales_1m">sales_1m (1M rows)</option>
+    <option value="test-data/sales_10m">sales_10m (10M rows)</option>
+  </select></label>
+  <label>Runs <input id="runs" type="number" min="1" max="20" value="5"></label>
+  <label>Filter: total &gt; <input id="thr" type="number" value="1000" style="width:80px"></label>
+  <button id="go" disabled>Run benchmark</button>
+</div>
+
+<div class="box">
+  <div id="msg">Idle.</div>
+  <div id="bar"><div id="fill"></div></div>
+  <div id="log"></div>
+</div>
+
+<div class="box chart"><h3>Time per test (median, lower is better)</h3><div class="legend" id="lg"></div><div id="c1"></div></div>
+
+<h2>Results and accuracy</h2>
+<div id="tbl" class="box scroll">Run the benchmark to fill this in.</div>
+<div id="tip"></div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/duckdb-engine.js"></script>
+<script src="../js/duckdb-pool.js"></script>
+<script src="../js/gpu-compute.js"></script>
+<script>
+const $ = id => document.getElementById(id), G = GpuCompute;
+const log = (m, c = '') => { const d = document.createElement('div'); d.className = c; d.textContent = m; $('log').append(d); $('log').scrollTop = 1e9; };
+const fmtMs = ms => ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : ms >= 10 ? Math.round(ms) + ' ms' : ms.toFixed(1) + ' ms';
+const med = a => { const b = [...a].sort((x, y) => x - y), h = b.length >> 1; return b.length % 2 ? b[h] : (b[h - 1] + b[h]) / 2; };
+const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };
+const cores = navigator.hardwareConcurrency || 4, P = Math.min(16, cores);
+const money = cents => (cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ---- progress ----
+let step = 0, total = 1, t0 = 0, label = '';
+const paint = () => { $('fill').style.width = (100 * step / total) + '%'; $('msg').textContent = `${step}/${total}  ${label}  ${((performance.now() - t0) / 1000).toFixed(1)}s`; };
+const begin = l => { label = l; t0 = performance.now(); paint(); };
+
+(async () => {
+  try {
+    const i = await G.init();
+    $('env').innerHTML = [['GPU', `${i.vendor} ${i.architecture} ${i.description}`.trim()], ['Max GPU buffer', (i.maxBuffer / 1048576).toFixed(0) + ' MB'],
+      ['CPU logical cores', cores], ['DuckDB engines compared', `1 and ${P}`]].map(([k, v]) => `<span>${k}: <b>${v}</b></span>`).join('');
+    $('go').disabled = false;
+  } catch (e) { $('env').innerHTML = `<span class="err">${e.message}</span>`; log(e.message, 'err'); }
+})();
+
+async function ensureParquet(e, base) {
+  if ((await DNFS.stat(base + '.parquet')).exists) return;
+  begin(`Converting ${base}.csv to Parquet (one time)`);
+  const w = await e.writeProjectFile(`SELECT * FROM read_csv('${e.url(base + '.csv')}')`, base + '.parquet');
+  log(`Wrote ${base}.parquet: ${(w.bytes / 1048576).toFixed(1)} MB in ${fmtMs(w.ms)}`, 'ok');
+}
+
+// Each test: gpu() -> { value | sums+counts, ms }; sql = query on table t (1 engine); pool = { partial, final }.
+// cents = round(total * 100) as an integer, so sums can be exact.
+const C = 'round(total * 100)::BIGINT';
+let TESTS;
+const buildTests = (thr, regions, maxCents) => [
+  { id: 'sumf', label: 'Sum (float)', gpu: () => G.sumF32('total'),
+    sql: 'SELECT sum(total) FROM t', pool: { partial: 'SELECT sum(total) s FROM t', final: 'SELECT sum(s) FROM __parts' },
+    exact: `SELECT sum(${C}) FROM t`, approx: true },
+  { id: 'sumc', label: 'Sum (exact cents)', gpu: () => G.sumI32('cents', maxCents),
+    sql: `SELECT sum(${C}) FROM t`, pool: { partial: `SELECT sum(${C}) s FROM t`, final: 'SELECT sum(s) FROM __parts' } },
+  { id: 'group', label: 'Group by region', gpu: () => G.groupI32('cents', 'region', regions.length, maxCents),
+    sql: `SELECT region, sum(${C}), count(*) FROM t GROUP BY 1 ORDER BY 1`,
+    pool: { partial: `SELECT region, sum(${C}) s, count(*) c FROM t GROUP BY 1`, final: 'SELECT region, sum(s), sum(c) FROM __parts GROUP BY 1 ORDER BY 1' } },
+  { id: 'count', label: `Filter count (> ${thr})`, gpu: () => G.countGreater('total', thr),
+    sql: `SELECT count(*) FROM t WHERE total > ${thr}`, pool: { partial: `SELECT count(*) c FROM t WHERE total > ${thr}`, final: 'SELECT sum(c) FROM __parts' } },
+];
+// Same shape for every engine: number, or [[region, sum, count], ...]
+const gpuValue = (r, regions) => r.sums ? regions.map((g, k) => [g, r.sums[k], r.counts[k]]) : r.value;
+const sqlValue = rows => rows.length === 1 && rows[0].length === 1 ? Number(rows[0][0]) : rows.map(([g, s, c]) => [g, Number(s), Number(c)]);
+const sameVal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+let results = null;
+$('go').onclick = guard(async () => {
+  const runs = Math.max(1, +$('runs').value || 5), base = $('data').value, thr = +$('thr').value || 0;
+  $('go').disabled = true;
+  const tick = setInterval(paint, 100);
+  const e = createDuckEngine();
+  let pool;
+  try {
+    step = 0; total = 6 + 4 * 3 * (runs + 1);
+    begin('Starting DuckDB');
+    await e.init({ build: 'eh' }); step++;
+    await ensureParquet(e, base);
+    const url = e.url(base + '.parquet');
+    begin('Loading Parquet into DuckDB (1 engine)');
+    await e.exec(`CREATE TABLE t AS SELECT * FROM read_parquet('${url}')`); step++;
+    const regions = (await e.query('SELECT DISTINCT region FROM t ORDER BY 1')).rows.map(r => r[0]);
+
+    // Columns for the GPU: total as f32, total as integer cents (i32), region as a group number.
+    begin('Reading columns out of DuckDB');
+    let t = performance.now();
+    const tbl = await e.queryArrow(`SELECT total, ${C}::INT cents, (list_position(${JSON.stringify(regions).replace(/"/g, "'")}, region) - 1)::INT g FROM t`);
+    const rows = tbl.numRows;
+    const f32 = Float32Array.from(tbl.getChild('total').toArray());
+    const cents = Int32Array.from(tbl.getChild('cents').toArray());
+    const grp = Int32Array.from(tbl.getChild('g').toArray());
+    let maxCents = 0; for (const v of cents) { const a = Math.abs(v); if (a > maxCents) maxCents = a; }
+    const extractMs = performance.now() - t; step++;
+    log(`${rows.toLocaleString()} rows, ${regions.length} regions; columns read out of DuckDB in ${fmtMs(extractMs)}`);
+
+    begin('Uploading columns to the GPU');
+    const up = (await G.upload('total', f32)).ms + (await G.upload('cents', cents)).ms + (await G.upload('region', grp)).ms; step++;
+    log(`Uploaded ${((f32.byteLength + cents.byteLength + grp.byteLength) / 1048576).toFixed(0)} MB to the GPU in ${fmtMs(up)}`, 'ok');
+
+    begin(`Starting ${P} DuckDB engines`);
+    pool = await DuckPool.create(P);
+    await pool.each((pe, i) => pe.exec(`CREATE TABLE t AS SELECT * EXCLUDE (file_row_number) FROM read_parquet('${url}', file_row_number = true) WHERE file_row_number % ${P} = ${i}`));
+    step++;
+
+    TESTS = buildTests(thr, regions, maxCents);
+    results = { rows, base, up, extractMs, regions, t: {}, val: {}, exact: {} };
+    for (const q of TESTS) {
+      results.exact[q.id] = sqlValue((await e.query(q.exact || q.sql)).rows);
+      const eng = {
+        gpu: async () => { const r = await q.gpu(); return { ms: r.ms, v: gpuValue(r, regions) }; },
+        d1: async () => { const r = await e.query(q.sql); return { ms: r.ms, v: sqlValue(r.rows) }; },
+        dp: async () => { const r = await pool.run(() => q.pool.partial, q.pool.final); return { ms: r.ms, v: sqlValue(r.rows) }; },
+      };
+      results.t[q.id] = {}; results.val[q.id] = {};
+      for (const [k, fn] of Object.entries(eng)) {
+        begin(`${q.label}: warm-up (${k})`);
+        results.val[q.id][k] = (await fn()).v; step++;
+        const a = results.t[q.id][k] = [];
+        for (let r = 0; r < runs; r++) { begin(`${q.label}: run ${r + 1}/${runs} (${k})`); a.push((await fn()).ms); step++; }
+      }
+      log(`${q.label}: GPU ${fmtMs(med(results.t[q.id].gpu))}, DuckDB 1 ${fmtMs(med(results.t[q.id].d1))}, DuckDB ${P} ${fmtMs(med(results.t[q.id].dp))}`, 'ok');
+      render();
+    }
+    label = 'Done'; step = total; paint();
+  } finally {
+    clearInterval(tick); $('go').disabled = false;
+    await pool?.close(); await e.close();
+    ['total', 'cents', 'region'].forEach(n => G.drop(n));
+  }
+});
+
+// ---- chart ----
+const tip = $('tip');
+const showTip = (ev, t) => { tip.textContent = t; tip.style.display = 'block'; tip.style.left = ev.clientX + 12 + 'px'; tip.style.top = ev.clientY + 12 + 'px'; };
+const hideTip = () => tip.style.display = 'none';
+const nice = max => { const p = 10 ** Math.floor(Math.log10(max || 1)); for (const m of [1, 2, 5, 10]) if (m * p >= max) return m * p; return max; };
+function bars(el, cats, series, unit) {
+  const W = 1000, H = 290, L = 56, R = 8, T = 10, B = 30, iw = W - L - R, ih = H - T - B;
+  const max = nice(Math.max(...series.flatMap(s => s.vals.map(v => v || 0)), 0.001));
+  const y = v => T + ih - ih * v / max;
+  const gw = iw / cats.length, bw = Math.min(40, (gw - 20) / series.length - 3);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  for (let i = 0; i <= 4; i++) { const v = max * i / 4; s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${+v.toPrecision(3)}${unit}</text>`; }
+  cats.forEach((c, i) => {
+    const gx = L + gw * i + (gw - series.length * (bw + 3)) / 2;
+    series.forEach((se, j) => {
+      const v = se.vals[i]; if (v == null) return;
+      const x = gx + j * (bw + 3), h = ih - (y(v) - T), r = Math.min(4, h / 2);
+      s += `<path d="M${x},${T + ih} V${y(v) + r} Q${x},${y(v)} ${x + r},${y(v)} H${x + bw - r} Q${x + bw},${y(v)} ${x + bw},${y(v) + r} V${T + ih} Z" fill="${se.color}" data-tip="${c} · ${se.name}: ${fmtMs(v)}"/>`;
+    });
+    s += `<text x="${L + gw * i + gw / 2}" y="${H - 10}" text-anchor="middle">${c}</text>`;
+  });
+  el.innerHTML = s + '</svg>';
+  el.querySelectorAll('[data-tip]').forEach(p => { p.onmousemove = ev => showTip(ev, p.dataset.tip); p.onmouseleave = hideTip; });
+}
+
+function render() {
+  const done = TESTS.filter(q => results.t[q.id]?.dp?.length);
+  const S = [
+    { k: 'gpu', name: 'GPU (data already on GPU)', color: 'var(--s1)' },
+    { k: 'gpuup', name: 'GPU incl. upload', color: 'var(--s4)' },
+    { k: 'd1', name: 'DuckDB 1 engine', color: 'var(--s2)' },
+    { k: 'dp', name: `DuckDB ${P} engines`, color: 'var(--s3)' },
+  ];
+  const m = (id, k) => k === 'gpuup' ? med(results.t[id].gpu) + results.up : med(results.t[id][k]);
+  $('lg').innerHTML = S.map(s => `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('');
+  bars($('c1'), done.map(q => q.label), S.map(s => ({ ...s, vals: done.map(q => m(q.id, s.k)) })), ' ms');
+
+  const check = (q, k) => {
+    const v = results.val[q.id][k], ex = results.exact[q.id];
+    if (q.approx) { const diff = Math.abs(Math.round(v * 100) - ex); return diff === 0 ? '<span class="ok">exact</span>' : `<span class="err">off by ${money(diff)}</span>`; }
+    return sameVal(v, ex) ? '<span class="ok">✓ exact</span>' : '<span class="err">✗ differs</span>';
+  };
+  const best = q => Math.min(...['gpu', 'd1', 'dp'].map(k => m(q.id, k)));
+  $('tbl').innerHTML = `<table><tr><th>Test</th><th>GPU</th><th>accuracy</th><th>GPU incl. upload</th><th>DuckDB 1</th><th>accuracy</th><th>DuckDB ${P}</th><th>accuracy</th><th>GPU vs DuckDB ${P}</th></tr>` +
+    done.map(q => `<tr><td>${q.label}</td>` +
+      `<td>${fmtMs(m(q.id, 'gpu'))}</td><td>${check(q, 'gpu')}</td><td>${fmtMs(m(q.id, 'gpuup'))}</td>` +
+      `<td>${fmtMs(m(q.id, 'd1'))}</td><td>${check(q, 'd1')}</td><td>${fmtMs(m(q.id, 'dp'))}</td><td>${check(q, 'dp')}</td>` +
+      `<td>${(m(q.id, 'dp') / m(q.id, 'gpu')).toFixed(1)}× ${m(q.id, 'gpu') < m(q.id, 'dp') ? 'faster' : 'slower'}</td></tr>`).join('') +
+    `</table><div class="note">${results.base}: ${results.rows.toLocaleString()} rows. One-time costs: reading the columns out of DuckDB ${fmtMs(results.extractMs)}, uploading them to the GPU ${fmtMs(results.up)}. ` +
+    `"GPU" = data already on the GPU (the dashboard case: upload once, query many times); "incl. upload" adds the one-time upload. ` +
+    `Accuracy is checked against DuckDB's exact sum of integer cents. Float sums are compared to the cent. ` +
+    `GPU float maths is 32-bit, so "Sum (float)" and the filter on a 32-bit copy of total can be slightly off; the exact tests use integer cents.</div>`;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+﻿{
+    "port":  54611,
+    "fileThreads":  16,
+    "page":  "html/home.html"
+}

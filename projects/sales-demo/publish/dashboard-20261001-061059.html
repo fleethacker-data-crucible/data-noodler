@@ -1,0 +1,306 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Sales Demo · Dashboard</title>
+<style>/* Data Noodler universal theme. Dark, shared by every page.
+   Fonts: Exo 2 (UI), Syne Mono (logs, data, code). Buttons: 25px, blue, 4px corners. */
+
+
+
+
+:root {
+  color-scheme: dark;
+  --bg: #1a1a19; --panel: #242422; --panel-2: #2c2c2a; --border: #3a3936; --sel: #44433f;
+  --text: #ffffff; --text-2: #c3c2b7; --muted: #8d8b82;
+  --blue: #3987e5; --blue-h: #5a9cec; --ok: #4cc27f; --warn: #d9b343; --err: #e24c4c;
+  --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c9a227; --c5: #9b6bd6; --c6: #d6529a; --c7: #5fb0c9; --c8: #8d8b82;
+  --mono: 'Syne Mono', ui-monospace, Consolas, monospace;
+  --pink: #f27ab8; --lerr: #ff9090; --time: #aeaca4;
+  --radius: 4px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px 'Exo 2', system-ui, sans-serif; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #3a3936; border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #55534e; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+a { color: var(--blue); }
+h1 { font-size: 20px; margin: 0; font-weight: 600; }
+h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin: 18px 0 10px; display: flex; align-items: center; gap: 10px; }
+h3 { font-size: 13px; margin: 0 0 6px; font-weight: 600; }
+code, .mono, pre { font-family: var(--mono); font-size: 12.5px; }
+.muted { color: var(--muted); } .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+[hidden] { display: none !important; }
+
+/* ---- layout ---- */
+.app { display: flex; flex-direction: column; height: 100%; }
+/* Same header as the server panel: DN logo, title, sub line. */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 12px; }
+.logo { width: 40px; height: 40px; border-radius: 8px; display: grid; place-items: center; background: var(--blue); color: #fff; font-weight: 600; font-size: 16px; flex: none; }
+.sub { color: var(--muted); font-size: 12px; }
+.topbar .spacer { flex: 1; }
+.main { flex: 1; overflow: auto; padding: 20px; }
+/* Stats like the server panel: small muted label over a big value. */
+.stats { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.stat label { display: block; font-size: 12px; color: var(--muted); }
+.stat b { display: block; font-size: 18px; font-weight: 600; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.row.end { justify-content: flex-end; }
+.stack > * + * { margin-top: 10px; }
+.box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 14px; }
+.split { display: grid; grid-template-columns: 300px 1fr; gap: 14px; min-height: 0; }
+@media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
+
+/* ---- buttons ---- */
+button, .btn {
+  height: 25px; line-height: 1; padding: 0 14px 2px; border: 0; border-radius: var(--radius);
+  background: var(--blue); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; text-decoration: none;
+}
+button:hover, .btn:hover { background: var(--blue-h); }
+button:disabled, .btn.disabled { background: var(--sel); color: var(--muted); cursor: not-allowed; }
+/* ghost = the server panel's cancel button */
+button.ghost { background: var(--sel); color: var(--text); }
+button.ghost:hover { background: var(--border); }
+button.ghost:disabled { color: var(--muted); }
+button.danger { background: var(--err); }
+button.danger:hover { background: var(--err); filter: brightness(1.1); }
+button.go { background: var(--ok); }
+button.go:hover { background: var(--ok); filter: brightness(1.1); }
+button.small { height: 21px; padding: 0 8px; font-size: 12px; }
+
+/* ---- inputs ---- */
+input, select, textarea {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 0 8px; height: 25px;
+}
+textarea { font-family: var(--mono); height: auto; min-height: 80px; padding: 6px 8px; width: 100%; resize: vertical; }
+select[multiple] { height: auto; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
+input[type=checkbox] { min-height: 0; accent-color: var(--blue); }
+label.field { display: flex; flex-direction: column; gap: 4px; color: var(--text-2); }
+label.field > input, label.field > select, label.field > textarea { width: 100%; }
+.search { width: 240px; }
+
+/* ---- tables ---- */
+.table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+table.grid { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.grid th, table.grid td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.grid th { background: var(--panel); color: var(--text-2); font-weight: 600; position: sticky; top: 0; z-index: 1; }
+table.grid th.sort { cursor: pointer; user-select: none; }
+table.grid th.sort:hover { color: var(--text); }
+table.grid tr.click { cursor: pointer; }
+table.grid tr.click:hover td { background: var(--panel-2); }
+table.grid tr.open td { background: var(--panel-2); }
+table.grid td.num, table.grid th.num { text-align: right; }
+table.data td { font-family: var(--mono); font-size: 12px; }
+table.data td.null { color: var(--muted); font-style: italic; }
+
+/* ---- badges ---- */
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; background: var(--sel); color: var(--text-2); }
+.badge.active, .badge.public { background: #1d4a35; color: #7fe0a8; }
+.badge.on-hold, .badge.internal { background: #4a3f12; color: #f0d070; }
+.badge.complete { background: #183a5c; color: #8cc0f5; }
+.badge.archived { background: var(--sel); color: var(--muted); }
+.badge.confidential { background: #5a2d12; color: #f4a36e; }
+.badge.restricted { background: #5c1c1c; color: #ff9a9a; }
+
+/* ---- dialogs and toasts ---- */
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0; width: min(520px, 94vw); box-shadow: 0 12px 40px #0009; }
+dialog::backdrop { background: #0008; }
+dialog header { padding: 18px 24px 0; font-size: 16px; font-weight: 600; }
+dialog .body { padding: 14px 24px; display: grid; gap: 12px; }
+dialog footer { padding: 4px 24px 20px; display: flex; justify-content: flex-end; gap: 8px; }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 50; }
+.toast { background: var(--panel-2); border: 1px solid var(--border); border-left: 4px solid var(--blue); border-radius: 6px; padding: 8px 12px; min-width: 240px; max-width: 420px; box-shadow: 0 6px 20px #0008; font-size: 13px; }
+.toast.ok { border-left-color: var(--ok); color: var(--text); }
+.toast.err { border-left-color: var(--err); color: var(--text); }
+
+/* ---- progress, logs ---- */
+.progress { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress > i { display: block; height: 100%; width: 0; background: var(--blue); transition: width .2s; }
+.log { font-family: var(--mono); font-size: 13px; line-height: 1.6; color: var(--text-2); max-height: 180px; overflow: auto; white-space: pre-wrap; }
+.log .t { color: var(--time); } .log .err { color: var(--lerr); } .log .ok { color: var(--ok); } .log .sys { color: var(--pink); }
+
+/* ---- module buttons row (home page) ---- */
+.modules { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0; }
+
+/* ---- charts ---- */
+svg text { fill: var(--text-2); font-size: 11px; font-family: 'Exo 2', system-ui, sans-serif; }
+svg .gridline { stroke: var(--border); stroke-width: 1; }
+.tip { position: fixed; pointer-events: none; background: var(--text); color: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 12px; z-index: 60; display: none; }
+.kpi { font-size: 28px; font-weight: 600; }
+.kpi-label { font-size: 12px; color: var(--text-2); }
+
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px}.card.wide{grid-column:1/-1}.card .body{overflow:auto;max-height:420px}</style></head>
+<body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>Sales Demo</h1><div class="sub" id="sub"></div></div></div></header>
+<div class="main"><div class="board" id="board"></div></div></div>
+<script>// Shared UI helpers. Global: UI.
+//   UI.toast('Saved', 'ok')                      bottom-right message (kind: '', 'ok', 'err')
+//   await UI.confirm('Delete?', { danger: true }) true / false (styled dialog; the browser's confirm() is not used)
+//   await UI.form('New project', fields)         { values } or null; fields = [{ name, label, type, value, options, required }]
+//   UI.dataTable(el, cols, rows)                 query results as a table
+const UI = (() => {
+  const $ = id => document.getElementById(id);
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  let toasts;
+  function toast(msg, kind = '', ms = 3500) {
+    toasts ||= document.body.appendChild(Object.assign(document.createElement('div'), { className: 'toasts' }));
+    const t = Object.assign(document.createElement('div'), { className: `toast ${kind}`, textContent: msg });
+    toasts.append(t);
+    setTimeout(() => t.remove(), kind === 'err' ? ms * 2 : ms);
+  }
+
+  // A modal <dialog>. body = HTML string; buttons = [{ label, value, kind }]. Resolves with the clicked value (null on Esc).
+  function dialog(title, body, buttons) {
+    return new Promise(res => {
+      const d = document.createElement('dialog');
+      d.innerHTML = `<header>${esc(title)}</header><form method="dialog"><div class="body">${body}</div><footer>${
+        buttons.map((b, i) => `<button value="${i}" class="${b.kind || ''}" ${b.submit ? '' : 'formnovalidate'}>${esc(b.label)}</button>`).join('')}</footer></form>`;
+      document.body.append(d);
+      const form = d.querySelector('form');
+      // Handle the submit itself (the dialog 'close' event is not reliable in every embedded browser).
+      let done = false;
+      const finish = i => {
+        if (done) return; done = true;
+        const b = buttons[+i];
+        const out = b ? (typeof b.value === 'function' ? b.value(form) : b.value) : null;
+        if (d.open) d.close();
+        d.remove(); res(out);
+      };
+      form.addEventListener('submit', ev => { ev.preventDefault(); finish(ev.submitter?.value); });
+      d.addEventListener('cancel', ev => { ev.preventDefault(); finish(null); });
+      d.addEventListener('keydown', ev => { if (ev.key === 'Escape') { ev.preventDefault(); finish(null); } });
+      d.showModal();
+      d.querySelector('input, select, textarea')?.focus();
+    });
+  }
+  const confirm = (msg, { danger = false, ok = 'OK' } = {}) =>
+    dialog('Confirm', `<div>${esc(msg)}</div>`, [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: ok, value: true, kind: danger ? 'danger' : '' }]);
+  const alert = (title, msg) => dialog(title, `<div>${esc(msg)}</div>`, [{ label: 'OK', value: true }]);
+
+  function fieldHtml(f) {
+    const v = esc(f.value ?? ''), req = f.required ? 'required' : '';
+    if (f.type === 'select') return `<label class="field">${esc(f.label)}<select name="${f.name}">${f.options.map(o => { const [val, lab] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(val)}" ${String(val) === String(f.value) ? 'selected' : ''}>${esc(lab)}</option>`; }).join('')}</select></label>`;
+    if (f.type === 'textarea') return `<label class="field">${esc(f.label)}<textarea name="${f.name}" ${req}>${v}</textarea></label>`;
+    return `<label class="field">${esc(f.label)}<input name="${f.name}" type="${f.type || 'text'}" value="${v}" ${req} ${f.pattern ? `pattern="${f.pattern}"` : ''} placeholder="${esc(f.placeholder || '')}"></label>`;
+  }
+  // Form dialog: resolves { name: value, ... } or null when cancelled.
+  const form = (title, fields, { ok = 'Save' } = {}) => dialog(title, fields.map(fieldHtml).join(''), [
+    { label: 'Cancel', value: null, kind: 'ghost' },
+    { label: ok, submit: true, value: f => Object.fromEntries(new FormData(f)) },
+  ]);
+
+  // ---- formatting ----
+  const num = v => v == null ? '' : Number(v).toLocaleString();
+  const bytes = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : b >= 1024 ? Math.round(b / 1024) + ' KB' : (b || 0) + ' B';
+  const ms = v => v >= 60000 ? `${Math.floor(v / 60000)}m ${Math.round(v % 60000 / 1000)}s` : v >= 1000 ? (v / 1000).toFixed(2) + ' s' : Math.round(v) + ' ms';
+  const date = iso => iso ? new Date(iso).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+  const rows = n => n >= 1e9 ? +(n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? +(n / 1e3).toFixed(1) + 'k' : String(n);
+
+  // Query results as an HTML table. rows = arrays of plain values.
+  function dataTable(el, cols, data, { max = 500 } = {}) {
+    el.innerHTML = `<div class="table-wrap"><table class="grid data"><thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${
+      data.slice(0, max).map(r => `<tr>${r.map(v => v == null ? '<td class="null">null</td>' : `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` +
+      (data.length > max ? `<div class="muted" style="margin-top:4px">Showing ${max} of ${num(data.length)} rows.</div>` : '');
+  }
+
+  // Wrap an async handler: errors become a red toast instead of a silent failure.
+  const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { console.error(e); toast(e.message || String(e), 'err'); } };
+  const debounce = (fn, wait = 200) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), wait); }; };
+  const params = () => Object.fromEntries(new URLSearchParams(location.search));
+
+  return { $, esc, toast, dialog, confirm, alert, form, num, bytes, ms, date, rows, dataTable, guard, debounce, params };
+})();
+</script><script>// Dashboard widgets: query building (split into per-engine "partial" + combining "final" SQL) and SVG rendering.
+// Global: Widgets.
+//   widget = { id, type: 'kpi'|'bar'|'line'|'table', title, dataset, dim, agg, col, where, limit, sort }
+const Widgets = (() => {
+  const q = s => '"' + String(s).replace(/"/g, '""') + '"';
+  const AGGS = ['count', 'sum', 'avg', 'min', 'max', 'count_distinct'];
+  const TYPES = { kpi: 'KPI number', bar: 'Bar chart', line: 'Line chart', table: 'Table' };
+  const COLORS = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c5)', 'var(--c6)', 'var(--c7)'];
+
+  // Measure split into a per-engine part and a combining part, so the job can run on several engines.
+  function measure(w) {
+    const c = w.col ? q(w.col) : '*';
+    switch (w.agg) {
+      case 'count': return { p: [`count(${w.col ? c : '*'}) AS m`], f: 'sum(m)' };
+      case 'sum': return { p: [`sum(${c}) AS m`], f: 'sum(m)' };
+      case 'min': return { p: [`min(${c}) AS m`], f: 'min(m)' };
+      case 'max': return { p: [`max(${c}) AS m`], f: 'max(m)' };
+      case 'avg': return { p: [`sum(${c}) AS s`, `count(${c}) AS n`], f: 'sum(s) / sum(n)' };
+      case 'count_distinct': return { p: [], f: `count(DISTINCT ${c})`, distinct: c };
+      default: throw new Error(`Unknown aggregate ${w.agg}`);
+    }
+  }
+  // { partial(src), final, kind } for kpi/bar/line; kind = profile test used to pick the engine count.
+  function aggQuery(w) {
+    const m = measure(w), dim = w.type === 'kpi' || !w.dim ? null : q(w.dim);
+    const where = w.where?.trim() ? ` WHERE ${w.where}` : '';
+    const label = dim ? `${dim} AS d, ` : '';
+    const partial = m.distinct
+      ? src => `SELECT DISTINCT ${dim ? `${dim} AS d, ` : ''}${m.distinct} AS v FROM ${src}${where}`
+      : src => `SELECT ${label}${m.p.join(', ')} FROM ${src}${where}${dim ? ' GROUP BY 1' : ''}`;
+    const fm = m.distinct ? 'count(DISTINCT v)' : m.f;
+    const order = w.type === 'line' ? 'ORDER BY d' : w.sort === 'label' ? 'ORDER BY d' : 'ORDER BY m DESC NULLS LAST';
+    const final = dim
+      ? `SELECT d, ${fm} AS m FROM __parts GROUP BY d ${order}${+w.limit > 0 ? ` LIMIT ${+w.limit}` : ''}`
+      : `SELECT ${fm} AS m FROM __parts`;
+    return { partial, final, kind: m.distinct ? 'dist' : dim ? 'group' : 'scan' };
+  }
+  const tableQuery = (w, src) => `SELECT * FROM ${src}${w.where?.trim() ? ` WHERE ${w.where}` : ''}${w.sort && w.sort !== 'label' ? ` ORDER BY ${w.sort}` : ''} LIMIT ${Math.min(+w.limit || 100, 1000)}`;
+
+  // ---- rendering ----
+  const fmt = v => typeof v === 'number' ? (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : Math.abs(v) >= 1e4 ? Math.round(v).toLocaleString() : +v.toFixed(2) + '') : String(v ?? '');
+  const nice = max => { const p = 10 ** Math.floor(Math.log10(max || 1)); for (const k of [1, 2, 5, 10]) if (k * p >= max) return k * p; return max; };
+  let tip;
+  const bindTips = el => {
+    tip ||= document.body.appendChild(Object.assign(document.createElement('div'), { className: 'tip' }));
+    el.querySelectorAll('[data-tip]').forEach(p => {
+      p.onmousemove = e => { tip.textContent = p.dataset.tip; tip.style.display = 'block'; tip.style.left = e.clientX + 12 + 'px'; tip.style.top = e.clientY + 12 + 'px'; };
+      p.onmouseleave = () => tip.style.display = 'none';
+    });
+  };
+  function kpi(el, rows, w) {
+    const v = Number(rows[0]?.[0]); // KPIs show the exact value, not the abbreviated chart label
+    el.innerHTML = `<div class="kpi">${UI.esc(Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 }))}</div><div class="kpi-label">${UI.esc(`${w.agg.replace('_', ' ')}${w.col ? ` of ${w.col}` : ''}`)}</div>`;
+  }
+  // Horizontal bars: label on the left, value bar to the right.
+  function bar(el, rows) {
+    const H = 22, L = 150, W = 560, max = nice(Math.max(...rows.map(r => Number(r[1]) || 0), 0));
+    let s = `<svg viewBox="0 0 ${W + L + 70} ${rows.length * H + 6}">`;
+    rows.forEach((r, i) => {
+      const v = Number(r[1]) || 0, w = max ? W * v / max : 0, y = i * H + 3;
+      s += `<text x="${L - 8}" y="${y + 15}" text-anchor="end">${UI.esc(String(r[0] ?? 'null').slice(0, 22))}</text>`;
+      s += `<rect x="${L}" y="${y + 2}" width="${Math.max(1, w)}" height="${H - 6}" rx="3" fill="${COLORS[0]}" data-tip="${UI.esc(`${r[0]}: ${fmt(v)}`)}"/>`;
+      s += `<text x="${L + w + 6}" y="${y + 15}">${UI.esc(fmt(v))}</text>`;
+    });
+    el.innerHTML = s + '</svg>'; bindTips(el);
+  }
+  function line(el, rows) {
+    const W = 760, H = 240, L = 60, B = 26, T = 10, iw = W - L - 10, ih = H - T - B;
+    const vals = rows.map(r => Number(r[1]) || 0), max = nice(Math.max(...vals, 0)), n = rows.length;
+    const x = i => L + (n > 1 ? iw * i / (n - 1) : iw / 2), y = v => T + ih - ih * v / (max || 1);
+    let s = `<svg viewBox="0 0 ${W} ${H}">`;
+    for (let k = 0; k <= 4; k++) { const v = max * k / 4; s += `<line class="gridline" x1="${L}" x2="${W - 10}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`; }
+    const step = Math.max(1, Math.ceil(n / 8));
+    rows.forEach((r, i) => { if (i % step === 0) s += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${UI.esc(String(r[0]).slice(0, 10))}</text>`; });
+    s += `<polyline fill="none" stroke="${COLORS[0]}" stroke-width="2" points="${vals.map((v, i) => `${x(i)},${y(v)}`).join(' ')}"/>`;
+    vals.forEach((v, i) => s += `<circle cx="${x(i)}" cy="${y(v)}" r="${n > 60 ? 1.5 : 3}" fill="${COLORS[0]}" data-tip="${UI.esc(`${rows[i][0]}: ${fmt(v)}`)}"/>`);
+    el.innerHTML = s + '</svg>'; bindTips(el);
+  }
+  const render = (el, w, res) => w.type === 'kpi' ? kpi(el, res.rows, w) : w.type === 'bar' ? bar(el, res.rows) : w.type === 'line' ? line(el, res.rows) : UI.dataTable(el, res.cols, res.rows, { max: 200 });
+
+  return { AGGS, TYPES, aggQuery, tableQuery, render, q };
+})();
+</script>
+<script>const D = {"project":"Sales Demo","at":"2026-10-01T06:10:59.996Z","results":[{"w":{"id":"d6d13a81","title":"Revenue by region","type":"bar","dataset":"orders","dim":"region","agg":"sum","col":"total","where":"","sort":"value","limit":"20"},"cols":["d","m"],"rows":[["North",460931397.09],["West",460318792.07],["South",460204484.09],["Central",457526380.47],["East",455665033.63]]},{"w":{"id":"k1","type":"kpi","title":"Orders","dataset":"orders","dim":"","agg":"count","col":"","where":"","sort":"value","limit":20},"cols":["m"],"rows":[[1000000]]},{"w":{"id":"l1","type":"line","title":"Orders per month","dataset":"orders","dim":"order_date","agg":"count","col":"","where":"order_date >= DATE '2025-01-01'","sort":"label","limit":400},"cols":["d","m"],"rows":[["2025-01-01",744],["2025-01-02",696],["2025-01-03",735],["2025-01-04",723],["2025-01-05",728],["2025-01-06",746],["2025-01-07",702],["2025-01-08",712],["2025-01-09",717],["2025-01-10",681],["2025-01-11",713],["2025-01-12",677],["2025-01-13",676],["2025-01-14",709],["2025-01-15",709],["2025-01-16",692],["2025-01-17",790],["2025-01-18",686],["2025-01-19",661],["2025-01-20",705],["2025-01-21",749],["2025-01-22",682],["2025-01-23",754],["2025-01-24",740],["2025-01-25",733],["2025-01-26",707],["2025-01-27",713],["2025-01-28",734],["2025-01-29",732],["2025-01-30",738],["2025-01-31",699],["2025-02-01",664],["2025-02-02",781],["2025-02-03",703],["2025-02-04",633],["2025-02-05",704],["2025-02-06",738],["2025-02-07",718],["2025-02-08",718],["2025-02-09",716],["2025-02-10",724],["2025-02-11",712],["2025-02-12",690],["2025-02-13",649],["2025-02-14",731],["2025-02-15",737],["2025-02-16",768],["2025-02-17",737],["2025-02-18",697],["2025-02-19",730],["2025-02-20",782],["2025-02-21",713],["2025-02-22",714],["2025-02-23",685],["2025-02-24",723],["2025-02-25",755],["2025-02-26",705],["2025-02-27",766],["2025-02-28",748],["2025-03-01",724],["2025-03-02",760],["2025-03-03",731],["2025-03-04",662],["2025-03-05",719],["2025-03-06",683],["2025-03-07",729],["2025-03-08",716],["2025-03-09",684],["2025-03-10",671],["2025-03-11",728],["2025-03-12",686],["2025-03-13",691],["2025-03-14",712],["2025-03-15",757],["2025-03-16",694],["2025-03-17",719],["2025-03-18",764],["2025-03-19",735],["2025-03-20",707],["2025-03-21",684],["2025-03-22",700],["2025-03-23",707],["2025-03-24",677],["2025-03-25",697],["2025-03-26",712],["2025-03-27",692],["2025-03-28",720],["2025-03-29",660],["2025-03-30",771],["2025-03-31",718],["2025-04-01",768],["2025-04-02",694],["2025-04-03",680],["2025-04-04",692],["2025-04-05",739],["2025-04-06",686],["2025-04-07",661],["2025-04-08",679],["2025-04-09",698],["2025-04-10",717],["2025-04-11",741],["2025-04-12",680],["2025-04-13",746],["2025-04-14",714],["2025-04-15",690],["2025-04-16",694],["2025-04-17",701],["2025-04-18",704],["2025-04-19",737],["2025-04-20",704],["2025-04-21",686],["2025-04-22",749],["2025-04-23",739],["2025-04-24",692],["2025-04-25",708],["2025-04-26",689],["2025-04-27",677],["2025-04-28",732],["2025-04-29",707],["2025-04-30",691],["2025-05-01",741],["2025-05-02",727],["2025-05-03",723],["2025-05-04",691],["2025-05-05",728],["2025-05-06",740],["2025-05-07",753],["2025-05-08",720],["2025-05-09",743],["2025-05-10",676],["2025-05-11",713],["2025-05-12",712],["2025-05-13",693],["2025-05-14",731],["2025-05-15",755],["2025-05-16",716],["2025-05-17",774],["2025-05-18",745],["2025-05-19",760],["2025-05-20",748],["2025-05-21",728],["2025-05-22",737],["2025-05-23",678],["2025-05-24",722],["2025-05-25",725],["2025-05-26",697],["2025-05-27",670],["2025-05-28",701],["2025-05-29",710],["2025-05-30",736],["2025-05-31",730],["2025-06-01",755],["2025-06-02",683],["2025-06-03",698],["2025-06-04",741],["2025-06-05",756],["2025-06-06",720],["2025-06-07",715],["2025-06-08",684],["2025-06-09",727],["2025-06-10",708],["2025-06-11",771],["2025-06-12",705],["2025-06-13",670],["2025-06-14",670],["2025-06-15",745],["2025-06-16",673],["2025-06-17",700],["2025-06-18",692],["2025-06-19",690],["2025-06-20",733],["2025-06-21",707],["2025-06-22",686],["2025-06-23",694],["2025-06-24",676],["2025-06-25",717],["2025-06-26",728],["2025-06-27",764],["2025-06-28",684],["2025-06-29",722],["2025-06-30",729],["2025-07-01",715],["2025-07-02",740],["2025-07-03",734],["2025-07-04",686],["2025-07-05",741],["2025-07-06",736],["2025-07-07",707],["2025-07-08",704],["2025-07-09",769],["2025-07-10",702],["2025-07-11",717],["2025-07-12",718],["2025-07-13",643],["2025-07-14",736],["2025-07-15",733],["2025-07-16",751],["2025-07-17",732],["2025-07-18",710],["2025-07-19",720],["2025-07-20",695],["2025-07-21",725],["2025-07-22",719],["2025-07-23",748],["2025-07-24",694],["2025-07-25",703],["2025-07-26",700],["2025-07-27",683],["2025-07-28",678],["2025-07-29",751],["2025-07-30",698],["2025-07-31",689],["2025-08-01",754],["2025-08-02",722],["2025-08-03",737],["2025-08-04",733],["2025-08-05",797],["2025-08-06",727],["2025-08-07",714],["2025-08-08",743],["2025-08-09",733],["2025-08-10",755],["2025-08-11",699],["2025-08-12",733],["2025-08-13",705],["2025-08-14",705],["2025-08-15",756],["2025-08-16",665],["2025-08-17",705],["2025-08-18",701],["2025-08-19",807],["2025-08-20",686],["2025-08-21",706],["2025-08-22",727],["2025-08-23",697],["2025-08-24",686],["2025-08-25",705],["2025-08-26",693],["2025-08-27",681],["2025-08-28",744],["2025-08-29",689],["2025-08-30",726],["2025-08-31",736],["2025-09-01",734],["2025-09-02",734],["2025-09-03",710],["2025-09-04",717],["2025-09-05",680],["2025-09-06",681],["2025-09-07",658],["2025-09-08",706],["2025-09-09",733],["2025-09-10",704],["2025-09-11",730],["2025-09-12",679],["2025-09-13",724],["2025-09-14",767],["2025-09-15",738],["2025-09-16",677],["2025-09-17",703],["2025-09-18",720],["2025-09-19",668],["2025-09-20",746],["2025-09-21",766],["2025-09-22",757],["2025-09-23",701],["2025-09-24",688],["2025-09-25",722],["2025-09-26",719],["2025-09-27",714],["2025-09-28",704],["2025-09-29",721],["2025-09-30",674],["2025-10-01",738],["2025-10-02",691],["2025-10-03",693],["2025-10-04",684],["2025-10-05",711],["2025-10-06",702],["2025-10-07",743],["2025-10-08",678],["2025-10-09",665],["2025-10-10",739],["2025-10-11",715],["2025-10-12",723],["2025-10-13",643],["2025-10-14",718],["2025-10-15",744],["2025-10-16",673],["2025-10-17",754],["2025-10-18",685],["2025-10-19",687],["2025-10-20",734],["2025-10-21",785],["2025-10-22",751],["2025-10-23",785],["2025-10-24",682],["2025-10-25",718],["2025-10-26",679],["2025-10-27",744],["2025-10-28",722],["2025-10-29",713],["2025-10-30",688],["2025-10-31",711]]},{"w":{"id":"t1","type":"table","title":"Biggest orders","dataset":"orders","dim":"","agg":"count","col":"","where":"","sort":"total DESC","limit":20},"cols":["id","order_date","customer_id","region","category","quantity","unit_price","discount","total"],"rows":[[2968,"2024-12-16",1108,"North","Support",19,504.92,0,9593.48],[863704,"2022-12-22",1323,"North","Support",19,504.87,0,9592.53],[531642,"2022-07-15",997,"East","Licensing",19,504.82,0,9591.58],[577192,"2025-08-01",2495,"Central","Licensing",19,504.8,0,9591.2],[946363,"2023-03-30",1097,"Central","Software",19,504.77,0,9590.63],[40966,"2025-09-01",4459,"East","Support",19,504.72,0,9589.68],[418051,"2023-11-15",290,"North","Support",19,504.71,0,9589.49],[727384,"2024-05-12",84,"South","Support",19,504.69,0,9589.11],[321603,"2022-11-05",299,"West","Hardware",19,504.61,0,9587.59],[660377,"2024-09-03",4451,"Central","Services",19,504.55,0,9586.45],[269356,"2023-10-26",972,"Central","Software",19,504.51,0,9585.69],[215728,"2022-09-27",1110,"West","Support",19,504.5,0,9585.5],[728621,"2024-09-28",1980,"South","Training",19,504.46,0,9584.74],[29223,"2025-10-17",4215,"Central","Licensing",19,504.45,0,9584.55],[609521,"2024-08-24",4200,"Central","Training",19,504.41,0,9583.79],[101604,"2025-02-10",3457,"East","Licensing",19,504.23,0,9580.37],[629019,"2025-06-25",2530,"South","Hardware",19,504.18,0,9579.42],[426635,"2023-03-25",895,"West","Software",19,504.14,0,9578.66],[493945,"2025-05-30",2747,"West","Software",19,504.13,0,9578.47],[49062,"2023-06-07",3700,"West","Services",19,504.12,0,9578.28]]},{"w":{"id":"k2","type":"kpi","title":"Distinct customers","dataset":"orders","dim":"","agg":"count_distinct","col":"customer_id","where":"","sort":"value","limit":20},"cols":["m"],"rows":[[5000]]}]};
+document.getElementById('sub').textContent = 'Dashboard published ' + new Date(D.at).toLocaleString() + ' (classification: internal)';
+const b = document.getElementById('board');
+D.results.forEach((r, i) => { const c = document.createElement('div'); c.className = 'card' + (r.w.type === 'table' || r.w.type === 'line' ? ' wide' : '');
+  c.innerHTML = '<h3>' + UI.esc(r.w.title) + '</h3><div class="body"></div>'; b.append(c);
+  r.error ? c.lastChild.textContent = r.error : Widgets.render(c.lastChild, r.w, r); });</script></body></html>
