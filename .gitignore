@@ -7,3 +7,16 @@ temp/
 js/duckdb/bench.*
 projects/*
 !projects/sales-demo/
+
+# Data files: never committed (any folder). Import reads these; datasets are Parquet.
+*.csv
+*.tsv
+*.parquet
+*.pq
+*.sqlite
+*.sqlite3
+*.db
+*.xlsx
+*.xls
+*.arrow
+*.feather
