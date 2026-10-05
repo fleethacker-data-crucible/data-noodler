@@ -14,7 +14,7 @@ const DataEngine = (() => {
   async function getMain() { if (!main) { main = DuckEngine; await main.init(); } return main; }
   async function loadProfile(force) {
     if (profile && !force) return profile;
-    try { profile = await DNFS.readJSON(PROFILE); } catch { profile = { tests: {} }; }
+    try { profile = await DNFS.readJSONOr(PROFILE, { tests: {} }); } catch { profile = { tests: {} }; }
     return profile;
   }
 
@@ -42,16 +42,22 @@ const DataEngine = (() => {
   const rangeSrc = (url, a, b) => `(SELECT * EXCLUDE (file_row_number) FROM read_parquet('${url}', file_row_number = true) WHERE file_row_number >= ${a} AND file_row_number < ${b})`;
 
   // partial(src) -> SQL over one share; final -> SQL over table __parts. Returns { cols, rows, ms, engines, from }.
-  async function parallel({ path, rows, kind = 'group', partial, final, source = 'http' }) {
+  // parts = part files of a split dataset (ParquetWriter): each engine gets whole parts instead of a row range.
+  async function parallel({ path, parts = null, rows, kind = 'group', partial, final, source = 'http' }) {
     await loadProfile();
-    const p = plan(kind, rows, source), n = Math.max(1, p.engines);
+    const p = plan(kind, rows, source);
+    const n = Math.max(1, parts?.length ? Math.min(p.engines, parts.length) : p.engines);
     const e = await getMain(), url = e.url(path);
+    const list = ps => `read_parquet([${ps.map(f => `'${e.url(f)}'`).join(', ')}])`;
     if (n === 1) {
-      const r = await e.query(final.replaceAll('__parts', `(${partial(`read_parquet('${url}')`)})`));
+      const r = await e.query(final.replaceAll('__parts', `(${partial(parts?.length ? list(parts) : `read_parquet('${url}')`)})`));
       return { ...r, engines: 1, from: p.from };
     }
     const pl = await getPool(n);
-    const r = await pl.run(i => partial(rangeSrc(url, Math.floor(rows * i / n), Math.floor(rows * (i + 1) / n))), final, n);
+    const share = parts?.length
+      ? i => list(parts.filter((_, k) => k % n === i))
+      : i => rangeSrc(url, Math.floor(rows * i / n), Math.floor(rows * (i + 1) / n));
+    const r = await pl.run(i => partial(share(i)), final, n);
     return { cols: r.cols, rows: r.rows, ms: r.ms, engines: n, from: p.from };
   }
 

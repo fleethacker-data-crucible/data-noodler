@@ -7,7 +7,7 @@
 //   await Projects.trash(folder)                moves it to projects/.trash/
 const Projects = (() => {
   const ROOT = 'projects';
-  const LAYOUT = ['data/source', 'data/staged', 'data/cache', 'pipeline', 'dashboard', 'publish', 'archives', 'logs'];
+  const LAYOUT = ['data/raw', 'data/source', 'data/staged', 'data/cache', 'pipeline', 'dashboard', 'publish', 'archives', 'logs'];
   const MODULES = ['import', 'pipeline', 'dashboard', 'publish', 'update', 'archives'];
   // Option lists: [stored value, label]. The value is also the badge class.
   const PHASE = [['not-started', 'Not Started'], ['planning', 'Planning'], ['development', 'Development'], ['testing', 'Testing'], ['production', 'Production']];
@@ -104,7 +104,10 @@ const Projects = (() => {
     return save(cfg);
   }
 
-  // Datasets registered by Import: { name, path, rows, columns: [{ name, type }], source, imported }
+  // Datasets (always Parquet): { name, path, parts?, stage, direct?, rows, columns: [{ name, type }], source, imported }
+  //   stage 'staged' = data/staged (Import > Stage; input for Pipeline)
+  //   stage 'source' = data/source (Import > Import Directly, or Pipeline output; ready for Dashboard)
+  //   parts = [part files] when written split (path = the part folder); see ParquetWriter.
   async function upsertDataset(folder, ds) {
     const cfg = await get(folder);
     cfg.datasets ||= [];
@@ -113,6 +116,8 @@ const Projects = (() => {
     return save(cfg);
   }
   const dir = folder => `${ROOT}/${folder}`;
+  // 'staged' | 'source' (older records have no stage: taken from the path; pipeline outputs are 'source').
+  const stageOf = d => d.stage || (d.source?.kind !== 'pipeline' && d.path.includes('/data/staged/') ? 'staged' : 'source');
 
-  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, touchModule, upsertDataset, dir };
+  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, touchModule, upsertDataset, dir, stageOf };
 })();

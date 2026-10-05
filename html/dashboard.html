@@ -3,34 +3,86 @@
 <head>
 <meta charset="utf-8">
 <title>Dashboard</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
-  .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-height: 120px; }
-  .card.wide { grid-column: 1 / -1; }
-  .card.kpi-card { min-height: 0; }
-  .card .head { display: flex; align-items: center; gap: 8px; }
-  .card .head h3 { margin: 0; flex: 1; }
-  .card .foot { font-size: 11.5px; color: var(--muted); }
-  .card .body { overflow: auto; max-height: 420px; }
-  .empty { color: var(--muted); padding: 30px; text-align: center; }
+  html, body { height: 100%; overflow: hidden; }
+  .addwrap { position: relative; }
+  .addmenu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); padding: 4px; display: none; min-width: 150px; }
+  .addmenu.open { display: block; }
+  .addmenu div { padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+  .addmenu div:hover { background: var(--sel); }
+  .addmenu small { color: var(--muted); display: block; font-size: 11.5px; }
+
+  /* Canvas: fills the window under the toolbar; grid lines every --g px. Widgets snap to it. */
+  .canvas-wrap { flex: 1; min-height: 0; overflow: auto; margin: 14px 20px 20px; border: 1px solid var(--border); border-radius: 4px; }
+  .canvas { position: relative; min-height: 100%; min-width: 100%;
+    background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px),
+                      linear-gradient(to bottom, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px);
+    background-size: var(--g) var(--g); }
+  .canvas .hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+
+  .wd { position: absolute; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .wd.sel { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue); }
+  .wd.moving { opacity: .85; z-index: 20; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+  .wd .wh { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: move; user-select: none; border-bottom: 1px solid var(--border); }
+  .wd .wh b { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wd .wh small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .wd .wb { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px; cursor: pointer; }
+  .wd .wb .table-wrap { max-height: none; }
+  .wd .note { height: 100%; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 10px; }
+  .wd .rz { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize;
+    background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); }
+  .ghostbox { position: absolute; border: 1px dashed var(--blue); border-radius: 4px; background: color-mix(in srgb, var(--blue) 10%, transparent); pointer-events: none; z-index: 5; }
+
+  /* Settings popout: slides in from the right. */
+  .side { position: fixed; top: 0; right: 0; bottom: 0; width: 340px; max-width: 92vw; z-index: 40; display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0, 0, 0, .3); transform: translateX(100%); transition: transform .18s ease-out; }
+  .side.open { transform: none; }
+  .side header { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .side header b { flex: 1; font-size: 15px; }
+  .side .x { background: none; color: var(--muted); padding: 0 6px; font-size: 16px; }
+  .side .x:hover { color: var(--text); }
+  .side .sb { flex: 1; overflow: auto; padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .side h2 { margin: 12px 0 0; }
+  .side footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; }
+  .seg { display: flex; gap: 5px; }
+  .seg button { flex: 1; }
+  .seg button:not(.on) { background: var(--sel); color: var(--text); }
+  .flist { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 360px; overflow: auto; }
+  .flist div { display: flex; align-items: center; gap: 8px; padding: 4px 8px; cursor: grab; }
+  .flist div + div { border-top: 1px solid var(--border); }
+  .flist div.drag { opacity: .4; }
+  .flist div.over { box-shadow: inset 0 2px 0 var(--blue); }
+  .flist .grip { color: var(--muted); letter-spacing: -2px; }
+  .flist .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flist small { color: var(--muted); }
 </style>
 </head>
 <body>
 <div class="app">
   <header class="topbar">
     <div class="brand"><span class="logo">DN</span><div><h1 id="title">Dashboard</h1><div class="sub" id="sub"></div></div></div>
+    <div class="row">
+      <div class="addwrap"><button id="add" class="go">Add widget ▾</button>
+        <div class="addmenu" id="addmenu">
+          <div data-type="chart">Chart<small>Bar or line</small></div>
+          <div data-type="table">Table<small>Pick and order fields</small></div>
+        </div>
+      </div>
+      <button id="refresh" class="ghost" title="Re-run every widget (ignores the cache)">Refresh all</button>
+    </div>
     <div class="spacer"></div>
-    <label class="row"><input type="checkbox" id="useCache" checked> Use cache</label>
-    <button id="refresh" class="ghost">Refresh all</button>
-    <button id="add" class="go">Add widget</button>
   </header>
-  <div class="main stack">
-    <div class="board" id="board"></div>
-    <h2>Activity</h2>
-    <div class="log" id="log"></div>
-  </div>
+  <div class="canvas-wrap" id="wrap"><div class="canvas" id="canvas"></div></div>
 </div>
+
+<aside class="side" id="side">
+  <header><b id="sTitle">Widget</b><button class="x" id="sClose" title="Close (Esc)">✕</button></header>
+  <div class="sb" id="sBody"></div>
+  <footer><button class="danger" id="sDel">Delete widget</button><button class="ghost" id="sDone">Done</button></footer>
+</aside>
 
 <script src="../js/dn-fs.js"></script>
 <script src="../js/duckdb-engine.js"></script>
@@ -40,105 +92,277 @@
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
 <script src="../js/core/data-engine.js"></script>
+<script src="../js/core/parquet-writer.js"></script>
 <script src="../js/dashboard/widgets.js"></script>
 <script>
+// Dashboard canvas. State: <project>/dashboard/dashboard.json (v2) = { version: 2, grid, widgets: [...] }
+// (widget shape: js/dashboard/widgets.js). Positions/sizes are in grid cells; drag the header to move,
+// the corner to resize (both snap to the grid). Click a widget to open its settings on the right.
 const { $, esc } = UI, W = Widgets;
-let ctx, dash = { widgets: [] };
+const G = 20;                                   // grid cell, px
+const SIZE = { chart: [24, 14], table: [30, 14] }, MIN = [8, 5];
+let ctx, dash = { version: 2, grid: G, widgets: [] }, selId = null;
+const results = new Map();                      // id -> last result (redraw on resize without re-querying)
 const FILE = () => `${ctx.dir}/dashboard/dashboard.json`;
 const cachePath = w => `${ctx.dir}/data/cache/widget-${w.id}.json`;
 const dsOf = name => (ctx.cfg.datasets || []).find(d => d.name === name);
-const save = async () => { dash.updated = new Date().toISOString(); await DNFS.writeJSON(FILE(), dash); };
+const readyDs = () => (ctx.cfg.datasets || []).filter(d => Projects.stageOf(d) === 'source');   // data/source only
+const byId = id => dash.widgets.find(w => w.id === id);
+const saveNow = async () => { dash.updated = new Date().toISOString(); await DNFS.writeJSON(FILE(), dash); };
+const save = UI.debounce(() => saveNow().catch(e => UI.toast(`Could not save the dashboard: ${e.message}`, 'err')), 400);
 
-// Cache key: the widget definition + when its dataset was last written. Either changing invalidates the cache.
-const keyOf = w => JSON.stringify({ ...w, title: undefined, imported: dsOf(w.dataset)?.imported });
+// Older dashboards (v1: a list of cards) become grid widgets: bar/line -> chart, table -> table; KPIs are dropped.
+function migrate(d) {
+  if (d.version === 2) return d;
+  let y = 0;
+  const widgets = (d.widgets || []).filter(w => w.type !== 'kpi').map(w => {
+    const t = w.type === 'table' ? 'table' : 'chart', [cw, ch] = SIZE[t];
+    const n = { id: w.id, type: t, title: w.title || '', dataset: w.dataset, x: 0, y, w: cw, h: ch };
+    y += ch + 1;
+    if (t === 'chart') Object.assign(n, { chart: w.type, measure: { agg: w.agg || 'count', col: w.col || '' }, category: { col: w.dim || '', sort: w.sort === 'label' ? 'label' : 'value', limit: +w.limit || 20 } });
+    else Object.assign(n, { fields: null, limit: +w.limit || 100 });
+    return n;
+  });
+  return { version: 2, grid: G, widgets };
+}
 
-async function compute(w) {
+// ---- queries (one at a time: widgets share the engines) ----
+const keyOf = w => JSON.stringify({ ds: w.dataset, s: W.spec(w), imported: dsOf(w.dataset)?.imported });
+async function compute(w, fresh) {
   const d = dsOf(w.dataset); if (!d) throw new Error(`Dataset "${w.dataset}" not found.`);
-  if ($('useCache').checked) {
-    try { const c = await DNFS.readJSON(cachePath(w)); if (c.key === keyOf(w)) return { ...c.res, cached: true }; } catch {}
-  }
+  if (!fresh) { try { const c = await DNFS.readJSONOr(cachePath(w), {}); if (c.key === keyOf(w)) return { ...c.res, cached: true }; } catch {} }
   const t0 = performance.now();
   let res;
-  if (w.type === 'table') {
+  if (W.spec(w).type === 'table') {
     const e = await DataEngine.main();
-    res = { ...(await e.query(W.tableQuery(w, `read_parquet('${e.url(d.path)}')`))), engines: 1, from: 'single' };
+    res = { ...(await e.query(W.tableQuery(w, ParquetWriter.sql(e, d)))), engines: 1 };
   } else {
     const a = W.aggQuery(w);
-    res = await DataEngine.parallel({ path: d.path, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final });
+    res = await DataEngine.parallel({ path: d.path, parts: d.parts, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final });
   }
-  res.ms = performance.now() - t0;
-  const out = { cols: res.cols, rows: res.rows, ms: res.ms, engines: res.engines, from: res.from };
+  const out = { cols: res.cols, rows: res.rows, ms: performance.now() - t0, engines: res.engines };
   DNFS.writeJSON(cachePath(w), { key: keyOf(w), at: new Date().toISOString(), res: out }).catch(() => {});
   return out;
 }
+let queue = Promise.resolve();
+function draw(w, fresh = false) {
+  queue = queue.then(async () => {
+    const el = document.querySelector(`.wd[data-id="${w.id}"]`); if (!el) return;
+    const body = el.querySelector('.wb'), meta = el.querySelector('.wh small');
+    results.delete(w.id);
+    if (!W.ready(w)) {
+      meta.textContent = '';
+      body.innerHTML = `<div class="note">${!w.dataset ? 'Click to choose a dataset' : w.type === 'table' ? 'Click to pick fields' : 'Click to set the X and Y axis'}</div>`;
+      return;
+    }
+    body.innerHTML = '<div class="note">Loading…</div>';
+    try {
+      const r = await compute(w, fresh);
+      results.set(w.id, r);
+      W.render(body, w, r);
+      meta.textContent = r.cached ? 'cached' : `${UI.ms(r.ms)}${r.engines > 1 ? ` · ${r.engines} engines` : ''}`;
+    } catch (e) { body.innerHTML = `<div class="note err">${esc(e.message.split('\n')[0])}</div>`; meta.textContent = ''; }
+  });
+  return queue;
+}
+const titleOf = w => w.title || (w.type === 'table' ? 'Table' : w.category?.col ? `${W.AGG_LABEL[w.measure.agg]}${w.measure.col ? ` of ${w.measure.col}` : ''} by ${w.category.col}` : 'Chart');
 
-function card(w) {
-  return `<div class="card ${w.type === 'table' || w.type === 'line' ? 'wide' : ''} ${w.type === 'kpi' ? 'kpi-card' : ''}" data-id="${w.id}">
-    <div class="head"><h3>${esc(w.title || 'Untitled')}</h3><button class="ghost small" data-act="edit">Edit</button><button class="ghost small" data-act="refresh">↻</button><button class="danger small" data-act="del">✕</button></div>
-    <div class="body" id="b-${w.id}"><span class="muted">Loading…</span></div><div class="foot" id="f-${w.id}"></div></div>`;
+// ---- canvas ----
+function place(el, w) {
+  Object.assign(el.style, { left: `${w.x * G}px`, top: `${w.y * G}px`, width: `${w.w * G - 1}px`, height: `${w.h * G - 1}px` });
 }
-async function draw(w) {
-  const body = $(`b-${w.id}`), foot = $(`f-${w.id}`);
-  try {
-    const r = await compute(w);
-    W.render(body, w, r);
-    foot.textContent = `${w.dataset} · ${r.cached ? 'from cache' : `${UI.ms(r.ms)} on ${r.engines} engine${r.engines > 1 ? 's' : ''}${r.from === 'profile' ? ' (profile)' : ''}`}`;
-  } catch (e) { body.innerHTML = `<span class="err">${esc(e.message.split('\n')[0])}</span>`; foot.textContent = ''; }
+function widgetEl(w) {
+  const el = document.createElement('div');
+  el.className = 'wd' + (w.id === selId ? ' sel' : ''); el.dataset.id = w.id;
+  el.innerHTML = `<div class="wh"><b></b><small></small></div><div class="wb"></div><div class="rz" title="Resize"></div>`;
+  el.querySelector('b').textContent = titleOf(w);
+  place(el, w);
+  return el;
 }
-async function drawAll() {
-  $('board').innerHTML = dash.widgets.map(card).join('') || '<div class="empty">No widgets yet. Click <b>Add widget</b>.</div>';
-  for (const w of dash.widgets) await draw(w); // one at a time: they share the engines
+function fitCanvas() {   // grow the canvas below/right of the lowest/rightmost widget, so there is room to drag into
+  const c = $('canvas'), maxY = Math.max(0, ...dash.widgets.map(w => w.y + w.h)), maxX = Math.max(0, ...dash.widgets.map(w => w.x + w.w));
+  c.style.height = `${(maxY + 10) * G}px`; c.style.width = `${(maxX + 2) * G}px`;
+  c.querySelector('.hint')?.remove();
+  if (!dash.widgets.length) c.insertAdjacentHTML('beforeend', '<div class="hint">Empty dashboard. Use Add widget to place a chart or table.</div>');
 }
+function renderAll(fresh = false) {
+  const c = $('canvas');
+  c.querySelectorAll('.wd').forEach(e => e.remove());
+  for (const w of dash.widgets) c.append(widgetEl(w));
+  fitCanvas();
+  for (const w of dash.widgets) draw(w, fresh);
+}
+const cols = () => Math.max(MIN[0], Math.floor($('wrap').clientWidth / G));
 
-async function editWidget(w) {
-  const ds = ctx.cfg.datasets || [];
-  if (!ds.length) throw new Error('No datasets. Import data first.');
-  const pick = w?.dataset || ds[0].name;
-  const cols = name => (dsOf(name)?.columns || []).map(c => c.name);
-  const v = await UI.form(w ? 'Edit widget' : 'Add widget', [
-    { name: 'title', label: 'Title', value: w?.title || '' },
-    { name: 'type', label: 'Type', type: 'select', options: Object.entries(W.TYPES), value: w?.type || 'bar' },
-    { name: 'dataset', label: 'Dataset', type: 'select', options: ds.map(d => d.name), value: pick },
-    { name: 'dim', label: 'Group by column (bar / line)', type: 'select', options: ['', ...cols(pick)], value: w?.dim || '' },
-    { name: 'agg', label: 'Measure', type: 'select', options: W.AGGS, value: w?.agg || 'count' },
-    { name: 'col', label: 'Of column (blank for count of rows)', type: 'select', options: ['', ...cols(pick)], value: w?.col || '' },
-    { name: 'where', label: 'Filter (SQL condition, optional)', value: w?.where || '' },
-    { name: 'sort', label: 'Sort: "value", "label", or for tables an ORDER BY', value: w?.sort || 'value' },
-    { name: 'limit', label: 'Max rows / bars', type: 'number', value: w?.limit || 20 },
-  ], { ok: w ? 'Save' : 'Add' });
-  if (!v) return null;
-  if (v.dataset !== pick && (v.dim || v.col) && !cols(v.dataset).includes(v.dim || v.col)) UI.toast('Columns refer to the old dataset; edit again to pick columns of the new one.', 'err');
-  if ((v.type === 'bar' || v.type === 'line') && !v.dim) throw new Error('Bar and line charts need a "Group by" column.');
-  if (v.agg !== 'count' && !v.col) throw new Error(`"${v.agg}" needs a column.`);
-  return { id: w?.id || crypto.randomUUID().slice(0, 8), ...v, title: v.title || `${v.agg}${v.col ? ` of ${v.col}` : ''}${v.dim ? ` by ${v.dim}` : ''}` };
-}
-
-$('add').onclick = UI.guard(async () => {
-  const w = await editWidget(); if (!w) return;
-  dash.widgets.push(w); await save(); ctx.log(`Widget added: ${w.title}`);
-  $('board').querySelector('.empty')?.remove();
-  $('board').insertAdjacentHTML('beforeend', card(w)); await draw(w);
+// Move / resize with the pointer; both snap to the grid. A press without movement = click (opens settings).
+$('canvas').addEventListener('pointerdown', ev => {
+  const el = ev.target.closest('.wd'); if (!el || ev.button !== 0) return;
+  const w = byId(el.dataset.id), mode = ev.target.closest('.rz') ? 'size' : ev.target.closest('.wh') ? 'move' : null;
+  if (!mode) return;   // body: plain click
+  ev.preventDefault();
+  const sx = ev.clientX, sy = ev.clientY, start = { ...w };
+  const ghost = Object.assign(document.createElement('div'), { className: 'ghostbox' });
+  let moved = false;
+  const onMove = e => {
+    const dx = Math.round((e.clientX - sx) / G), dy = Math.round((e.clientY - sy) / G);
+    if (!moved && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 4) return;
+    if (!moved) { moved = true; el.classList.add('moving'); $('canvas').append(ghost); }
+    if (mode === 'move') { w.x = Math.max(0, Math.min(cols() - w.w, start.x + dx)); w.y = Math.max(0, start.y + dy); }
+    else { w.w = Math.max(MIN[0], Math.min(cols() - w.x, start.w + dx)); w.h = Math.max(MIN[1], start.h + dy); }
+    place(ghost, w);
+    const px = { left: start.x * G + (mode === 'move' ? e.clientX - sx : 0), top: start.y * G + (mode === 'move' ? e.clientY - sy : 0) };
+    Object.assign(el.style, mode === 'move' ? { left: `${px.left}px`, top: `${px.top}px` } : { width: `${Math.max(MIN[0] * G, start.w * G + e.clientX - sx)}px`, height: `${Math.max(MIN[1] * G, start.h * G + e.clientY - sy)}px` });
+  };
+  const onUp = () => {
+    removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp);
+    ghost.remove(); el.classList.remove('moving'); place(el, w);
+    if (!moved) return select(w.id);
+    fitCanvas(); save();
+    if (mode === 'size' && (w.w !== start.w || w.h !== start.h)) { const r = results.get(w.id); if (r) W.render(el.querySelector('.wb'), w, r); }
+  };
+  addEventListener('pointermove', onMove); addEventListener('pointerup', onUp);
 });
-$('board').onclick = UI.guard(async ev => {
-  const b = ev.target.closest('[data-act]'); if (!b) return;
-  const id = b.closest('.card').dataset.id, i = dash.widgets.findIndex(x => x.id === id), w = dash.widgets[i];
-  if (b.dataset.act === 'refresh') { await DNFS.remove(cachePath(w)).catch(() => {}); return draw(w); }
-  if (b.dataset.act === 'del') {
-    if (!await UI.confirm(`Remove widget "${w.title}"?`, { danger: true, ok: 'Remove' })) return;
-    dash.widgets.splice(i, 1); await save(); await DNFS.remove(cachePath(w)).catch(() => {}); return drawAll();
+$('canvas').addEventListener('click', ev => {
+  const el = ev.target.closest('.wd');
+  if (!el) return select(null);
+  if (ev.target.closest('.wb')) select(el.dataset.id);
+});
+
+// ---- add ----
+$('add').onclick = ev => { ev.stopPropagation(); $('addmenu').classList.toggle('open'); };
+addEventListener('click', () => $('addmenu').classList.remove('open'));
+$('addmenu').onclick = UI.guard(async ev => {
+  const t = ev.target.closest('[data-type]')?.dataset.type; if (!t) return;
+  $('addmenu').classList.remove('open');
+  const [cw, ch] = SIZE[t], ds = readyDs();
+  const w = { id: crypto.randomUUID().slice(0, 8), type: t, title: '', dataset: ds.length === 1 ? ds[0].name : '',
+    x: 0, y: Math.max(0, ...dash.widgets.map(o => o.y + o.h + 1)), w: Math.min(cw, cols()), h: ch };
+  if (t === 'chart') Object.assign(w, { chart: 'bar', measure: { agg: 'count', col: '' }, category: { col: '', sort: 'value', limit: 20 } });
+  else Object.assign(w, { fields: [], limit: 100 });
+  dash.widgets.push(w); await saveNow();
+  $('canvas').append(widgetEl(w)); fitCanvas(); draw(w);
+  select(w.id);
+  document.querySelector(`.wd[data-id="${w.id}"]`).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  ctx.log(`Widget added: ${t}`);
+});
+$('refresh').onclick = UI.guard(async () => { await ctx.reload(); renderAll(true); await Projects.touchModule(ctx.folder, 'dashboard'); });
+
+// ---- settings popout ----
+function select(id) {
+  selId = id;
+  document.querySelectorAll('.wd').forEach(e => e.classList.toggle('sel', e.dataset.id === id));
+  if (!id) return $('side').classList.remove('open');
+  panel(byId(id)); $('side').classList.add('open');
+}
+// A setting changed: save, update the title, re-run the widget (debounced while typing).
+const rerun = UI.debounce(w => draw(w), 350);
+function changed(w, query = true) {
+  save();
+  const el = document.querySelector(`.wd[data-id="${w.id}"]`); if (el) el.querySelector('b').textContent = titleOf(w);
+  if (query) rerun(w);
+}
+const opt = (v, label, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(label)}</option>`;
+const colOpts = (w, cur, { numeric = false, blank = '' } = {}) => (blank ? opt('', blank, cur) : opt('', 'Select a field…', cur)) +
+  (dsOf(w.dataset)?.columns || []).filter(c => !numeric || W.NUMERIC.test(c.type)).map(c => opt(c.name, c.name, cur)).join('');
+
+function panel(w) {
+  $('sTitle').textContent = w.type === 'table' ? 'Table' : 'Chart';
+  const ds = readyDs(), list = ds.some(d => d.name === w.dataset) || !w.dataset ? ds : [...ds, dsOf(w.dataset) || { name: w.dataset }];
+  let h = `<label class="field">Title<input id="pTitle" type="text" value="${esc(w.title)}" placeholder="${esc(titleOf({ ...w, title: '' }))}"></label>
+    <label class="field">Dataset<select id="pDs">${opt('', 'Select a dataset…', w.dataset)}${list.map(d => opt(d.name, d.name, w.dataset)).join('')}</select></label>`;
+  if (!ds.length) h += `<div class="muted">No ready datasets. Use Import Directly, or run the Pipeline on staged data.</div>`;
+  if (w.type === 'chart') {
+    const m = w.measure, c = w.category, numeric = m.agg === 'sum' || m.agg === 'avg';
+    const measure = `<label class="field">Aggregation<select id="pAgg">${W.AGGS.map(a => opt(a, W.AGG_LABEL[a], m.agg)).join('')}</select></label>
+      <label class="field">Field<select id="pCol">${colOpts(w, m.col, { numeric, blank: m.agg === 'count' ? 'All rows' : '' })}</select></label>`;
+    const category = `<label class="field">Field<select id="pDim">${colOpts(w, c.col)}</select></label>
+      ${w.chart === 'bar' ? `<label class="field">Order<select id="pSort">${opt('value', 'Largest first', c.sort)}${opt('label', 'A to Z', c.sort)}</select></label>` : ''}
+      <label class="field">Max ${w.chart === 'bar' ? 'bars' : 'points'}<input id="pLimit" type="number" min="1" max="1000" value="${+c.limit || 20}"></label>`;
+    h += `<div class="field"><span>Chart type</span><div class="seg" id="pChart">${Object.entries(W.CHARTS).map(([k, l]) => `<button data-v="${k}" class="${w.chart === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <h2>X axis <small class="muted" style="text-transform:none;letter-spacing:0">${w.chart === 'bar' ? 'value' : 'categories'}</small></h2>${w.chart === 'bar' ? measure : category}
+      <h2>Y axis <small class="muted" style="text-transform:none;letter-spacing:0">${w.chart === 'bar' ? 'categories' : 'value'}</small></h2>${w.chart === 'bar' ? category : measure}`;
+  } else {
+    const all = (dsOf(w.dataset)?.columns || []), on = w.fields || [];
+    const ordered = [...on.map(n => all.find(c => c.name === n)).filter(Boolean), ...all.filter(c => !on.includes(c.name))];
+    h += `<h2>Fields <small class="muted" style="text-transform:none;letter-spacing:0">tick to show, drag to order</small></h2>
+      ${all.length ? `<div class="row"><button class="ghost small" id="pAll">All</button><button class="ghost small" id="pNone">None</button></div>
+      <div class="flist" id="pFields">${ordered.map(c => `<div draggable="true" data-n="${esc(c.name)}"><span class="grip">⋮⋮</span><input type="checkbox" ${on.includes(c.name) ? 'checked' : ''}><span class="nm">${esc(c.name)}</span><small>${esc(c.type)}</small></div>`).join('')}</div>` : '<div class="muted">Choose a dataset first.</div>'}
+      <label class="field">Max rows<input id="pLimit" type="number" min="1" max="1000" value="${+w.limit || 100}"></label>`;
   }
-  const nw = await editWidget(w); if (!nw) return;
-  dash.widgets[i] = nw; await save(); await drawAll();
+  $('sBody').innerHTML = h;
+  bindPanel(w);
+}
+
+function bindPanel(w) {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('pTitle', 'input', e => { w.title = e.target.value; changed(w, false); });
+  on('pDs', 'change', e => {
+    w.dataset = e.target.value;
+    if (w.type === 'chart') { w.measure.col = ''; w.category.col = ''; } else w.fields = [];
+    changed(w); panel(w);
+  });
+  if (w.type === 'chart') {
+    $('pChart').onclick = e => { const v = e.target.closest('[data-v]')?.dataset.v; if (!v || v === w.chart) return; w.chart = v; changed(w); panel(w); };
+    on('pAgg', 'change', e => {
+      w.measure.agg = e.target.value;
+      const col = (dsOf(w.dataset)?.columns || []).find(c => c.name === w.measure.col);
+      if ((w.measure.agg === 'sum' || w.measure.agg === 'avg') && col && !W.NUMERIC.test(col.type)) w.measure.col = '';
+      changed(w); panel(w);
+    });
+    on('pCol', 'change', e => { w.measure.col = e.target.value; changed(w); });
+    on('pDim', 'change', e => { w.category.col = e.target.value; changed(w); });
+    on('pSort', 'change', e => { w.category.sort = e.target.value; changed(w); });
+    on('pLimit', 'input', e => { w.category.limit = Math.max(1, Math.min(1000, +e.target.value || 20)); changed(w); });
+  } else {
+    const list = $('pFields');
+    const sync = () => { w.fields = [...list.children].filter(r => r.querySelector('input').checked).map(r => r.dataset.n); changed(w); };
+    on('pLimit', 'input', e => { w.limit = Math.max(1, Math.min(1000, +e.target.value || 100)); changed(w); });
+    if (!list) return;
+    list.addEventListener('change', sync);
+    $('pAll').onclick = () => { list.querySelectorAll('input').forEach(i => i.checked = true); sync(); };
+    $('pNone').onclick = () => { list.querySelectorAll('input').forEach(i => i.checked = false); sync(); };
+    // Drag to reorder (drop above the row under the pointer).
+    let dragging = null;
+    list.addEventListener('dragstart', e => { dragging = e.target.closest('[data-n]'); dragging.classList.add('drag'); e.dataTransfer.effectAllowed = 'move'; });
+    list.addEventListener('dragover', e => {
+      e.preventDefault();
+      const over = e.target.closest('[data-n]');
+      list.querySelectorAll('.over').forEach(r => r.classList.remove('over'));
+      if (over && over !== dragging) over.classList.add('over');
+    });
+    list.addEventListener('drop', e => {
+      e.preventDefault();
+      const over = e.target.closest('[data-n]');
+      if (over && dragging && over !== dragging) list.insertBefore(dragging, over);
+      else if (!over && dragging) list.append(dragging);
+    });
+    list.addEventListener('dragend', () => { dragging?.classList.remove('drag'); list.querySelectorAll('.over').forEach(r => r.classList.remove('over')); dragging = null; sync(); });
+  }
+}
+$('sClose').onclick = $('sDone').onclick = () => select(null);
+addEventListener('keydown', e => { if (e.key === 'Escape' && !document.querySelector('dialog[open]')) select(null); });
+$('sDel').onclick = UI.guard(async () => {
+  const w = byId(selId); if (!w) return;
+  if (!await UI.confirm(`Delete "${titleOf(w)}"?`, { danger: true, ok: 'Delete' })) return;
+  dash.widgets = dash.widgets.filter(x => x !== w); results.delete(w.id);
+  document.querySelector(`.wd[data-id="${w.id}"]`)?.remove();
+  select(null); fitCanvas(); await saveNow(); DNFS.remove(cachePath(w)).catch(() => {});
+  ctx.log(`Widget deleted: ${titleOf(w)}`);
 });
-$('refresh').onclick = UI.guard(async () => { await ctx.reload(); await drawAll(); await Projects.touchModule(ctx.folder, 'dashboard'); });
+
+// Window resized: redraw charts at their new pixel size (from the last result, no re-query).
+addEventListener('resize', UI.debounce(() => dash.widgets.forEach(w => { const r = results.get(w.id), el = document.querySelector(`.wd[data-id="${w.id}"] .wb`); if (r && el) W.render(el, w, r); }), 200));
 
 (async () => {
   try {
+    document.documentElement.style.setProperty('--g', `${G}px`);
     ctx = await ModulePage.init('dashboard', 'Dashboard');
     await DataEngine.loadProfile();
-    try { dash = await DNFS.readJSON(FILE()); } catch { dash = { version: 1, widgets: [] }; }
-    await drawAll();
-  } catch (e) { UI.toast(e.message, 'err'); $('board').innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
+    const raw = await DNFS.readJSONOr(FILE(), null);
+    dash = raw ? migrate(raw) : { version: 2, grid: G, widgets: [] };
+    if (raw && raw.version !== 2) { await saveNow(); ctx.log('Dashboard converted to the grid layout.'); }
+    renderAll();
+  } catch (e) { UI.toast(e.message, 'err'); $('canvas').innerHTML = `<div class="hint err">${esc(e.message)}</div>`; }
 })();
 window.addEventListener('beforeunload', () => DataEngine.close());
 </script>

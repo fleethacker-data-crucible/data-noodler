@@ -10,7 +10,7 @@ const ProjectLog = (() => {
     queue = queue.then(async () => {
       const p = file(folder);
       let text = '';
-      try { text = await DNFS.readText(p); } catch {}
+      if (await DNFS.exists(p)) text = await DNFS.readText(p);   // new month/project: no file yet
       await DNFS.writeText(p, text + line);
     }).catch(e => console.warn('ProjectLog:', e.message));
     return queue;

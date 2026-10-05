@@ -34,6 +34,8 @@ const DNFS = (() => {
     readText: async path => (await call('read', { path })).text(),
     readJSON: async path => (await call('read', { path })).json(),
     readBuffer: async path => (await call('read', { path })).arrayBuffer(),
+    // Optional file (may not exist yet, e.g. a new project): fallback instead of a 404 in the server log.
+    readJSONOr: async (path, fallback) => (await DNFS.exists(path)) ? (await call('read', { path })).json() : fallback,
 
     // data: string, Blob/File, ArrayBuffer or typed array. Creates folders as needed.
     write: (path, data, { overwrite = true } = {}) =>

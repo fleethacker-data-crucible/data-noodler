@@ -28,6 +28,8 @@ Known exceptions:
 | `start-server.cmd` | Entry point. Runs `.server/server.ps1` with a hidden PowerShell window. |
 | `.server/server.ps1` | HTTP server: site (range requests, COOP/COEP, parallel static files), control panel API, file API (incl. copy), project trash, logging, browser launch. |
 | `.server/server.html` | Control panel UI (inline CSS + JS). |
+| `.server/import-api.ps1` | Import API (dot-sourced): read-only access to source files outside the project, background jobs, 10 s warn / 30 s timeout. See ARCHITECTURE.md 4b. |
+| `js/import/external-source.js` | `ExternalSource`: client for the import API (probe, read URL, copy with progress) + `verify()` (columns, types, rows, values). |
 | `config/users.json` | Shared user list (`first, middle, last, type, display`), edited in the panel's User Access dialog (`/api/users`); pages read `/config/users.json` for user drop-downs. |
 | `.server/settings.json` | Saved `port`, `page`, `fileThreads`. Written by the server. |
 | `.server/fonts/` | Exo 2 + Syne Mono for the panel. |
@@ -38,12 +40,10 @@ Known exceptions:
 | `html/thread-bench.html` | Threaded (coi) DuckDB build vs thread count. Threaded build can't load extensions in this DuckDB-WASM, so it falls back to single-threaded. |
 | `html/engine-bench.html` | Engine pool benchmark: 1–16 engines, splits, tests, Auto, Profile (saves `js/duckdb/optimal-engine-profile.json`). |
 | `html/generate-test-parquet-files.html` | Builds the 50-column test datasets in `test-data/gen/` (parallel, resumable, Verify button). |
-| `html/gpu-bench.html` | WebGPU vs DuckDB on sums, group-by and filters, with accuracy checks. |
 | `html/duckdb-test.html` | Minimal DuckEngine query test. |
 | `js/dn-fs.js` | `DNFS`: client for the project file API. |
 | `js/duckdb-engine.js` | `createDuckEngine()` / `DuckEngine`: DuckDB-WASM engine loaded from the server; reads project files over HTTP (httpfs, range requests). |
 | `js/duckdb-pool.js` | `DuckPool`: N independent engines; `run(partial, final, n)` runs on each engine's share, then combines. |
-| `js/gpu-compute.js` | `GpuCompute`: WebGPU column maths (exact integer sums, group-by, filter count). |
 | `js/mem-monitor.js` | `MemMonitor`: live memory graph (tab / browser / system vs limit), polls `/api/mem` (server reads browser process memory). |
 | `js/test-data-gen.js` | `TestDataGen`: 50-column synthetic data SQL, dataset sizes, part plans, manifests. |
 | `js/duckdb/` | DuckDB-WASM builds (`eh` single-threaded, `coi` threaded), `duckdb-config.json`, `ext/v1.5.4/<platform>/` extensions (httpfs, parquet, sqlite_scanner), `optimal-engine-profile.json`. |
@@ -51,9 +51,9 @@ Known exceptions:
 | `js/vendor/` | sql.js (`sql-wasm.js` + embedded binary), used by Import for SQLite files. |
 | `css/theme.css` | Universal dark theme for all app pages (matches the server panel). |
 | `html/home.html` | Project Management home page (default page). |
-| `html/import.html` | Import Data: upload, preview, schema edit, convert to staged Parquet. |
+| `html/import.html` | Import Data: data/raw list (watched), path import (streamed), schema edit; Stage → data/staged, Import Directly → data/source. |
 | `html/pipeline.html` | Pipeline: steps editor, preview, run. |
-| `html/dashboard.html` | Dashboard: KPI/bar/line/table widgets on the engine pool, cached. |
+| `html/dashboard.html` | Dashboard: grid canvas (20px snap), Add widget (chart/table), drag/resize, right-side settings popout; state in dashboard/dashboard.json v2. |
 | `html/publish.html` | Publish: self-contained dashboard HTML, CSV/Parquet exports. |
 | `html/update.html` | Update: detect changed sources, re-import, re-run pipeline, show changes. |
 | `html/archives.html` | Archives: snapshot, compare, restore, delete. |
@@ -61,13 +61,16 @@ Known exceptions:
 | `js/core/user-picker.js` | `UserPicker`: owner/developer drop-downs with search, fed by `config/users.json`. |
 | `js/core/projects.js` | `Projects`: project CRUD, layout, datasets, trash. |
 | `js/core/project-log.js` | `ProjectLog`: per-project monthly activity log. |
-| `js/core/windows.js` | `Windows`: module list and centered 1400×1000 module windows. |
+| `html/app.html` | App shell: global header (module initials, "Data Noodler", module · project, Server + DuckDB status) and a frame the current page loads into. `Shell.go(id, project)`, URL `app.html?m=<id>&project=`. |
+| `js/core/embed.js` | In `<head>` of home + the 6 modules: reloads into the shell if opened alone; inside it, hides the page's own logo/title and adds Back at the left of the toolbar row. |
+| `js/core/windows.js` | `Windows`: module list; opens a module in the same window as Projects (`?project=`). Back (ModulePage) returns to `home.html?project=` with it expanded. |
 | `js/core/module-page.js` | `ModulePage.init()`: shared start-up for module pages (project, header, log). |
-| `js/core/data-engine.js` | `DataEngine`: shared engine, engine count from the profile, `parallel()` row-range jobs. |
+| `js/core/data-engine.js` | `DataEngine`: shared engine, engine count from the profile, `parallel()` row-range or per-part jobs. |
+| `js/core/parquet-writer.js` | `ParquetWriter`: prescan size estimate, write one Parquet or split parts + manifest, `sql(E, d)` reader. |
 | `js/import/source-reader.js` | `SourceReader`: CSV/Parquet over HTTP, SQLite via sql.js. |
 | `js/pipeline/steps.js` | `PipelineSteps`: step types → SQL. |
 | `js/pipeline/runner.js` | `PipelineRunner`: views, run outputs, run history (used by Pipeline and Update). |
-| `js/dashboard/widgets.js` | `Widgets`: partial/final SQL per widget, SVG renderers. |
+| `js/dashboard/widgets.js` | `Widgets`: widget model (chart: bar/line, X/Y axis; table: ordered fields), `spec`/`ready`, partial/final SQL, size-aware SVG renderers. |
 | `assets/fonts/` | Exo 2 + Syne Mono for site pages. |
 | `projects/` | Analytics projects (see PROJECT_PLAN.md for the layout); `projects/.trash/` holds deleted ones. |
 | `test-data/` | Sample CSVs + `make-test-data.ps1` generator. |
@@ -128,7 +131,8 @@ page JS → DNFS.<op>()  (js/dn-fs.js, call() :9 adds X-DN-Token header)
 |---|---|---|
 | `list(path, {recursive})` | 24 | `list` |
 | `stat` / `exists` | 26–27 | `stat` |
-| `read` / `readText` / `readJSON` / `readBuffer` | 29–32 | `read` |
+| `read` / `readText` / `readJSON` / `readBuffer` | 33–36 | `read` |
+| `readJSONOr(path, fallback)`: optional file, stat first (no 404 for new projects) | 38 | `stat` + `read` |
 | `write` / `writeText` / `writeJSON` | 35–38 | `write` |
 | `upload(file, folder)` | 41 | `write` |
 | `mkdir` / `remove` / `move` | 43–45 | `mkdir` / `delete` / `move` |

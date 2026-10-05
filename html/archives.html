@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Archives</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 </head>
 <body>
@@ -31,7 +33,7 @@
 <script>
 const { $, esc } = UI;
 let ctx;
-const PARTS = ['project-config.json', 'data/staged', 'pipeline', 'dashboard']; // what a snapshot holds
+const PARTS = ['project-config.json', 'data/staged', 'data/source', 'pipeline', 'dashboard']; // what a snapshot holds
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
 
 async function snapshots() {

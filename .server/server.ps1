@@ -2,6 +2,20 @@
 # Serves the project root (one dir up) on the site port, and the control panel
 # (this folder) on the UI port. Exits when the control panel window closes.
 $ErrorActionPreference = 'Stop'
+$startSw = [Diagnostics.Stopwatch]::StartNew()   # load time, shown in the panel
+
+# Any error that would stop the server before the panel can show it: write it to the log
+# file and show a message box (the PowerShell window is hidden). No admin needed.
+function Show-Fatal([string]$text) {
+    try { [IO.File]::AppendAllText($logFile, "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  [FATAL] $text`r`n") } catch {}
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [void][System.Windows.Forms.MessageBox]::Show("Data Noodler server could not start.`n`n$text`n`nLog: $logFile", 'Data Noodler Server',
+            [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    } catch {}
+}
+trap { Show-Fatal "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"; exit 1 }
+$script:loadMs = 0
 $here = $PSScriptRoot
 $root = (Resolve-Path (Join-Path $here '..')).Path
 $uiPort = 8079
@@ -19,16 +33,26 @@ $mime = @{
 
 # --- settings ---
 # fileThreads = how many file requests are served at the same time (background runspaces).
-$settings = @{ port = 47823; page = 'html/index.html'; fileThreads = 16 }
+# portMode = 'manual' (keep port) or 'random' (new 5-digit port each launch). browser = 'edge' or 'chrome' for Open Module.
+# theme = 'dark' or 'light': one setting for every window (panel and site), so they all follow the toggle.
+$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; page = 'html/index.html'; fileThreads = 16 }
 if (Test-Path $settingsFile) {
     try {
         $j = Get-Content $settingsFile -Raw | ConvertFrom-Json
         if ($j.port) { $settings.port = [int]$j.port }
         if ($j.page) { $settings.page = [string]$j.page }
+        if ($j.portMode -in 'manual', 'random') { $settings.portMode = [string]$j.portMode }
+        if ($j.browser -in 'edge', 'chrome') { $settings.browser = [string]$j.browser }
+        if ($j.theme -in 'dark', 'light') { $settings.theme = [string]$j.theme }
         if ($j.fileThreads) { $settings.fileThreads = [Math]::Max(1, [Math]::Min(64, [int]$j.fileThreads)) }
     } catch {}
 }
 function Save-Settings { $settings | ConvertTo-Json | Set-Content $settingsFile -Encoding UTF8 }
+# Light/dark for every window; saved so windows opened later use it too.
+function Set-Theme([string]$t) {
+    if ($t -notin 'dark', 'light') { throw 'Theme must be dark or light.' }
+    if ($settings.theme -ne $t) { $settings.theme = $t; Save-Settings }
+}
 
 # --- log ---
 $log = [System.Collections.Generic.List[object]]::new()
@@ -68,7 +92,8 @@ $tokenTag = "<script>window.DN_TOKEN='$fsToken'</script>"
 # Streams a file to the response; returns bytes sent.
 # Honours a single "Range: bytes=a-b" request (206) so DuckDB can read only the
 # parts of a Parquet file it needs, and HEAD (headers only).
-function Send-Stream($res, $path, $req) {
+# $prog (optional, synchronized hashtable): .at / .done are updated per chunk so a stalled read can be detected.
+function Send-Stream($res, $path, $req, $prog) {
     $ext = [IO.Path]::GetExtension($path).ToLower()
     $res.ContentType = if ($mime[$ext]) { $mime[$ext] } else { 'application/octet-stream' }
     $res.Headers['Cache-Control'] = 'no-store'
@@ -105,6 +130,7 @@ function Send-Stream($res, $path, $req) {
             if ($n -le 0) { break }
             $res.OutputStream.Write($buf, 0, $n)
             $left -= $n
+            if ($prog) { $prog.at = [DateTime]::UtcNow; $prog.done = $count - $left }
         }
         return $count - $left
     } finally { $fs.Dispose() }
@@ -146,7 +172,8 @@ Remove-Item (Join-Path $root 'temp\upload-*.tmp') -Force -ErrorAction SilentlyCo
 
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("http://localhost:$uiPort/")
-$listener.Start()
+try { $listener.Start() }
+catch { Show-Fatal "Control panel port $uiPort is in use or blocked: $($_.Exception.Message)"; exit 1 }
 
 function Test-PortFree([int]$p) {
     try { $t = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $p); $t.Start(); $t.Stop(); $true } catch { $false }
@@ -154,7 +181,7 @@ function Test-PortFree([int]$p) {
 
 # Moves the site to port $p (rebinding if the site is running).
 function Set-SitePort([int]$p) {
-    if ($p -lt 1 -or $p -gt 65535) { throw 'Port must be 1-65535.' }
+    if ($p -ne 80 -and ($p -lt 1024 -or $p -gt 65535)) { throw 'Port must be 1024-65535 (or 80). Ports below 1024 are reserved for the system.' }
     if ($p -eq $uiPort) { throw "Port $uiPort is used by the control panel." }
     if ($script:siteUp -and $p -ne $settings.port) {
         $old = "http://localhost:$($settings.port)/"
@@ -169,6 +196,16 @@ function Set-SitePort([int]$p) {
     $settings.port = $p
 }
 
+# A free 5-digit port (10000-65535), other than the current one.
+function Get-RandomPort {
+    for ($n = 0; $n -lt 25; $n++) {
+        $c = Get-Random -Minimum 10000 -Maximum 65536
+        if ($c -ne $settings.port -and (Test-PortFree $c)) { return $c }
+    }
+    throw 'Could not find a free port.'
+}
+if ($settings.portMode -eq 'random') { try { $settings.port = Get-RandomPort; Save-Settings } catch {} }
+
 function Start-Site {
     if ($script:siteUp) { return }
     try { $listener.Prefixes.Add("http://localhost:$($settings.port)/") }
@@ -176,6 +213,29 @@ function Start-Site {
     $script:siteUp = $true
     $script:siteStarted = Get-Date
     Add-Log 'start' 'SERVER STARTED'; Add-Log 'sys' "Site online. Serving $($settings.page) at http://localhost:$($settings.port)/"
+}
+
+# Opens the selected module in $name (default: the Settings browser). Returns an error message or $null.
+# $page (optional, e.g. 'html/engine-bench.html'): open that page instead, for testing; the default is unchanged.
+# Pages that live in the app shell (they load js/core/embed.js) open as html/app.html?m=<name> directly,
+# so the browser doesn't load the page, get redirected and cancel its half-loaded files.
+function Get-ShellUrl([string]$page) {
+    $file = Join-Path $root $page
+    if ((Test-Path $file -PathType Leaf) -and (Select-String -LiteralPath $file -Pattern 'core/embed.js' -SimpleMatch -Quiet)) {
+        return "html/app.html?m=$([IO.Path]::GetFileNameWithoutExtension($page))"
+    }
+    return $page
+}
+
+function Open-Site([string]$name, [string]$page) {
+    if (-not $name) { $name = $settings.browser }
+    if ($page -and ($page -notmatch '^html/[\w.-]+\.html$' -or -not (Test-Path (Join-Path $root $page) -PathType Leaf))) { return "$page not found." }
+    $exe = if ($browsers.ContainsKey($name)) { Find-Browser $name }
+    if (-not $script:siteUp) { return 'Start the server first.' }
+    if (-not $exe) { Add-Log 'err' "Browser '$name' not found."; return "$name is not installed." }
+    Raise-Window (Open-App $exe "http://localhost:$($settings.port)/$(Get-ShellUrl $(if ($page) { $page } else { $settings.page }))" ".profile-site-$name")
+    Add-Log 'sys' "Opened $(if ($page) { "$page (test)" } else { $settings.page }) in $name."
+    return $null
 }
 
 function Stop-Site {
@@ -197,7 +257,8 @@ function Handle-Ui($req, $res, $rel) {
     switch ($rel) {
         'api/state' {
             Send-Json $res @{
-                port = $settings.port; page = $settings.page; up = $script:siteUp; root = $root
+                ps = "$($PSVersionTable.PSVersion)"; loadMs = $script:loadMs; theme = $settings.theme
+                port = $settings.port; portMode = $settings.portMode; browser = $settings.browser; page = $settings.page; up = $script:siteUp; root = $root
                 pages = Get-Pages; hits = $script:hits; uptime = $(if ($script:siteUp) { [int]((Get-Date) - $script:siteStarted).TotalSeconds } else { 0 })
             }
         }
@@ -208,13 +269,16 @@ function Handle-Ui($req, $res, $rel) {
         'api/settings' {
             $body = Read-Json $req
             try {
-                Set-SitePort ([int]$body.port)
+                if ($body.port) { Set-SitePort ([int]$body.port) }
+                if ($body.portMode) { if ($body.portMode -notin 'manual', 'random') { throw 'Invalid port mode.' }; $settings.portMode = [string]$body.portMode }
+                if ($body.browser) { if ($body.browser -notin 'edge', 'chrome') { throw 'Invalid browser.' }; $settings.browser = [string]$body.browser }
+                if ($body.theme) { Set-Theme ([string]$body.theme) }
                 if ($body.page) {
                     if (-not (Test-Path (Join-Path $root $body.page) -PathType Leaf)) { throw "$($body.page) not found." }
                     $settings.page = [string]$body.page
                 }
                 Save-Settings
-                Add-Log 'sys' "Settings applied: page $($settings.page), port $($settings.port)"
+                if ($body.port -or $body.page -or $body.portMode -or $body.browser) { Add-Log 'sys' "Settings applied: page $($settings.page), port $($settings.port) ($($settings.portMode)), browser $($settings.browser)" }
                 Send-Json $res @{ ok = $true }
             } catch {
                 Add-Log 'err' $_.Exception.Message
@@ -223,12 +287,7 @@ function Handle-Ui($req, $res, $rel) {
         }
         'api/random' {
             try {
-                $p = 0
-                for ($n = 0; $n -lt 25 -and -not $p; $n++) {
-                    $c = Get-Random -Minimum 20000 -Maximum 60000
-                    if ($c -ne $settings.port -and (Test-PortFree $c)) { $p = $c }
-                }
-                if (-not $p) { throw 'Could not find a free port.' }
+                $p = Get-RandomPort
                 Set-SitePort $p
                 Save-Settings
                 Add-Log 'sys' "Random port: now on http://localhost:$p/"
@@ -240,7 +299,7 @@ function Handle-Ui($req, $res, $rel) {
         }
         'api/site' {
             try {
-                if ((Read-Json $req).on) { Start-Site } else { Stop-Site }
+                if ((Read-Json $req).on) { Start-Site; Open-Site | Out-Null } else { Stop-Site }
                 Send-Json $res @{ ok = $true }
             } catch {
                 Add-Log 'err' $_.Exception.Message
@@ -249,19 +308,13 @@ function Handle-Ui($req, $res, $rel) {
         }
         'api/clientlog' {
             $body = Read-Json $req
-            Add-Log $(if ($body.level -eq 'err') { 'err' } else { 'client' }) ([string]$body.text)
+            Add-Log $(if ($body.level -in 'err', 'duck') { $body.level } else { 'client' }) ([string]$body.text)
             Send-Json $res @{ ok = $true }
         }
         'api/open' {
-            $name = [string](Read-Json $req).browser
-            $exe = if ($browsers.ContainsKey($name)) { Find-Browser $name }
-            if (-not $script:siteUp) { Send-Json $res @{ ok = $false; error = 'Start the server first.' } }
-            elseif (-not $exe) { Add-Log 'err' "Browser '$name' not found."; Send-Json $res @{ ok = $false; error = "$name is not installed." } }
-            else {
-                Raise-Window (Open-App $exe "http://localhost:$($settings.port)/" ".profile-site-$name")
-                Add-Log 'sys' "Opened site in $name."
-                Send-Json $res @{ ok = $true }
-            }
+            $body = Read-Json $req
+            $err = Open-Site ([string]$body.browser) ([string]$body.page)
+            Send-Json $res $(if ($err) { @{ ok = $false; error = $err } } else { @{ ok = $true } })
         }
         'api/clear' { $log.Clear(); Send-Json $res @{ ok = $true } }
         # User list shared by the whole project: config/users.json (site pages read it at /config/users.json).
@@ -282,7 +335,9 @@ function Handle-Ui($req, $res, $rel) {
         'api/bye'   { $script:byeAt = (Get-Date).AddSeconds(4); Send-Json $res @{ ok = $true } }
         default {
             if ($rel -eq '') { $rel = 'server.html' }
-            if ((Send-File $res $here $rel) -lt 0) { $res.StatusCode = 404 }
+            # The panel's DuckDB check loads the engine from the project's js/ folder.
+            $base = if ($rel -eq 'js/duckdb-engine.js' -or $rel -like 'js/duckdb/*') { $root } else { $here }
+            if ((Send-File $res $base $rel) -lt 0) { $res.StatusCode = 404 }
         }
     }
 }
@@ -294,6 +349,36 @@ function Handle-Ui($req, $res, $rel) {
 # symlinks) that could point outside. Requests must come from this site with the token.
 
 class FsError : Exception { [int]$Code; FsError([int]$c, [string]$m) : base($m) { $this.Code = $c } }
+
+# Drive part of a path: "X:" or "\\server\share".
+function Get-DriveName([string]$path) {
+    if ($path -match '^(\\\\[^\\]+\\[^\\]+)') { return $Matches[1] }
+    if ($path -match '^([A-Za-z]:)') { return $Matches[1] }
+    return $path
+}
+
+# Turns a .NET file error into a plain-English FsError: permission denied, not found,
+# drive unavailable, file in use, or a read/write error. $what = 'read' / 'write' / ...
+function ConvertTo-FsError($err, [string]$path, [string]$what) {
+    if ($err -is [FsError]) { return $err }
+    $code = $err.HResult -band 0xFFFF
+    $drive = Get-DriveName $path
+    if ($drive -ne $path -and $err.GetType().Name -match 'NotFound' -and -not [IO.Directory]::Exists("$drive\")) {
+        return [FsError]::new(503, "Drive $drive is not available (disconnected, not mapped or not responding).")
+    }
+    switch -Regex ($err.GetType().Name) {
+        'UnauthorizedAccess' { return [FsError]::new(403, "Permission denied ($what): $path") }
+        'DirectoryNotFound' { return [FsError]::new(404, "Folder not found: $(Split-Path $path)") }
+        'FileNotFound' { return [FsError]::new(404, "File not found: $path") }
+        'DriveNotFound' { return [FsError]::new(503, "Drive $drive is not available.") }
+    }
+    # Win32 codes: 53/67/64/59/1231 = network path gone, 21 = device not ready, 32/33 = in use.
+    if ($code -in 53, 67, 64, 59, 1231, 21) { return [FsError]::new(503, "Drive $drive is not available (network or device not responding).") }
+    if ($code -in 32, 33) { return [FsError]::new(423, "File is in use by another program ($what): $path") }
+    if ($code -eq 5) { return [FsError]::new(403, "Permission denied ($what): $path") }
+    if ($code -eq 112) { return [FsError]::new(507, "Disk full ($what): $path") }
+    return [FsError]::new(500, "Error during $what of ${path}: $($err.Message)")
+}
 
 # Resolves a relative project path to a full path, or throws FsError.
 function Resolve-ProjectPath([string]$rel, [switch]$AllowRoot) {
@@ -428,15 +513,22 @@ $staticJobs = [Collections.Generic.List[object]]::new()
 $staticScript = {
     param($ctx, $path, $logPath)
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $req = $ctx.Request; $res = $ctx.Response; $size = 0
+    $req = $ctx.Request; $res = $ctx.Response; $size = 0; $err = $null
     try {
         $res.AddHeader('Cross-Origin-Opener-Policy', 'same-origin')
         $res.AddHeader('Cross-Origin-Embedder-Policy', 'require-corp')
         $res.AddHeader('Cross-Origin-Resource-Policy', 'same-origin')
         $size = Send-Stream $res $path $req
-    } catch { try { $res.StatusCode = 500 } catch {} }
+    } catch {
+        $e = $_.Exception; while ($e.InnerException) { $e = $e.InnerException }
+        $err = $e; try { $res.StatusCode = 500 } catch {}
+    }
     finally { try { $res.Close() } catch {} }
-    @{ p = $logPath; c = $res.StatusCode; m = $req.HttpMethod; s = $size; ms = $sw.ElapsedMilliseconds }
+    # A dropped connection (browser cancelled the read, e.g. the page navigated away) is normal, not an error.
+    $cancelled = $err -is [Net.HttpListenerException] -or $err -is [ObjectDisposedException]
+    if ($cancelled) { $logPath += ' (cancelled by browser)' }
+    @{ p = $logPath; c = $(if ($cancelled) { '---' } else { $res.StatusCode }); m = $req.HttpMethod; s = $size; ms = $sw.ElapsedMilliseconds; path = $path
+       err = $(if ($err -and -not $cancelled) { $err }) }
 }
 
 # Full path of a plain static file under the root, or $null (html, missing, dot-folders, outside root).
@@ -459,11 +551,20 @@ function Complete-StaticJobs {
     for ($i = $staticJobs.Count - 1; $i -ge 0; $i--) {
         $j = $staticJobs[$i]
         if (-not $j.handle.IsCompleted) { continue }
-        try { $r = $j.ps.EndInvoke($j.handle) | Select-Object -Last 1; if ($r) { Add-Log 'req' $r.p $r.c $r.m $r.s $r.ms } }
+        try {
+            $r = $j.ps.EndInvoke($j.handle) | Select-Object -Last 1
+            if ($r) {
+                Add-Log 'req' $r.p $r.c $r.m $r.s $r.ms
+                if ($r.err) { Add-Log 'err' "File read $($r.p): $((ConvertTo-FsError $r.err $r.path 'read').Message)" }
+            }
+        }
         catch { Add-Log 'err' "Static file: $($_.Exception.Message)" }
         $j.ps.Dispose(); $staticJobs.RemoveAt($i)
     }
 }
+
+# --- import api (source files outside the project) ---
+. (Join-Path $here 'import-api.ps1')
 
 # Returns $true if the request was handed to a background job (which closes the response itself).
 # --- browser memory (engine-bench live graph) ---
@@ -504,6 +605,34 @@ function Handle-Site($req, $res, $rel, $ctx) {
     $res.AddHeader('Cross-Origin-Opener-Policy', 'same-origin')
     $res.AddHeader('Cross-Origin-Embedder-Policy', 'require-corp')
     $res.AddHeader('Cross-Origin-Resource-Policy', 'same-origin')
+    # Reading source files from outside the project (import). Background jobs own their responses.
+    if ($rel.StartsWith('api/import/')) {
+        $op = $rel.Substring(11)
+        try { if (Handle-Import $req $res $op $ctx) { return $true } }
+        catch {
+            $err = $_.Exception; while ($err -isnot [FsError] -and $err.InnerException) { $err = $err.InnerException }
+            $err = ConvertTo-FsError $err ([string]$req.QueryString['src']) $op
+            try { $res.StatusCode = $err.Code; Send-Json $res @{ ok = $false; error = $err.Message } } catch {}
+            Add-Log 'err' "Import ($op): $($err.Message)"
+        }
+        Add-Log 'req' (Get-ImportLogPath $req) $res.StatusCode $req.HttpMethod 0 $sw.ElapsedMilliseconds
+        return $false
+    }
+    # Light/dark toggle from the app header (the panel uses /api/settings).
+    if ($rel -eq 'api/theme') {
+        if (-not (Test-FsRequest $req) -or $req.HttpMethod -ne 'POST') { $res.StatusCode = 403; return $false }
+        try { Set-Theme ([string]$req.QueryString['theme']); Send-Json $res @{ ok = $true; theme = $settings.theme } }
+        catch { $res.StatusCode = 400; Send-Json $res @{ ok = $false; error = $_.Exception.Message } }
+        return $false
+    }
+    # App shell header status, polled every 5 s: not logged.
+    if ($rel -eq 'api/status') {
+        if (Test-FsRequest $req) {
+            Send-Json $res @{ ok = $true; ps = "$($PSVersionTable.PSVersion)"; port = $settings.port; theme = $settings.theme
+                              uptime = [int]((Get-Date) - $script:siteStarted).TotalSeconds }
+        } else { $res.StatusCode = 403 }
+        return $false
+    }
     # Polled 4x a second by the memory graph: not logged.
     if ($rel -eq 'api/mem') {
         try { if (Test-FsRequest $req) { Send-Json $res (Get-BrowserMem) } else { $res.StatusCode = 403 } } catch { $res.StatusCode = 500 }
@@ -533,18 +662,21 @@ function Handle-Site($req, $res, $rel, $ctx) {
         $size = 0
     }
     elseif ($rel.StartsWith('api/fs/')) {
-        try { $size = Handle-Fs $req $res $rel.Substring(7) }
+        $op = $rel.Substring(7)
+        try { $size = Handle-Fs $req $res $op }
         catch {
             $err = $_.Exception
-            if ($err -is [Management.Automation.RuntimeException] -and $err.InnerException) { $err = $err.InnerException }
-            try { $res.StatusCode = if ($err -is [FsError]) { $err.Code } else { 500 } } catch {}
-            Add-Log 'err' "File API: $($err.Message)"
+            while ($err -isnot [FsError] -and $err.InnerException) { $err = $err.InnerException }
+            $q = $req.QueryString; $target = @($q['path'], $q['from'], $q['to']) -ne $null -join ' -> '
+            $err = ConvertTo-FsError $err $target $op
+            try { $res.StatusCode = $err.Code } catch {}
+            Add-Log 'err' "File API ($op): $($err.Message)"
             try { Send-Json $res @{ ok = $false; error = $err.Message } } catch {}
             $size = 0
         }
     }
     # "/" redirects to the chosen page so its relative links (../js, ../fonts) resolve.
-    elseif ($rel -eq '') { $res.Redirect("/$($settings.page)"); $size = 0 }
+    elseif ($rel -eq '') { $res.Redirect("/$(Get-ShellUrl $settings.page)"); $size = 0 }
     else {
         $size = Send-File $res $root $rel -Token -req $req
         if ($size -lt 0) { $res.StatusCode = 404; $size = 0 }
@@ -633,12 +765,14 @@ if ($browser) { Open-App $browser $uiUrl '.profile' | Out-Null } else { Start-Pr
 $script:running = $true
 $script:byeAt = $null
 $lastBeat = $null
+$autoStartAt = $null; $autoStartDone = $false
 $deadline = (Get-Date).AddSeconds(60)   # panel must connect within this
 $pending = $listener.GetContextAsync()
+$script:loadMs = $startSw.ElapsedMilliseconds
 try {
     while ($script:running) {
         # Poll faster while background file jobs are running so their log lines appear promptly.
-        if ($pending.Wait($(if ($staticJobs.Count) { 10 } else { 250 }))) {
+        if ($pending.Wait($(if ($staticJobs.Count -or $importJobs.Count) { 10 } else { 250 }))) {
             $ctx = $pending.Result
             $pending = $listener.GetContextAsync()
             $req = $ctx.Request; $res = $ctx.Response
@@ -659,6 +793,20 @@ try {
             }
         }
         if ($staticJobs.Count) { Complete-StaticJobs }
+        if ($importJobs.Count) { Watch-ImportJobs }
+        # Auto start: 2 s after the panel first connects (so its notifications show), start the site
+        # if a module is selected; otherwise say why not.
+        if ($lastBeat -and -not $autoStartDone) {
+            if (-not $autoStartAt) { $autoStartAt = (Get-Date).AddSeconds(2); Add-Log 'sys' 'Auto start in 2 s...' }
+            elseif ((Get-Date) -ge $autoStartAt) {
+                $autoStartDone = $true
+                if ($settings.page -and (Test-Path (Join-Path $root $settings.page) -PathType Leaf)) {
+                    try { Start-Site; Open-Site | Out-Null } catch { Add-Log 'err' "Auto start failed: $($_.Exception.Message)" }
+                } else {
+                    Add-Log 'warn' 'No module selected. Auto start aborted. Pick one under Modules, then Start server.'
+                }
+            }
+        }
         $now = Get-Date
         if ($script:byeAt -and $now -gt $script:byeAt) { break }
         if ($lastBeat -and ($now - $lastBeat).TotalSeconds -gt 120) { break }   # throttled/minimized tabs poll slowly
@@ -669,6 +817,7 @@ try {
 } finally {
     Add-Log 'sys' 'Server stopped.'
     try { $staticPool.Close(); $staticPool.Dispose() } catch {}
+    try { $importPool.Close(); $importPool.Dispose() } catch {}
     $listener.Stop()
     $listener.Close()
     if ((Get-Content $pidFile -ErrorAction SilentlyContinue) -eq "$PID") { Remove-Item $pidFile -ErrorAction SilentlyContinue }

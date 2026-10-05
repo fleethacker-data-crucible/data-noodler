@@ -1,5 +1,6 @@
 {
   "threads": 1,
   "memoryLimitGB": 3,
-  "build": "eh"
+  "build": "eh",
+  "partMB": 256
 }

@@ -1,6 +1,7 @@
 // Reads source files for Import. Global: SourceReader.
 //   SourceReader.kind('data/source/a.csv')        'csv' | 'parquet' | 'sqlite' | null
 //   const s = await SourceReader.open(engine, path) { kind, tables, sql(table) }  sql() = a SQL source for the table
+//   const s = await SourceReader.openUrl(engine, url, fileName)   same, for a file outside the project (ExternalSource.url)
 //   await SourceReader.schema(engine, sourceSql)   [{ name, type }]
 // CSV and Parquet are read over HTTP (range requests).
 // SQLite: DuckDB-WASM's sqlite extension cannot open files in this build, so the vendored sql.js reads the
@@ -24,9 +25,10 @@ const SourceReader = (() => {
   const duckType = t => { t = (t || '').toUpperCase(); return /INT/.test(t) ? 'BIGINT' : /CHAR|CLOB|TEXT/.test(t) ? 'VARCHAR' : /REAL|FLOA|DOUB/.test(t) ? 'DOUBLE' : /DEC|NUM/.test(t) ? 'DOUBLE' : /BOOL/.test(t) ? 'BOOLEAN' : /DATE|TIME/.test(t) ? 'VARCHAR' : 'VARCHAR'; };
   const csvCell = v => v == null ? '\\N' : typeof v === 'number' ? String(v) : v instanceof Uint8Array ? '"' + btoa(String.fromCharCode(...v)) + '"' : '"' + String(v).replace(/"/g, '""') + '"';
 
-  async function openSqlite(e, path) {
+  // load() -> ArrayBuffer of the whole database file.
+  async function openSqlite(e, load) {
     const SQL = await getSqlJs(), id = ++opened;
-    const db = new SQL.Database(new Uint8Array(await DNFS.readBuffer(path)));
+    const db = new SQL.Database(new Uint8Array(await load()));
     const tables = (db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY 1")[0]?.values || []).map(r => r[0]);
     const done = new Map();
     async function sql(t) {
@@ -49,8 +51,15 @@ const SourceReader = (() => {
     const url = e.url(path);
     if (k === 'csv') return { kind: k, tables: [''], sql: () => `read_csv('${url}', auto_detect = true, sample_size = 100000)` };
     if (k === 'parquet') return { kind: k, tables: [''], sql: () => `read_parquet('${url}')` };
-    return openSqlite(e, path);
+    return openSqlite(e, () => DNFS.readBuffer(path));
+  }
+  // A file outside the project, read in place over HTTP (ExternalSource.url). kind comes from the original file name.
+  async function openUrl(e, url, fileName) {
+    const k = kind(fileName); if (!k) throw new Error(`Unsupported file type: ${fileName}`);
+    if (k === 'csv') return { kind: k, tables: [''], sql: () => `read_csv('${url}', auto_detect = true, sample_size = 100000)` };
+    if (k === 'parquet') return { kind: k, tables: [''], sql: () => `read_parquet('${url}')` };
+    return openSqlite(e, async () => { const r = await fetch(url); if (!r.ok) throw new Error(`Could not read ${fileName} (HTTP ${r.status})`); return r.arrayBuffer(); });
   }
   const schema = async (e, src) => (await e.query(`DESCRIBE SELECT * FROM ${src}`)).rows.map(r => ({ name: r[0], type: r[1] }));
-  return { kind, open, schema, quote: q };
+  return { kind, open, openUrl, schema, quote: q };
 })();

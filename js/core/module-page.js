@@ -2,6 +2,7 @@
 //   const ctx = await ModulePage.init('import', 'Import Data')
 //   ctx = { folder, cfg, dir, log(msg, level), reload() }
 // Fills the page header (#title, #sub), reads ?project=<folder>, and writes to the project log.
+// Inside the app shell, the shell's global header shows the module title and project name instead.
 const ModulePage = {
   async init(module, title) {
     const folder = UI.params().project;
@@ -13,6 +14,7 @@ const ModulePage = {
     try { cfg = await Projects.get(folder); }
     catch { set('sub', `Project "${folder}" not found.`); throw new Error(`Project "${folder}" not found.`); }
     set('sub', `${cfg.name} · projects/${folder}`);
+    try { window.parent.Shell?.setInfo(title, cfg.name); } catch {}
     document.title = `${title} · ${cfg.name}`;
     const ctx = {
       folder, cfg, module, dir: Projects.dir(folder),

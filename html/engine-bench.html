@@ -31,7 +31,7 @@
   button { padding: 4px 10px; }
   input[type=number] { width: 52px; }
   .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px; }
-  .box { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  .box { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; }
   #env { font-size: 13px; color: var(--text-2); margin-bottom: 10px; }
   #bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin: 6px 0; }
   #fill { height: 100%; width: 0; background: var(--s1); transition: width .15s; }
@@ -308,7 +308,7 @@ async function autoPlan(ds, rows, tests) {
 // tests.<id>.entries["<source>:<rows>"] = { rows, source, dataset, timings: { "<engines>": best median ms }, engines, ms, rowsPerSec }
 // Each profile run keeps the fastest time seen for every engine count, so repeated runs refine it.
 const PROFILE = 'js/duckdb/optimal-engine-profile.json';
-const loadProfile = async () => { try { return await DNFS.readJSON(PROFILE); } catch { return { version: 1, tests: {} }; } };
+const loadProfile = async () => { try { return await DNFS.readJSONOr(PROFILE, { version: 1, tests: {} }); } catch { return { version: 1, tests: {} }; } };
 async function saveProfile(ds, res) {
   const p = await loadProfile(), now = new Date().toISOString(), source = res.inMem ? 'memory' : 'http';
   Object.assign(p, { version: 1, cores, updated: now, about: 'Fastest DuckDB engine count per test and row count, measured by engine-bench.html. Auto picks the entry nearest the row count.' });

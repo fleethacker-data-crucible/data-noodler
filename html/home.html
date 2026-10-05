@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Data Noodler</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   .detail td { background: var(--panel) !important; white-space: normal; padding: 12px 16px 14px; }
@@ -21,12 +23,6 @@
     <div class="brand">
       <span class="logo">DN</span>
       <div><h1>Data Noodler</h1><div class="sub">Project Management</div></div>
-    </div>
-    <div class="spacer"></div>
-    <div class="stats">
-      <div class="stat"><label>Projects</label><b id="s-total">0</b></div>
-      <div class="stat"><label>Active</label><b id="s-active">0</b></div>
-      <div class="stat"><label>Datasets</label><b id="s-ds">0</b></div>
     </div>
   </header>
   <div class="main">
@@ -62,7 +58,8 @@
 <script src="../js/core/windows.js"></script>
 <script>
 const { $, esc } = UI, P = Projects;
-let projects = [], sortKey = 'modified', sortDir = -1, open = null;
+// open = expanded project; Back from a module returns here with ?project=<folder> so it stays expanded.
+let projects = [], sortKey = 'modified', sortDir = -1, open = UI.params().project || null;
 // Filters: [value, label] lists from Projects.
 const fill = (id, list) => list.forEach(([v, l]) => $(id).insertAdjacentHTML('beforeend', `<option value="${esc(v === '' ? '-' : v)}">${esc(l)}</option>`));
 fill('fPhase', P.PHASE); fill('fStatus', P.STATUS); fill('fClass', P.CLASSIFICATION);
@@ -80,9 +77,6 @@ function render() {
     .filter(p => (!fp || p.phase === fp) && (!fs || String(p.status) === fs) && (!fc || p.classification === fc))
     .filter(p => !q || [p.name, p.owner, p.description, ...(p.tags || [])].join(' ').toLowerCase().includes(q))
     .sort((a, b) => { const x = val(a, sortKey), y = val(b, sortKey); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
-  $('s-total').textContent = projects.length;
-  $('s-active').textContent = projects.filter(p => ['planning', 'development', 'testing'].includes(p.phase)).length;
-  $('s-ds').textContent = projects.reduce((s, p) => s + (p.datasets?.length || 0), 0);
   document.querySelectorAll('th.sort').forEach(th => th.innerHTML = th.textContent.replace(/[▲▼]/g, '').trim() + (th.dataset.k === sortKey ? ` <span class="arrow">${sortDir > 0 ? '▲' : '▼'}</span>` : DATES.includes(th.dataset.k) ? ' <span class="arrow off">▼</span>' : ''));
   const body = $('tbl').querySelector('tbody');
   if (!list.length) { body.innerHTML = `<tr><td colspan="${COLS}" class="empty">${projects.length ? 'No projects match the filters.' : 'No projects yet. Click <b>New project</b> to create one.'}</td></tr>`; return; }
@@ -119,7 +113,7 @@ $('refresh').onclick = load;
 document.querySelectorAll('th.sort').forEach(th => th.onclick = () => { sortDir = sortKey === th.dataset.k ? -sortDir : DATES.includes(th.dataset.k) ? -1 : 1; sortKey = th.dataset.k; render(); });
 $('tbl').onclick = UI.guard(async ev => {
   const mod = ev.target.closest('[data-mod]'), act = ev.target.closest('[data-act]');
-  if (mod) { if (!Windows.open(mod.dataset.mod, open)) UI.toast('Could not open the window (pop-ups blocked?)', 'err'); return; }
+  if (mod) { Windows.open(mod.dataset.mod, open); return; }
   if (act) return actions[act.dataset.act](projects.find(p => p.folder === open));
   const tr = ev.target.closest('tr.click'); if (!tr) return;
   open = open === tr.dataset.f ? null : tr.dataset.f; render();

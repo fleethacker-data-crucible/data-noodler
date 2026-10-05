@@ -165,6 +165,14 @@ const createDuckEngine = (() => {
         return { path, bytes: buf.length, ms: performance.now() - t0 };
       },
 
+      // Size in bytes of a query result written with these COPY options (written in memory, then dropped).
+      // Used by ParquetWriter's prescan on a sample of rows.
+      async outputBytes(sql, options = 'FORMAT PARQUET, COMPRESSION ZSTD') {
+        const tmp = 'probe-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.bin';
+        await conn.query(`COPY (${strip(sql)}) TO '${tmp}' (${options})`);
+        try { return (await db.copyFileToBuffer(tmp)).length; } finally { await db.dropFile(tmp).catch(() => {}); }
+      },
+
       // DuckDB buffer memory: { used, limit } in bytes
       async mem() {
         const u = (await conn.query('SELECT sum(memory_usage_bytes)::DOUBLE u FROM duckdb_memory()')).toArray()[0].u;

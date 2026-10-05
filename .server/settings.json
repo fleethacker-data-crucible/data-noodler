@@ -1,5 +1,8 @@
 ﻿{
-    "port":  54611,
+    "port":  54979,
     "fileThreads":  16,
-    "page":  "html/home.html"
+    "browser":  "edge",
+    "page":  "html/home.html",
+    "portMode":  "random",
+    "theme":  "dark"
 }

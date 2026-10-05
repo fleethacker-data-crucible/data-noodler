@@ -58,7 +58,6 @@ projects/
 - **Optimal engine profile** (`js/duckdb/optimal-engine-profile.json`): measured by `html/engine-bench.html` (Profile) on the generated test datasets, best engine count per query kind (scan, group, distinct, sort, join, window) and row count. `js/core/data-engine.js` picks the engine count from the entry nearest the row count.
 - **Server:** HTTP range requests (206), `Last-Modified`/`ETag`, COOP/COEP headers, and up to `fileThreads` (16) file requests served in parallel.
 - **SQLite:** DuckDB's sqlite extension cannot open files in DuckDB-WASM, so Import reads SQLite with the vendored sql.js and hands tables to DuckDB as typed CSV (limited by browser memory).
-- **GPU (WebGPU):** works on this machine and is 5–18× faster than DuckDB for numeric aggregates on data already on the GPU; exact only with integer cents (no 64-bit floats). Candidate for interactive dashboard filtering later (`js/gpu-compute.js`, `html/gpu-bench.html`).
 - **Known limits:** ~4 GB per engine, little disk spilling; CSV is read whole at import; very large single-step outputs are built in memory before upload.
 
 ## Phases
@@ -105,7 +104,6 @@ projects/
 - [ ] Run every module in real Chrome/Edge windows (the built-in test pane cannot open pop-ups)
 - [ ] Large-file paths: chunked writes for outputs over ~1 GB, CSV imports of multi-GB files
 - [ ] Use the engine profile in Pipeline runs (today: single engine)
-- [ ] GPU path for dashboard filtering
 
 ## Working rules
 

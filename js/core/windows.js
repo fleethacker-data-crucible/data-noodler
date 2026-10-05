@@ -1,25 +1,22 @@
-// Module windows. Global: Windows.
-// Each module opens as its own 1400x1000 window centered on the screen, with ?project=<folder>.
+// Module navigation. Global: Windows.
+// Modules load inside the app shell (html/app.html) under its global header, in the same window.
+// initials = the header logo while that module is shown.
 const Windows = (() => {
   const MODULES = [
-    { id: 'import', label: 'Import Data', page: 'import.html', enabled: true },
-    { id: 'pipeline', label: 'Pipeline', page: 'pipeline.html', enabled: true },
-    { id: 'dashboard', label: 'Dashboard', page: 'dashboard.html', enabled: true },
-    { id: 'publish', label: 'Publish', page: 'publish.html', enabled: true },
-    { id: 'update', label: 'Update', page: 'update.html', enabled: true },
-    { id: 'archives', label: 'Archives', page: 'archives.html', enabled: true },
+    { id: 'import', label: 'Import Data', page: 'import.html', initials: 'IM', enabled: true },
+    { id: 'pipeline', label: 'Pipeline', page: 'pipeline.html', initials: 'PL', enabled: true },
+    { id: 'dashboard', label: 'Dashboard', page: 'dashboard.html', initials: 'DA', enabled: true },
+    { id: 'publish', label: 'Publish', page: 'publish.html', initials: 'PU', enabled: true },
+    { id: 'update', label: 'Update', page: 'update.html', initials: 'UP', enabled: true },
+    { id: 'archives', label: 'Archives', page: 'archives.html', initials: 'AR', enabled: true },
   ];
-  const W = 1400, H = 1000;
   function open(moduleId, folder) {
     const m = MODULES.find(x => x.id === moduleId);
-    if (!m?.enabled) return null;
-    const sw = screen.availWidth, sh = screen.availHeight;
-    const left = Math.max(0, Math.round((screen.availLeft || 0) + (sw - W) / 2)), top = Math.max(0, Math.round((screen.availTop || 0) + (sh - H) / 2));
-    const url = new URL(m.page, new URL('/html/', location.origin)); url.searchParams.set('project', folder);
-    // One window per module+project: opening again focuses the existing one.
-    const w = window.open(url.href, `dn-${moduleId}-${folder}`, `popup=yes,width=${Math.min(W, sw)},height=${Math.min(H, sh)},left=${left},top=${top}`);
-    w?.focus();
-    return w;
+    if (!m?.enabled) return false;
+    const shell = window.parent !== window && window.parent.Shell;
+    if (shell) shell.go(moduleId, folder);
+    else location.href = `/html/app.html?${new URLSearchParams({ m: moduleId, project: folder })}`;
+    return true;
   }
   return { MODULES, open };
 })();

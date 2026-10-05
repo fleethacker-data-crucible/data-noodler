@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Pipeline</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   aside { display: flex; flex-direction: column; gap: 24px; }
@@ -43,7 +45,7 @@
         <div id="editor" hidden class="stack">
           <div class="row">
             <label class="field">Step name<input id="sName" type="text" pattern="[a-z0-9_]+"></label>
-            <label class="row" style="margin-top:18px"><input id="sOut" type="checkbox"> Save result as a dataset (Parquet in data/staged)</label>
+            <label class="row" style="margin-top:18px"><input id="sOut" type="checkbox"> Save result as a dataset (Parquet in data/source, ready for Dashboard)</label>
             <div class="spacer" style="flex:1"></div>
             <button id="up" class="ghost small">Move up</button><button id="down" class="ghost small">Move down</button><button id="del" class="danger small">Delete step</button>
           </div>
@@ -66,6 +68,7 @@
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
+<script src="../js/core/parquet-writer.js"></script>
 <script src="../js/pipeline/steps.js"></script>
 <script src="../js/pipeline/runner.js"></script>
 <script>

@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Update</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 </head>
 <body>
@@ -14,7 +16,7 @@
     <button id="go" class="go">Update selected</button>
   </header>
   <div class="main stack">
-    <div class="muted">Re-imports datasets whose source files changed (with the same column choices as the first import), then re-runs the pipeline. Copy a new version of a file over the old one in data/source, or upload it with the same name in Import.</div>
+    <div class="muted">Re-imports datasets whose source files changed (with the same column choices as the first import), then re-runs the pipeline. Copy a new version of a file over the old one in data/raw (or at its original path), or upload it with the same name in Import.</div>
     <label class="row"><input type="checkbox" id="rerun" checked> Re-run the pipeline afterwards</label>
     <div class="table-wrap"><table class="grid" id="tbl"></table></div>
     <h2>Changes</h2>
@@ -30,24 +32,35 @@
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
+<script src="../js/core/parquet-writer.js"></script>
 <script src="../js/import/source-reader.js"></script>
+<script src="../js/import/external-source.js"></script>
 <script src="../js/pipeline/steps.js"></script>
 <script src="../js/pipeline/runner.js"></script>
 <script>
 const { $, esc } = UI, R = SourceReader;
 let ctx, E, state = []; // [{ d, stat, status }]
 
+// Sources live in the project (source.path) or outside it (source.origin: local/network path, via the server).
+const X = ExternalSource;
+const srcName = d => (d.source.path || d.source.origin || '').split(/[\\/]/).pop();
+async function statSource(d) {
+  if (d.source.path) return DNFS.stat(d.source.path).catch(() => ({ exists: false }));
+  try { const p = await X.probe(d.source.origin, { onWait: dr => UI.toast(`Waiting on drive ${dr}…`) }); return { exists: true, size: p.size, modified: p.modified }; }
+  catch (e) { ctx.log(`${d.name}: ${e.message}`, 'err'); return { exists: false, error: e.message }; }
+}
+
 async function check() {
   await ctx.reload();
   state = [];
   for (const d of (ctx.cfg.datasets || []).filter(x => x.source && x.source.kind !== 'pipeline')) {
-    const st = await DNFS.stat(d.source.path).catch(() => ({ exists: false }));
+    const st = await statSource(d);
     const status = !st.exists ? 'missing' : (d.source.size == null ? 'unknown' : st.size !== d.source.size || st.modified !== d.source.modified ? 'changed' : 'same');
     state.push({ d, st, status });
   }
   $('tbl').innerHTML = `<thead><tr><th></th><th>Dataset</th><th>Source file</th><th>Imported</th><th>Source now</th><th>Status</th></tr></thead><tbody>` +
     state.map((s, i) => `<tr><td><input type="checkbox" data-i="${i}" ${s.status === 'changed' || s.status === 'unknown' ? 'checked' : ''} ${s.status === 'missing' ? 'disabled' : ''}></td>
-      <td><b>${esc(s.d.name)}</b><div class="sub">${UI.num(s.d.rows)} rows</div></td><td class="mono">${esc(s.d.source.path.split('/').pop())}${s.d.source.table ? ` : ${esc(s.d.source.table)}` : ''}</td>
+      <td><b>${esc(s.d.name)}</b><div class="sub">${UI.num(s.d.rows)} rows</div></td><td class="mono">${esc(srcName(s.d))}${s.d.source.table ? ` : ${esc(s.d.source.table)}` : ''}</td>
       <td>${UI.date(s.d.imported)}</td><td>${s.st.exists ? `${UI.bytes(s.st.size)} · ${UI.date(s.st.modified)}` : '-'}</td>
       <td>${{ same: '<span class="muted">unchanged</span>', changed: '<span class="warn">changed</span>', missing: '<span class="err">missing</span>', unknown: '<span class="muted">unknown (older import)</span>' }[s.status]}</td></tr>`).join('') + '</tbody>';
   if (!state.length) $('tbl').innerHTML = '<tbody><tr><td class="muted">No imported datasets yet.</td></tr></tbody>';
@@ -56,13 +69,18 @@ $('check').onclick = UI.guard(check);
 
 // Re-import one dataset; returns a description of what changed.
 async function reimport(d) {
-  const r = await R.open(E, d.source.path), src = await r.sql(d.source.table || '');
-  const oldCols = d.columns, w = await E.writeProjectFile(`SELECT ${d.source.select} FROM ${src}`, d.path, 'FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000');
-  const url = E.url(d.path);
-  const rows = Number((await E.query(`SELECT count(*) FROM read_parquet('${url}')`)).rows[0][0]);
-  const columns = await R.schema(E, `read_parquet('${url}')`);
-  const st = await DNFS.stat(d.source.path);
-  await Projects.upsertDataset(ctx.folder, { ...d, rows, bytes: w.bytes, columns, imported: new Date().toISOString(), source: { ...d.source, size: st.size, modified: st.modified } });
+  const oldCols = d.columns, ext = !d.source.path;
+  // Read the source where it is (outside files stream through the server), same columns as the first import.
+  const r = ext ? await R.openUrl(E, X.url(d.source.origin), srcName(d)) : await R.open(E, d.source.path), src = await r.sql(d.source.table || '');
+  const total = Number((await E.query(`SELECT count(*) FROM ${src}`)).rows[0][0]);
+  const dest = d.parts ? d.path : d.path.replace(/\.parquet$/, '');
+  const w = await ParquetWriter.write(E, { select: d.source.select, src, rows: total, dest });
+  const out = ParquetWriter.sql(E, w);
+  const rows = Number((await E.query(`SELECT count(*) FROM ${out}`)).rows[0][0]);
+  const columns = await R.schema(E, out);
+  if (rows !== total) throw new Error(`${d.name}: ${UI.num(total)} rows in source, ${UI.num(rows)} written.`);
+  const st = await statSource(d);
+  await Projects.upsertDataset(ctx.folder, { ...d, path: w.path, parts: w.parts, rows, bytes: w.bytes, columns, imported: new Date().toISOString(), source: { ...d.source, size: st.size, modified: st.modified } });
   const was = new Map(oldCols.map(c => [c.name, c.type])), now = new Map(columns.map(c => [c.name, c.type]));
   return {
     name: d.name, before: d.rows, after: rows,

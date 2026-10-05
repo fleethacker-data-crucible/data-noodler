@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>Publish</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   .list div { display: flex; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); }
@@ -46,6 +48,7 @@
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
 <script src="../js/core/data-engine.js"></script>
+<script src="../js/core/parquet-writer.js"></script>
 <script src="../js/dashboard/widgets.js"></script>
 <script>
 const { $, esc } = UI;
@@ -67,32 +70,33 @@ $('pubs').onclick = UI.guard(async ev => {
 
 // ---- dashboard page: results computed now, embedded as JSON; renderer, theme and helpers inlined ----
 $('pubDash').onclick = UI.guard(async () => {
-  let dash; try { dash = await DNFS.readJSON(`${ctx.dir}/dashboard/dashboard.json`); } catch { throw new Error('No dashboard yet. Build one in the Dashboard module first.'); }
+  const dash = await DNFS.readJSONOr(`${ctx.dir}/dashboard/dashboard.json`, null);
+  if (!dash) throw new Error('No dashboard yet. Build one in the Dashboard module first.');
   if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
   $('pubDash').disabled = true;
   try {
     await DataEngine.loadProfile();
     const results = [];
-    for (const w of dash.widgets) {
+    for (const w of dash.widgets.filter(Widgets.ready)) {   // widgets not set up yet are left out
       const d = ctx.cfg.datasets.find(x => x.name === w.dataset);
       if (!d) { results.push({ w, error: `Dataset ${w.dataset} not found` }); continue; }
       let r;
-      if (w.type === 'table') { const e = await DataEngine.main(); r = await e.query(Widgets.tableQuery(w, `read_parquet('${e.url(d.path)}')`)); }
-      else { const a = Widgets.aggQuery(w); r = await DataEngine.parallel({ path: d.path, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final }); }
+      if (Widgets.spec(w).type === 'table') { const e = await DataEngine.main(); r = await e.query(Widgets.tableQuery(w, ParquetWriter.sql(e, d))); }
+      else { const a = Widgets.aggQuery(w); r = await DataEngine.parallel({ path: d.path, parts: d.parts, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final }); }
       results.push({ w, cols: r.cols, rows: r.rows });
     }
     const [css, ui, widgets] = await Promise.all(['/css/theme.css', '/js/core/ui.js', '/js/dashboard/widgets.js'].map(async u => (await fetch(u)).text()));
     const data = JSON.stringify({ project: ctx.cfg.name, at: new Date().toISOString(), results }).replace(/</g, '\\u003c');
     const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(ctx.cfg.name)} · Dashboard</title>
 <style>${css.replace(/@font-face[^}]+}/g, '')}
-.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px 14px}.card.wide{grid-column:1/-1}.card .body{overflow:auto;max-height:420px}</style></head>
+.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px 14px}.card.wide{grid-column:1/-1}.card .body{overflow:auto;max-height:420px}</style></head>
 <body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>${esc(ctx.cfg.name)}</h1><div class="sub" id="sub"></div></div></div></header>
 <div class="main"><div class="board" id="board"></div></div></div>
 <script>${ui}<\/script><script>${widgets}<\/script>
 <script>const D = ${data};
 document.getElementById('sub').textContent = 'Dashboard published ' + new Date(D.at).toLocaleString() + ' (classification: ${esc(ctx.cfg.classification || '')})';
 const b = document.getElementById('board');
-D.results.forEach((r, i) => { const c = document.createElement('div'); c.className = 'card' + (r.w.type === 'table' || r.w.type === 'line' ? ' wide' : '');
+D.results.forEach((r, i) => { const c = document.createElement('div'); c.className = 'card' + (Widgets.spec(r.w).type !== 'bar' ? ' wide' : '');
   c.innerHTML = '<h3>' + UI.esc(r.w.title) + '</h3><div class="body"></div>'; b.append(c);
   r.error ? c.lastChild.textContent = r.error : Widgets.render(c.lastChild, r.w, r); });<\/script></body></html>`;
     const name = slug($('dName').value), path = `${ctx.dir}/publish/${name}-${stamp()}.html`;
@@ -112,8 +116,13 @@ $('pubData').onclick = UI.guard(async () => {
   try {
     for (const n of names) {
       const d = ctx.cfg.datasets.find(x => x.name === n), t0 = performance.now();
-      if (fmt === 'parquet') await DNFS.copy(d.path, `${dir}/${n}.parquet`);
-      else await e.writeProjectFile(`SELECT * FROM read_parquet('${e.url(d.path)}')`, `${dir}/${n}.csv`, 'FORMAT CSV, HEADER');
+      // Split datasets export part by part (folder <name>/), so a big one never has to fit in memory at once.
+      const parts = d.parts || [d.path], one = !d.parts;
+      for (const [i, f] of parts.entries()) {
+        const to = one ? `${dir}/${n}.${fmt}` : `${dir}/${n}/part-${String(i + 1).padStart(4, '0')}.${fmt}`;
+        if (fmt === 'parquet') await DNFS.copy(f, to);
+        else await e.writeProjectFile(`SELECT * FROM read_parquet('${e.url(f)}')`, to, 'FORMAT CSV, HEADER');
+      }
       ctx.log(`Exported ${n} as ${fmt.toUpperCase()} (${UI.ms(performance.now() - t0)})`, 'ok');
     }
     await Projects.touchModule(ctx.folder, 'publish');

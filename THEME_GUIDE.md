@@ -10,6 +10,10 @@ A portable look-and-feel standard for any web app or tool, whatever it does. Dro
 - **One stylesheet.** All pages link one shared theme file (e.g. `css/theme.css`). Pages add only layout-specific rules.
 - **Dark first.** Dark is the default. A light palette is optional and only via `prefers-color-scheme`.
 - **Flat and quiet.** Flat panels, 1px border lines, no gradients, shadows only on floating things (dialogs, notifications, toasts).
+- **One corner radius: 4px (`--radius`) on everything** — buttons, inputs, drop-downs and their open lists, panels, cards,
+  tables, lists, menus, dialogs, notifications, toasts, badges, chart bars and tooltips. Only four exceptions, because
+  the rounding is part of their shape: the **40px logo** (8px), **scrollbar thumbs** (5px), **progress bars** (3px)
+  and **chart legend color squares** (2px). Nothing else gets a different radius.
 - **Show only what applies.** Hide buttons that can't be used right now instead of cluttering; grey out only "not built yet" features.
 - **Relative paths only** for every asset (`../assets/fonts/...`), so the folder can move anywhere.
 
@@ -101,13 +105,13 @@ Every badge, everywhere, follows one rule. "A yellow badge" means:
 - **Border:** 1px solid yellow.
 - **Text:** yellow, **bold (600)**, **UPPERCASE**, centered vertically and horizontally.
 - **Background:** the same yellow, **50% darker** (`color-mix(in srgb, <color> 50%, #000)`).
-- **Size:** exactly **20px tall**, 11px text, `padding: 0 8px 2px` (text sits 2px high), **3px radius**.
+- **Size:** exactly **20px tall**, 11px text, `padding: 0 8px 2px` (text sits 2px high), **4px radius**.
 
 ```css
 .badge {
   --bc: var(--muted);
   display: inline-flex; align-items: center; justify-content: center;
-  height: 20px; padding: 0 8px 2px; border: 1px solid var(--bc); border-radius: 3px; /* bottom 2px lifts the text */
+  height: 20px; padding: 0 8px 2px; border: 1px solid var(--bc); border-radius: 4px; /* bottom 2px lifts the text */
   background: color-mix(in srgb, var(--bc) 50%, #000); color: var(--bc);
   font-size: 11px; font-weight: 600; line-height: 1; text-transform: uppercase; white-space: nowrap;
 }
@@ -151,7 +155,7 @@ A stage sequence (e.g. new → planning → building → review → done) uses w
 - **Sidebar + main:** grid `365px 1fr`. Sidebar padding `20px 25px 20px 20px`, right border 1px, sections stacked with **40px gap**.
 - **Main content:** `padding: 20px`, scrolls internally (`overflow: auto`), page itself never scrolls horizontally.
 - **Section spacing:** 40px between major groups (e.g. last action button → next field group). 5px between buttons in a group. 12px under form fields. 10px under `h2`.
-- **Panels / boxes:** `--panel` bg, 1px border, `border-radius: 8px`, `padding: 14px 16px`. Inside the sidebar, panels are borderless and transparent.
+- **Panels / boxes:** `--panel` bg, 1px border, `border-radius: 4px`, `padding: 14px 16px`. Inside the sidebar, panels are borderless and transparent.
 - **Stats:** small muted label (12px) above a big value (18px 600), 2-column grid, 10px gap.
 - **Corner radii:** 3px badges · 4px controls · 6px tables/notifications/toasts · 8px panels/dialogs/logo.
 - **App windows (optional):** tools that open sub-pages as separate windows center them at a fixed size (e.g. 1400×1000).
@@ -204,11 +208,14 @@ input[type=checkbox] { accent-color: var(--blue); }
 
 - Labels sit **above** the field: `--text-2`, 4px gap, field full width, 12px below.
 - Single-letter fields (e.g. middle initial) are narrow (44px), centered, auto-uppercase, `maxlength=1`.
-- Drop-downs use the same 25px height and border as inputs.
+- Drop-downs use the same 25px height and border as inputs. Their **open list** is styled too (Edge/Chrome
+  customizable select, `appearance: base-select`): `--panel` bg, 1px border, **4px radius**, 4px padding,
+  shadow `0 6px 18px rgba(0,0,0,.35)`, 3px below the field; options 4px 8px with a 4px-radius `--sel` hover,
+  current choice bold, no checkmark. Older browsers fall back to the plain list.
 
 ### Searchable picker (single choice, e.g. an owner or a category)
 - Use instead of a plain `<select>` when the list can be long. Looks like an input (`--bg`, 1px border, 4px radius, 400 weight) showing the chosen item, muted placeholder ("Select …") and a muted ▾ on the right.
-- Click opens a floating menu directly below: `--panel` bg, 1px border, **6px radius**, shadow `0 6px 20px #0008`, 6px padding.
+- Click opens a floating menu directly below: `--panel` bg, 1px border, **4px radius**, shadow `0 6px 20px #0008`, 6px padding.
 - Menu = **search box on top** (focused on open), then the list.
 - List shows **exactly 10 rows** (26px each, 260px max), always-visible vertical scrollbar, mouse-wheel scrolling that doesn't scroll the page behind it (`overscroll-behavior: contain`).
 - Items sorted **alphabetically**; long items end in "…". Hover `--panel-2`, current choice `--sel`.
@@ -231,7 +238,7 @@ input[type=checkbox] { accent-color: var(--blue); }
 - Hover: `--panel`. Selected: `--sel`. Optional right-side detail in `<small>` at 70% opacity.
 
 ### Data tables
-- Wrapper: 1px border, 6px radius, scrolls internally.
+- Wrapper: 1px border, 4px radius, scrolls internally.
 - `th`: `--panel` bg, `--text-2`, 600, **sticky** header. Sortable headers show pointer and brighten on hover.
 - `td`: `padding: 6px 10px`, bottom border 1px, no wrapping; numbers right-aligned.
 - Data cells use Syne Mono 12px; nulls are muted italic.
@@ -251,7 +258,7 @@ input[type=checkbox] { accent-color: var(--blue); }
 ## 8. Dialogs
 
 - **Overlay:** fixed, full screen, `#0009` backdrop, content centered (`display: grid; place-items: center`).
-- **Box:** `--panel` bg, 1px border, **8px radius**, `padding: 20px 24px`, shadow `0 12px 40px #0009`.
+- **Box:** `--panel` bg, 1px border, **4px radius**, `padding: 20px 24px`, shadow `0 12px 40px #0009`.
 - **Sizing:** dynamic — `width: min(<ideal>px, calc(100vw - 40px))`, `max-height: calc(100vh - 40px)`; inner list scrolls, the dialog never overflows the window. Like a browser's own picker dialog.
 - **Title:** 16px 600, 14px below.
 - **Footer:** buttons right-aligned, 5px gap; or a single full-width grey **Close/Cancel** at the bottom.
@@ -264,7 +271,7 @@ input[type=checkbox] { accent-color: var(--blue); }
 
 **Drop-down notifications** (primary feedback):
 - Position: top center of the content/log area, `width: min(520px, 90%)`, stacked with 6px gap, newest on top.
-- Look: solid color fill, white 600 text, `padding: 10px 34px 10px 14px`, **6px radius on all 4 corners**, shadow `0 4px 14px #0006`.
+- Look: solid color fill, white 600 text, `padding: 10px 34px 10px 14px`, **4px radius on all 4 corners**, shadow `0 4px 14px #0006`.
 - Animation: drop in from above, 0.25s ease-out.
 - White **✕** in the top-right corner (18px, no background) dismisses it.
 - Auto-dismiss after **5 seconds**.
@@ -272,7 +279,7 @@ input[type=checkbox] { accent-color: var(--blue); }
 - **When to notify:** system messages and errors (say what failed and a plain cause, e.g. "Save failed: file is read-only."). Confirm user actions with a short sentence ("Log cleared.", "Settings saved."). **Do not** notify routine events.
 - History loaded on page open never triggers notifications; only live events do.
 
-**Toasts** (optional, for secondary pages): bottom-right, `--panel-2` bg, 4px colored left border (blue / green / red), 6px radius.
+**Toasts** (optional, for secondary pages): bottom-right, `--panel-2` bg, 4px colored left border (blue / green / red), 4px radius.
 
 ---
 
@@ -307,7 +314,7 @@ input[type=checkbox] { accent-color: var(--blue); }
 
 - Pure inline SVG, no chart libraries.
 - Axis/label text: 11px Exo 2, `--text-2`. Gridlines: 1px `--border`.
-- Bars: horizontal, 3px radius, label left / value right. Lines: 2px stroke with dot markers.
+- Bars: horizontal, 4px radius, label left / value right. Lines: 2px stroke with dot markers.
 - Series colors follow the palette in section 3.
 - Tooltip: inverted (`--text` bg, `--bg` text), 4px radius, 12px, follows the cursor.
 - Large numbers abbreviate in charts (`1.25M`); KPIs show the exact value.
@@ -336,6 +343,7 @@ input[type=checkbox] { accent-color: var(--blue); }
 - [ ] Empty values in tables show `-`.
 - [ ] Badges: 20px, 3px corners, colored border + bold caps text, 50% darker fill.
 - [ ] Expanding rows: Edit (blue) left, Delete (red) right.
-- [ ] Dialogs centered, dynamically sized, 8px radius.
-- [ ] Drop-down notifications: top center, 6px radius, white ✕, 5s.
+- [ ] Dialogs centered, dynamically sized, 4px radius.
+- [ ] Drop-down notifications: top center, 4px radius, white ✕, 5s.
+- [ ] Every corner 4px; only logo, scrollbar thumbs, progress bars, legend squares differ.
 - [ ] Scrollbars hidden until within 15px; no horizontal scroll on logs.
