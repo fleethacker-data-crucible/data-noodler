@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Engine Pool Benchmark</title>
+<title>Engine Benchmark</title>
 <style>
   @font-face { font-family: 'Exo 2'; font-weight: 400; src: url(../assets/fonts/exo2-400.ttf) format('truetype'); }
   @font-face { font-family: 'Exo 2'; font-weight: 600; src: url(../assets/fonts/exo2-600.ttf) format('truetype'); }
@@ -57,8 +57,8 @@
 </style>
 </head>
 <body>
-<h1>Engine pool benchmark: 1 vs 2 vs 4 DuckDB engines on Parquet</h1>
-<div id="env">Each engine is a separate single-threaded DuckDB-WASM worker. The data is split into Parquet files, the files are spread over the engines, every engine works on its own files at the same time, then engine 1 combines the partial results. CPU logical cores: <b id="cores"></b>.</div>
+<h1>Engine benchmark: 1 vs 2 vs 4 ... native engine workers on Parquet</h1>
+<div id="env">One native engine runs in the server; each query is split by Parquet row group across its workers (one compiled engine, up to 64 worker threads, never more than the CPU's logical cores), then the partial results are merged in row-group order. CPU logical cores: <b id="cores"></b>, engine workers: <b id="maxw"></b>.</div>
 
 <div class="row">
   <label>Data <select id="data">
@@ -66,28 +66,18 @@
     <option value="test-data/sales_10m">sales_10m (10M rows)</option>
   </select></label>
   <label>Read from <select id="source">
-    <option value="table">In-memory tables (one per engine)</option>
-    <option value="file">Parquet files (HTTP range reads)</option>
-  </select></label>
-  <label>Split by <select id="split">
-    <option value="rows">Row blocks (spread over engines)</option>
-    <option value="key">Customer (hash of customer_id)</option>
-  </select></label>
-  <label id="blockLbl">Block size <select id="block">
-    <option value="0" selected>Auto: rows ÷ engines</option>
-    <option value="100000">100k rows</option>
-    <option value="250000">250k rows</option>
-    <option value="1000000">1M rows</option>
+    <option value="file">Parquet files (read from disk)</option>
+    <option value="table">In-memory table (cached in the engine)</option>
   </select></label>
   <label>Runs <input id="runs" type="number" min="1" max="10" value="3"></label>
   <label>Show <select id="unit"><option value="time">Time (ms / s)</option><option value="rows">Rows per second</option></select></label>
-  <span>Engines <span id="counts"></span></span>
+  <span>Workers <span id="counts"></span></span>
 </div>
 <div class="row">
   <span>Tests <span id="tests"></span></span>
   <button id="go">Run benchmark</button>
-  <button id="prof1" title="Runs every engine count from 1 to the core count on this dataset and saves the fastest per test">Profile this dataset</button>
-  <button id="profAll" title="Profiles every generated dataset, smallest first, over HTTP">Profile all datasets</button>
+  <button id="prof1" title="Runs every worker count from 1 to the engine's workers on this dataset and saves the fastest per test">Profile this dataset</button>
+  <button id="profAll" title="Profiles every generated dataset, smallest first">Profile all datasets</button>
 </div>
 
 <div class="box">
@@ -99,19 +89,18 @@
 <div class="box chart" style="margin-top:12px"><h3>Memory (live, every 250 ms)</h3><div id="mem"></div></div>
 
 <div class="charts">
-  <div class="box chart"><h3 id="h1">Query time by engine count (median, lower is better)</h3><div class="legend" id="lg1"></div><div id="c1"></div></div>
-  <div class="box chart"><h3>Speedup vs 1 engine (higher is better)</h3><div class="legend" id="lg2"></div><div id="c2"></div></div>
+  <div class="box chart"><h3 id="h1">Query time by worker count (median, lower is better)</h3><div class="legend" id="lg1"></div><div id="c1"></div></div>
+  <div class="box chart"><h3>Speedup vs 1 worker (higher is better)</h3><div class="legend" id="lg2"></div><div id="c2"></div></div>
 </div>
 
 <h2>Results</h2>
 <div id="tbl" class="box">Run the benchmark to fill this in.</div>
-<h2>Saved engine profile <span class="off">js/duckdb/optimal-engine-profile.json</span></h2>
+<h2>Saved engine profile <span class="off">config/engine-profile.json</span></h2>
 <div id="prof" class="box" style="overflow-x:auto">Loading…</div>
 <div id="tip"></div>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
-<script src="../js/duckdb-pool.js"></script>
+<script src="../js/core/engine-client.js"></script>
 <script src="../js/test-data-gen.js"></script>
 <script src="../js/mem-monitor.js"></script>
 <script>
@@ -123,202 +112,98 @@ const COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)',
 const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };
 
 const MEM = MemMonitor.mount($('mem'));
-const cores = navigator.hardwareConcurrency || 4;
-$('cores').textContent = cores;
-// 1-16 engines; at most one engine per logical CPU core, so counts above the core count are greyed out.
-$('counts').innerHTML = Array.from({ length: 16 }, (_, k) => k + 1)
-  .map(n => `<label${n > cores ? ` class="off" title="Only ${cores} logical CPU cores: one engine per core at most"` : ''}><input type="checkbox" value="${n}" ${n > cores ? 'disabled' : [1, 2, 4].includes(n) ? 'checked' : ''}> ${n}</label>`).join(' ') +
-  ` <label title="Uses the saved profile (nearest row count) for each test; a prescan fills any gaps"><input type="checkbox" value="auto" checked> <b>Auto</b></label>`;
-const MAX_AUTO = Math.max(1, Math.min(16, cores)); // one engine per logical core, 16 at most
-const nameOf = k => k === 'auto' ? (results?.plan?.label || 'Auto') : `${k} engine${k > 1 ? 's' : ''}`;
-
-$('split').onchange = () => $('blockLbl').hidden = $('split').value !== 'rows';
-let TESTS = []; // the queries picked for this run (filled in below QUERIES)
-
-// Each query: partial(src) runs on every engine's own data; final combines them (table __parts).
-// byKey = the query needs all rows of a customer on the same engine. Correct only when split by customer;
-// with row blocks one customer's rows land on several engines, so the answer is wrong (the ✗ shows it).
+let MAXW = 1, info = null;
+const nameOf = k => k === 'auto' ? (results?.plan?.label || 'Auto') : `${k} worker${k > 1 ? 's' : ''}`;
 const QUERIES = [
-  { id: 'scan', label: 'Scan + sum',
-    partial: s => `SELECT count(*) c, sum(total) s, sum(unit_price) p, max(order_date) m FROM ${s}`,
-    final: 'SELECT sum(c) n, sum(s) total, sum(p) / sum(c) avg_price, max(m) last_date FROM __parts' },
-  { id: 'group', label: 'Group by',
-    partial: s => `SELECT region, category, count(*) c, sum(total) s, sum(discount) d FROM ${s} GROUP BY ALL`,
-    final: 'SELECT region, category, sum(c) n, sum(s) total, sum(d) / sum(c) avg_disc FROM __parts GROUP BY ALL ORDER BY ALL' },
-  { id: 'dist', label: 'Distinct',
-    partial: s => `SELECT DISTINCT customer_id, category FROM ${s}`,
-    final: 'SELECT count(DISTINCT customer_id) customers, count(DISTINCT (customer_id, category)) customer_categories FROM __parts' },
-  { id: 'sort', label: 'Sort*',
-    partial: s => `SELECT max(rn) m FROM (SELECT row_number() OVER (ORDER BY total DESC, id) rn FROM ${s})`,
-    final: 'SELECT sum(m) sorted_rows FROM __parts' },
-  { id: 'join', label: 'Join', byKey: true,
-    partial: s => `SELECT count(*) n, sum(s.total / c.max_total) v FROM ${s} s JOIN (SELECT customer_id, max(total) max_total FROM ${s} GROUP BY 1) c USING (customer_id)`,
-    final: 'SELECT sum(n) n, sum(v) v FROM __parts' },
-  { id: 'window', label: 'Window', byKey: true,
-    partial: s => `SELECT sum(rt) x FROM (SELECT sum(total) OVER (PARTITION BY customer_id ORDER BY order_date, id) rt FROM ${s})`,
-    final: 'SELECT sum(x) x FROM __parts' },
+  { id: 'scan', label: 'Scan + sum', sql: s => `SELECT count(*) n, sum(total) total, sum(unit_price) / count(*) avg_price, max(order_date) last_date FROM ${s}` },
+  { id: 'group', label: 'Group by', sql: s => `SELECT region, category, count(*) n, sum(total) total, avg(discount) avg_disc FROM ${s} GROUP BY ALL ORDER BY ALL` },
+  { id: 'dist', label: 'Distinct', sql: s => `SELECT count(DISTINCT customer_id) customers, count(DISTINCT (customer_id, category)) customer_categories FROM ${s}` },
+  { id: 'sort', label: 'Sort', sql: s => `SELECT max(rn) sorted_rows FROM (SELECT row_number() OVER (ORDER BY total DESC, id) rn FROM ${s})` },
+  { id: 'join', label: 'Join', sql: s => `SELECT count(*) n, sum(s.total / c.max_total) v FROM ${s} s JOIN (SELECT customer_id, max(total) max_total FROM ${s} GROUP BY 1) c USING (customer_id)` },
+  { id: 'window', label: 'Window', sql: s => `SELECT sum(rt) x FROM (SELECT sum(total) OVER (PARTITION BY customer_id ORDER BY order_date, id) rt FROM ${s})` },
 ];
 $('tests').innerHTML = QUERIES.map(q => `<label><input type="checkbox" value="${q.id}" checked> ${q.label}</label>`).join(' ');
+let TESTS = [];
 
 // ---- progress ----
 let step = 0, total = 1, t0 = 0, label = '';
 const paint = () => { $('fill').style.width = (100 * step / total) + '%'; $('msg').textContent = `${step}/${total}  ${label}  ${((performance.now() - t0) / 1000).toFixed(1)}s`; };
 const begin = l => { label = l; t0 = performance.now(); paint(); };
 
-// ---- data prep (one time, cached in test-data/) ----
-// Split modes:
-//   key  = one file per engine, rows go to file hash(customer_id) % N (all of a customer's rows together; files differ per N)
-//   rows = fixed-size blocks in file order (block 0 = rows 0..B-1, ...); blocks are dealt round-robin to the engines.
-//          The same block files serve every engine count.
-//          size 0 = auto: block size = rows ÷ N, so each of the N engines gets exactly one equal block.
-const partsDir = base => `test-data/parts/${base.split('/').pop()}`;
-const keyPath = (base, n, i) => n === 1 ? base + '.parquet' : `${partsDir(base)}/n${n}/part-${i}.parquet`;
-const blockDir = (base, size, n) => size ? `${partsDir(base)}/rows-${size}` : `${partsDir(base)}/even-n${n}`;
-const blockPath = (base, size, k, n) => `${blockDir(base, size, n)}/block-${String(k).padStart(4, '0')}.parquet`;
-const autoSize = (rows, n) => Math.ceil(rows / n);
-
-// Write row blocks of `size` rows from src (file_row_number = position in the file, so every row lands in exactly one block).
-async function writeBlocks(e, url, rows, size, path) {
-  const blocks = Math.ceil(rows / size);
-  for (let k = 0; k < blocks; k++) {
-    begin(`Writing row block ${k + 1}/${blocks} (one time)`);
-    await e.writeProjectFile(`SELECT * EXCLUDE (file_row_number) FROM read_parquet('${url}', file_row_number = true)
-      WHERE file_row_number >= ${k * size} AND file_row_number < ${(k + 1) * size}`, path(k));
-  }
-  return blocks;
-}
-
-// Builds whatever files are missing (one time, cached in test-data/). Returns { rows, blocks }.
-async function ensureFiles(ds, counts, split, size) {
-  if (ds.gen) return { rows: ds.rows, blocks: 0 }; // generated datasets are split on the fly by id range
-  const base = ds.base;
-  const exists = async p => (await DNFS.stat(p)).exists;
-  const e = createDuckEngine();
-  await e.init({ build: 'eh' });
-  try {
-    if (!(await exists(base + '.parquet'))) {
-      begin(`Converting ${base}.csv to Parquet (one time)`);
-      const w = await e.writeProjectFile(`SELECT * FROM read_csv('${e.url(base + '.csv')}')`, base + '.parquet');
-      log(`Wrote ${base}.parquet: ${(w.bytes / 1048576).toFixed(1)} MB in ${fmtMs(w.ms)}`, 'ok');
-    }
-    const src = `read_parquet('${e.url(base + '.parquet')}')`;
-    const rows = (await e.query(`SELECT count(*) FROM ${src}`)).rows[0][0];
-    const blocks = size ? Math.ceil(rows / size) : 0;
-    if (split === 'rows' && !size) {
-      for (const n of counts.filter(n => n > 1)) {
-        if (await exists(blockPath(base, 0, n - 1, n))) continue;
-        await writeBlocks(e, e.url(base + '.parquet'), rows, autoSize(rows, n), k => blockPath(base, 0, k, n));
-        log(`Wrote ${n} equal blocks of ~${autoSize(rows, n).toLocaleString()} rows to ${blockDir(base, 0, n)}/`, 'ok');
-      }
-    } else if (split === 'key') {
-      for (const n of counts.filter(n => n > 1)) {
-        if (await exists(keyPath(base, n, n - 1))) continue;
-        begin(`Splitting into ${n} files by customer (one time)`);
-        for (let i = 0; i < n; i++) await e.writeProjectFile(`SELECT * FROM ${src} WHERE hash(customer_id) % ${n} = ${i}`, keyPath(base, n, i));
-        log(`Wrote ${n} files to ${partsDir(base)}/n${n}/`, 'ok');
-      }
-    } else if (!(await exists(blockPath(base, size, blocks - 1)))) {
-      // Fixed size: block 0 = rows 0..size-1, and so on.
-      await writeBlocks(e, e.url(base + '.parquet'), rows, size, k => blockPath(base, size, k));
-      log(`Wrote ${blocks} blocks of ${size.toLocaleString()} rows to ${partsDir(base)}/rows-${size}/`, 'ok');
-    }
-    return { rows, blocks };
-  } finally { await e.close(); }
-}
+// ---- engine + worker counts ----
+const ready = (async () => {
+  info = await Engine.status();
+  MAXW = info.workers;
+  $('cores').textContent = info.cores; $('maxw').textContent = info.workers;
+  const opts = [...new Set([1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64].filter(n => n <= MAXW).concat(MAXW))];
+  $('counts').innerHTML = opts.map(n => `<label><input type="checkbox" value="${n}" ${[1, 2, 4].includes(n) || n === MAXW ? 'checked' : ''}> ${n}</label>`).join(' ') +
+    ` <label title="Uses the saved profile (nearest row count) for each test; a prescan fills any gaps"><input type="checkbox" value="auto" checked> <b>Auto</b></label>`;
+  MEM.setLimit(info.memory.budget, 'Engine budget');
+})().catch(e => { log('Engine not available: ' + e.message, 'err'); });
 
 // ---- datasets ----
-// Legacy: test-data/sales_*.parquet (one file; split files are written on demand under test-data/parts/).
-// Generated: test-data/gen/<name>/ part files with ids 0..rows-1 in order (see generate-test-parquet-files.html);
-//            split on the fly: by id range (row groups outside the range are skipped) or by customer hash.
-const NEED = 'id, order_date, customer_id, region, category, unit_price, discount, total'; // columns the tests use
+// Legacy: test-data/sales_*.csv converted once to test-data/sales_*.parquet.
+// Generated: test-data/gen/<name>/ (generate-test-parquet-files.html), read as one dataset folder.
 const DATASETS = new Map();
 const fmtRows = n => n >= 1e6 ? +(n / 1e6).toFixed(1) + 'M' : Math.round(n / 1e3) + 'k';
 const dsOf = v => DATASETS.get(v) || { base: v, name: v.split('/').pop() };
-const fileList = (e, parts) => '[' + parts.map(p => `'${e.url(p.path)}'`).join(', ') + ']';
-// The whole dataset as one SQL source.
-const whole = (e, ds) => ds.gen ? `read_parquet(${fileList(e, ds.parts)})` : `read_parquet('${e.url(ds.base + '.parquet')}')`;
-// Sample for the prescan: ids below S, engine i of n takes every n-th row.
-const sampleSql = (e, ds, S, i, n) => `SELECT ${NEED} FROM ${ds.gen ? `read_parquet(${fileList(e, ds.parts.filter(p => p.first < S))})` : whole(e, ds)} WHERE id < ${S} AND id % ${n} = ${i}`;
 const datasetsReady = TestDataGen.list().then(list => {
   for (const m of list) {
     DATASETS.set('gen:' + m.name, { gen: true, ...m });
     $('data').insertAdjacentHTML('beforeend', `<option value="gen:${m.name}">${m.name} (${fmtRows(m.rows)} rows, ${m.columns} cols)</option>`);
   }
 });
-$('data').onchange = () => { if (dsOf($('data').value).gen) $('source').value = 'file'; };
-
-// SQL source for each of n engines.
-function sources(pool, ds, n, split, size, blocks) {
-  if (!ds.gen) return legacySources(pool, ds.base, n, split, size, blocks);
-  return pool.engines.map((e, i) => {
-    if (n === 1) return whole(e, ds);
-    if (split === 'key') return `(SELECT * FROM ${whole(e, ds)} WHERE hash(customer_id) % ${n} = ${i})`;
-    const a = Math.floor(ds.rows * i / n), b = Math.floor(ds.rows * (i + 1) / n);
-    return `(SELECT * FROM read_parquet(${fileList(e, ds.parts.filter(p => p.first < b && p.first + p.rows > a))}) WHERE id >= ${a} AND id < ${b})`;
-  });
+async function ensureData(ds) {
+  if (ds.gen) return { src: `read_parquet(${Engine.lit(`${TestDataGen.DIR}/${ds.name}`)})`, rows: ds.rows };
+  const pq = ds.base + '.parquet';
+  if (!(await DNFS.stat(pq)).exists) {
+    begin(`Converting ${ds.base}.csv to Parquet (one time)`);
+    const t = performance.now();
+    const w = await Engine.exportTo({ sql: `SELECT * FROM read_csv(${Engine.lit(ds.base + '.csv')})`, to: pq, format: 'parquet' });
+    log(`Wrote ${pq}: ${(w.bytes / 1048576).toFixed(1)} MB in ${fmtMs(performance.now() - t)}`, 'ok');
+  }
+  const src = `read_parquet(${Engine.lit(pq)})`;
+  return { src, rows: await Engine.count(src) };
 }
-function legacySources(pool, base, n, split, size, blocks) {
-  return pool.engines.map((e, i) => {
-    if (split === 'key') return `read_parquet('${e.url(keyPath(base, n, i))}')`;
-    if (!size) return `read_parquet('${e.url(n === 1 ? base + '.parquet' : blockPath(base, 0, i, n))}')`; // auto: one equal block each
-    const mine = [];
-    for (let k = i; k < blocks; k += n) mine.push(`'${e.url(blockPath(base, size, k))}'`);
-    // More engines than blocks: this engine gets an empty source with the right columns.
-    return mine.length ? `read_parquet([${mine.join(', ')}])` : `(SELECT * FROM read_parquet('${e.url(blockPath(base, size, 0))}') LIMIT 0)`;
-  });
-}
+const NEED = 'id, order_date, customer_id, region, category, unit_price, discount, total'; // columns the tests use
 
-// Auto plan (prescan), measured with the selected tests themselves on a sample of up to 200k rows:
-//  1. run each test with 1 engine (T1) and with M = MAX_AUTO engines (TM), median of 3 runs each
-//  2. model a test as T(N) = W / N + c * N  (W = work, c = cost per engine: messaging, combining, shared cores)
-//     T1 = W + c and TM = W / M + c * M  give  c = (TM - T1 / M) / (M - 1 / M),  W = T1 - c
-//  3. scale W from the sample to all rows, sum W and c over the tests, N = sqrt(sum W / sum c), clamped to 1..M
-//  4. blocks = rows / N; split per test: by customer for byKey tests, row blocks for the rest.
-async function autoPlan(ds, rows, tests) {
-  const t0 = performance.now(), S = Math.min(rows, 200000), M = MAX_AUTO;
-  const timeTests = async n => {
-    begin(`Auto: timing the tests on a ${S.toLocaleString()}-row sample with ${n} engine(s)`);
-    const pool = await DuckPool.create(n), out = {};
-    try {
-      await pool.each((e, i) => e.exec(`CREATE TABLE t AS ${sampleSql(e, ds, S, i, n)}`));
-      for (const q of tests) {
-        const job = () => pool.run(() => q.partial('t'), q.final);
-        await job();
-        const ts = [];
-        for (let r = 0; r < 3; r++) ts.push((await job()).ms);
-        out[q.id] = med(ts);
-      }
-    } finally { await pool.close(); }
-    return out;
-  };
-  const T1 = await timeTests(1), TM = M > 1 ? await timeTests(M) : T1;
-  let W = 0, C = 0;
-  const perTest = tests.map(q => {
-    const c = M > 1 ? Math.max(0.05, (TM[q.id] - T1[q.id] / M) / (M - 1 / M)) : 0.05;
-    const w = Math.max(0, T1[q.id] - c) * rows / S;
-    W += w; C += c;
-    return { id: q.id, w, c, n: DuckPool.bestCount(w, c, M) };
-  });
-  const byId = Object.fromEntries(perTest.map(p => [p.id, p.n]));
-  const n = Math.max(...perTest.map(p => p.n)); // pool size: the most any test needs
-  return { n, byId, workMs: W / tests.length, perEngineMs: C / tests.length, perTest, sample: S, block: Math.ceil(rows / n), ms: performance.now() - t0 };
+// Engine time of one query at n workers, and its rows.
+async function run(sql, n) { const r = await Engine.query(sql, { workers: n, limit: 1000 }); return { ms: r.ms, rows: r.rows }; }
+
+// Auto plan (prescan) for tests the profile does not cover, measured on a sample of up to 200k rows:
+//  T(N) = W / N + c * N (W = work, c = cost per extra worker); from 1 and MAXW workers: c = (TM - T1 / M) / (M - 1 / M), W = T1 - c;
+//  W scaled to all rows, N = sqrt(W / c) clamped to 1..MAXW.
+async function autoPlan(src, rows, tests) {
+  const t1 = performance.now(), S = Math.min(rows, 200000), M = MAXW;
+  begin(`Auto: loading a ${S.toLocaleString()}-row sample`);
+  await Engine.cache.load('bench_sample', `SELECT ${NEED} FROM ${src} LIMIT ${S}`);
+  const time = async (q, n) => { await run(q.sql('bench_sample'), n); const ts = []; for (let r = 0; r < 3; r++) ts.push((await run(q.sql('bench_sample'), n)).ms); return med(ts); };
+  const perTest = [];
+  try {
+    for (const q of tests) {
+      begin(`Auto: timing ${q.label} on the sample`);
+      const T1 = await time(q, 1), TM = M > 1 ? await time(q, M) : T1;
+      const c = M > 1 ? Math.max(0.05, (TM - T1 / M) / (M - 1 / M)) : 0.05, w = Math.max(0, T1 - c) * rows / S;
+      perTest.push({ id: q.id, w, c, n: Math.max(1, Math.min(M, Math.round(Math.sqrt(w / c)))) });
+    }
+  } finally { await Engine.cache.drop('bench_sample'); }
+  return { byId: Object.fromEntries(perTest.map(p => [p.id, p.n])), perTest, ms: performance.now() - t1 };
 }
 
-// ---- saved engine profile: js/duckdb/optimal-engine-profile.json ----
-// tests.<id>.entries["<source>:<rows>"] = { rows, source, dataset, timings: { "<engines>": best median ms }, engines, ms, rowsPerSec }
-// Each profile run keeps the fastest time seen for every engine count, so repeated runs refine it.
-const PROFILE = 'js/duckdb/optimal-engine-profile.json';
+// ---- saved engine profile: config/engine-profile.json ----
+// tests.<id>.entries["<source>:<rows>"] = { rows, source, dataset, timings: { "<workers>": best median ms }, engines (= best workers), ms, rowsPerSec }
+const PROFILE = 'config/engine-profile.json';
 const loadProfile = async () => { try { return await DNFS.readJSONOr(PROFILE, { version: 1, tests: {} }); } catch { return { version: 1, tests: {} }; } };
 async function saveProfile(ds, res) {
-  const p = await loadProfile(), now = new Date().toISOString(), source = res.inMem ? 'memory' : 'http';
-  Object.assign(p, { version: 1, cores, updated: now, about: 'Fastest DuckDB engine count per test and row count, measured by engine-bench.html. Auto picks the entry nearest the row count.' });
+  const p = await loadProfile(), now = new Date().toISOString(), source = res.inMem ? 'memory' : 'file';
+  Object.assign(p, { version: 1, cores: info.cores, workers: MAXW, updated: now, about: 'Fastest native-engine worker count per test and row count, measured by engine-bench.html. Auto picks the entry nearest the row count.' });
   p.tests ||= {};
   for (const q of res.tests) {
     const T = p.tests[q.id] ||= { label: q.label, entries: {} };
     const e = T.entries[`${source}:${res.rows}`] ||= { rows: res.rows, source, timings: {} };
     for (const k of res.counts) {
       const a = res.q[q.id][k];
-      if (!a?.length || res.check[q.id][k] === false) continue; // only correct runs count
+      if (!a?.length || res.check[q.id][k] === false) continue;   // only correct runs count
       const m = Math.round(med(a) * 10) / 10;
       e.timings[k] = e.timings[k] == null ? m : Math.min(e.timings[k], m);
     }
@@ -329,14 +214,13 @@ async function saveProfile(ds, res) {
   await DNFS.writeJSON(PROFILE, p);
   return p;
 }
-// Engine count per test from the profile entry nearest the row count (log scale), same read mode.
 function profilePlan(p, rows, source, tests) {
   const byId = {}, perTest = [];
   for (const q of tests) {
     const es = Object.values(p.tests?.[q.id]?.entries || {}).filter(e => e.source === source && e.engines);
     if (!es.length) continue;
     const e = es.reduce((a, b) => Math.abs(Math.log(b.rows / rows)) < Math.abs(Math.log(a.rows / rows)) ? b : a);
-    byId[q.id] = Math.min(e.engines, MAX_AUTO);
+    byId[q.id] = Math.min(e.engines, MAXW);
     perTest.push({ id: q.id, n: byId[q.id], src: 'profile', from: e.rows });
   }
   return { byId, perTest };
@@ -350,9 +234,9 @@ async function renderProfile(p) {
   $('prof').innerHTML = `<table><tr><th>Test</th>${cols.map(c => { const [src, r] = c.split(':'); return `<th>${fmtRows(+r)} <span class="off">${src}</span></th>`; }).join('')}</tr>` +
     QUERIES.filter(q => p.tests[q.id]).map(q => `<tr><td>${q.label}</td>${cols.map(c => {
       const e = p.tests[q.id].entries[c];
-      return e?.engines ? `<td title="${Object.entries(e.timings).map(([k, v]) => `${k}: ${fmtMs(v)}`).join('&#10;')}"><b>${e.engines}</b> eng · ${fmtRps(e.rowsPerSec)}</td>` : '<td>-</td>';
+      return e?.engines ? `<td title="${Object.entries(e.timings).map(([k, v]) => `${k}: ${fmtMs(v)}`).join('&#10;')}"><b>${e.engines}</b> wkr · ${fmtRps(e.rowsPerSec)}</td>` : '<td>-</td>';
     }).join('')}</tr>`).join('') +
-    `</table><div class="note">Best engine count and rows/s per test and row count (hover a cell for every engine count's time). Updated ${p.updated ? new Date(p.updated).toLocaleString() : '-'} on a ${p.cores}-core machine.</div>`;
+    `</table><div class="note">Best worker count and rows/s per test and row count (hover a cell for every worker count's time). Updated ${p.updated ? new Date(p.updated).toLocaleString() : '-'} on a ${p.cores}-core machine.</div>`;
 }
 renderProfile();
 
@@ -362,135 +246,90 @@ const same = (a, b) => a.length === b.length && a.every((row, i) => row.length =
 
 // ---- benchmark ----
 let results = null;
-const memFor = n => Math.max(0.5, Math.min(3, Math.floor(100 / n) / 10)); // keep all engines together under ~10 GB
 const pickedTests = () => { const want = new Set([...$('tests').querySelectorAll('input:checked')].map(c => c.value)); return QUERIES.filter(q => want.has(q.id)); };
 const busy = on => ['go', 'prof1', 'profAll'].forEach(id => $(id).disabled = on);
 
-// One benchmark on one dataset. profile = every engine count 1..MAX_AUTO with the per-test split; the best is saved.
-async function runBench({ ds, counts, auto, runs, inMem, split, size, profile = false }) {
+// One benchmark on one dataset. profile = every worker count 1..MAXW; the best is saved.
+async function runBench({ ds, counts, auto, runs, inMem, profile = false }) {
+  await ready;
   const tick = setInterval(paint, 100);
   try {
-    step = 0; total = (counts.length + (auto ? 1 : 0)) * (2 + TESTS.length * (runs + 1));
-    if (ds.gen && size) { log('Generated datasets are split by id range: block size is ignored (rows ÷ engines).'); size = 0; }
-    const { rows, blocks } = await ensureFiles(ds, counts, profile ? 'rows' : split, profile ? 0 : size);
-    if (profile && !ds.gen) await ensureFiles(ds, counts, 'key', 0);
-    if (!profile && split === 'rows' && size && blocks < Math.max(...counts)) log(`Only ${blocks} block(s): with more engines than blocks, some engines sit idle. Pick a smaller block size.`, 'err');
+    step = 0; total = (counts.length + (auto ? 1 : 0)) * (1 + TESTS.length * (runs + 1)) + 1;
+    const d = await ensureData(ds), rows = d.rows;
+    let src = d.src, loadMs = null;
+    if (inMem) {
+      begin('Loading the data into engine memory');
+      const t = await Engine.cache.load('bench_t', `SELECT ${NEED} FROM ${d.src}`);
+      loadMs = t.ms; src = 'bench_t';
+      log(`Loaded ${rows.toLocaleString()} rows into engine memory in ${fmtMs(t.ms)} (${(t.bytes / 1048576).toFixed(0)} MB)`);
+    } else await Engine.cache.drop('bench_t');
+    step++;
     let plan = null;
     if (auto) {
-      // The saved profile first; tests it does not cover yet get a prescan.
-      const fromProfile = profilePlan(await loadProfile(), rows, inMem ? 'memory' : 'http', TESTS);
+      const fromProfile = profilePlan(await loadProfile(), rows, inMem ? 'memory' : 'file', TESTS);
       const missing = TESTS.filter(q => fromProfile.byId[q.id] == null);
-      const pre = missing.length ? await autoPlan(ds, rows, missing) : { byId: {}, perTest: [], ms: 0 };
+      const pre = missing.length ? await autoPlan(d.src, rows, missing) : { byId: {}, perTest: [], ms: 0 };
       const byId = { ...pre.byId, ...fromProfile.byId };
-      plan = { byId, n: Math.max(...Object.values(byId)), ms: pre.ms,
+      plan = { byId, ms: pre.ms,
         perTest: TESTS.map(q => fromProfile.perTest.find(p => p.id === q.id) || { ...pre.perTest.find(p => p.id === q.id), src: 'prescan' }),
         label: !missing.length ? 'Auto (profile)' : missing.length === TESTS.length ? 'Auto (prescan)' : 'Auto (profile + prescan)' };
-      if (!ds.gen) {
-        const need = sp => [...new Set(TESTS.filter(q => !!q.byKey === (sp === 'key')).map(q => byId[q.id]))];
-        await ensureFiles(ds, need('rows'), 'rows', 0);
-        await ensureFiles(ds, need('key'), 'key', 0);
-      }
-      log(`${plan.label}: engines per test: ` + plan.perTest.map(p => `${QUERIES.find(q => q.id === p.id).label} ${p.n}` +
+      log(`${plan.label}: workers per test: ` + plan.perTest.map(p => `${QUERIES.find(q => q.id === p.id).label} ${p.n}` +
         (p.src === 'profile' ? ` (profile @ ${fmtRows(p.from)} rows)` : ' (prescan)')).join(', ') + '.', 'ok');
     }
-    // One run per manual count, plus the auto plan (key 'auto').
-    const runList = counts.map(n => ({ key: n, n })).concat(plan ? [{ key: 'auto', n: plan.n, auto: true }] : []);
-    results = { tests: TESTS, counts: runList.map(r => r.key), base: ds.name, inMem, split: profile ? 'auto' : split, size, blocks, rows, plan, profile, q: {}, check: {}, fail: {}, start: {}, load: {}, peak: {} };
+    const runList = counts.map(n => ({ key: n })).concat(plan ? [{ key: 'auto', auto: true }] : []);
+    results = { tests: TESTS, counts: runList.map(r => r.key), base: ds.name, inMem, rows, plan, profile, q: {}, check: {}, fail: {}, load: loadMs, peak: {} };
     for (const q of TESTS) { results.q[q.id] = {}; results.check[q.id] = {}; results.fail[q.id] = {}; }
-    // Reference answers: each test once on one engine over the whole dataset. A profile uses its own 1-engine run instead.
+    // Reference answers: each test once with 1 worker.
     const ref = {};
-    if (!profile) {
-      begin('Computing reference answers on 1 engine');
-      const re = createDuckEngine();
-      await re.init({ build: 'eh' });
-      try {
-        for (const q of TESTS) {
-          try { ref[q.id] = (await re.query(q.final.replaceAll('__parts', `(${q.partial(whole(re, ds))})`))).rows; }
-          catch (e) { log(`No reference answer for ${q.label}: ${e.message.split('\n')[0]}`, 'err'); }
-        }
-      } finally { await re.close(); }
-    }
+    for (const q of TESTS) { try { begin(`Reference answer: ${q.label}`); ref[q.id] = (await run(q.sql(src), 1)).rows; } catch (e) { log(`No reference answer for ${q.label}: ${e.message}`, 'err'); } }
     for (const R of runList) {
-      const { key, n } = R;
-      begin(`Starting ${nameOf(key)}`);
-      let t = performance.now(), pool;
-      try { pool = await DuckPool.create(n, { memoryLimitGB: memFor(n) }); }
-      catch (e) { log(`${nameOf(key)}: could not start: ${e.message}`, 'err'); step += 2 + TESTS.length * (runs + 1); continue; }
-      results.start[key] = performance.now() - t; step++;
-      MEM.setLimit(n * memFor(n) * 2 ** 30, `DuckDB limit ${n} × ${memFor(n)} GB`); MEM.mark(nameOf(key).replace(' engines',' eng').replace(' engine',' eng')); MEM.resetPeak();
-      try {
-        // Each engine's source: its own data, read over HTTP or loaded into its own memory.
-        // Manual: one layout. Auto/profile: per test (row split, or customer split for byKey tests), one table per layout.
-        const layout = q => R.auto ? { split: q.byKey ? 'key' : 'rows', n: plan.byId[q.id], size: 0, blocks: 0 }
-          : profile ? { split: q.byKey ? 'key' : 'rows', n, size: 0, blocks: 0 } : { split, n, size, blocks };
-        const tableOf = L => R.auto || profile ? `t_${L.split}_${L.n}` : 't';
-        const layouts = new Map(TESTS.map(q => { const L = layout(q); return [tableOf(L), L]; }));
-        begin(inMem ? `Loading data into ${nameOf(key)}` : 'Using Parquet files over HTTP');
-        t = performance.now();
-        if (inMem) for (const [tbl, L] of layouts) {
-          const src = sources(pool, ds, L.n, L.split, L.size, L.blocks);
-          await Promise.all(pool.engines.slice(0, L.n).map((e, i) => e.exec(`CREATE OR REPLACE TABLE ${tbl} AS SELECT ${NEED} FROM ${src[i]}`)));
+      const key = R.key;
+      begin(`Starting ${nameOf(key)}`); step++;
+      MEM.mark(nameOf(key).replace(' workers', ' wkr').replace(' worker', ' wkr')); MEM.resetPeak();
+      for (const q of TESTS) {
+        const n = R.auto ? plan.byId[q.id] : key;
+        try {
+          begin(`${q.label}: warm-up, ${nameOf(key)}`);
+          const w = await run(q.sql(src), n); step++;
+          if (ref[q.id]) results.check[q.id][key] = same(ref[q.id], w.rows);
+          const a = results.q[q.id][key] = [];
+          for (let r = 0; r < runs; r++) { begin(`${q.label}: run ${r + 1}/${runs}, ${nameOf(key)}`); a.push((await run(q.sql(src), n)).ms); step++; }
+        } catch (e) {
+          results.fail[q.id][key] = e.message; delete results.q[q.id][key];
+          log(`${q.label}, ${nameOf(key)}: FAILED: ${e.message}`, 'err'); step += runs;
         }
-        results.load[key] = performance.now() - t; step++;
-        const S = q => { const L = layout(q); return inMem ? pool.engines.map(() => tableOf(L)) : sources(pool, ds, L.n, L.split, L.size, L.blocks); };
-        const N = q => layout(q).n;
-        log(`${nameOf(key)}: started in ${fmtMs(results.start[key])}${inMem ? `, loaded in ${fmtMs(results.load[key])}` : ''}`);
-        for (const q of TESTS) {
-          try {
-            const Sq = S(q);
-            begin(`${q.label}: warm-up, ${nameOf(key)}`);
-            const w = await pool.run(i => q.partial(Sq[i]), q.final, N(q)); step++;
-            if (profile) ref[q.id] ??= w.rows;
-            if (ref[q.id]) results.check[q.id][key] = same(ref[q.id], w.rows);
-            const a = results.q[q.id][key] = [];
-            for (let r = 0; r < runs; r++) {
-              begin(`${q.label}: run ${r + 1}/${runs}, ${nameOf(key)}`);
-              a.push((await pool.run(i => q.partial(Sq[i]), q.final, N(q))).ms); step++;
-            }
-          } catch (e) {
-            results.fail[q.id][key] = e.message; delete results.q[q.id][key];
-            log(`${q.label}, ${nameOf(key)}: FAILED: ${e.message.split('\n')[0]}`, 'err');
-            step += runs;
-          }
-          render();
-        }
-        try { results.peak[key] = (await Promise.all(pool.engines.map(e => e.mem()))).reduce((s, m) => s + m.used, 0); } catch {}
-        log(`${nameOf(key)}: peak tab memory ${MemMonitor.fmt(MEM.peak)}`);
-        log(`${nameOf(key)}: ` + TESTS.map(q => `${q.label} ${results.q[q.id][key] ? fmtMs(med(results.q[q.id][key])) : 'failed'}`).join(', '), 'ok');
-      } catch (e) { log(`${nameOf(key)}: FAILED: ${e.message.split('\n')[0]}`, 'err'); }
-      finally { await pool.close(); }
+        render();
+      }
+      results.peak[key] = MEM.peak;
+      log(`${nameOf(key)}: ` + TESTS.map(q => `${q.label} ${results.q[q.id][key] ? fmtMs(med(results.q[q.id][key])) : 'failed'}`).join(', ') + ` · peak engine memory ${MemMonitor.fmt(MEM.peak)}`, 'ok');
     }
     if (profile) {
-      const p = await saveProfile(ds, results), src = inMem ? 'memory' : 'http';
+      const p = await saveProfile(ds, results), s = inMem ? 'memory' : 'file';
       renderProfile(p);
-      log(`Profile saved for ${ds.name} (${fmtRows(rows)} rows): ` + TESTS.map(q => `${q.label} → ${p.tests[q.id].entries[`${src}:${rows}`]?.engines ?? '?'}`).join(', '), 'ok');
+      log(`Profile saved for ${ds.name} (${fmtRows(rows)} rows): ` + TESTS.map(q => `${q.label} → ${p.tests[q.id].entries[`${s}:${rows}`]?.engines ?? '?'}`).join(', '), 'ok');
     }
     label = 'Done'; step = total; paint(); render();
-  } finally { clearInterval(tick); }
+  } finally { clearInterval(tick); if (inMem) await Engine.cache.drop('bench_t').catch(() => {}); }
 }
 
-const uiOptions = () => ({
-  ds: dsOf($('data').value), runs: Math.max(1, +$('runs').value || 3), inMem: $('source').value === 'table',
-  split: $('split').value, size: +$('block').value,
-});
+const uiOptions = () => ({ ds: dsOf($('data').value), runs: Math.max(1, +$('runs').value || 3), inMem: $('source').value === 'table' });
 $('go').onclick = guard(async () => {
   TESTS = pickedTests();
   if (!TESTS.length) return log('Pick at least one test.', 'err');
   const picked = [...$('counts').querySelectorAll('input:checked')].map(c => c.value);
-  if (!picked.length) return log('Pick at least one engine count.', 'err');
+  if (!picked.length) return log('Pick at least one worker count.', 'err');
   busy(true);
   try { await runBench({ ...uiOptions(), counts: picked.filter(v => v !== 'auto').map(Number).sort((a, b) => a - b), auto: picked.includes('auto') }); }
   finally { busy(false); }
 });
-const ALL = () => Array.from({ length: MAX_AUTO }, (_, k) => k + 1);
+const ALL = () => [...new Set([1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64].filter(n => n <= MAXW).concat(MAXW))];
 $('prof1').onclick = guard(async () => {
   TESTS = pickedTests();
   if (!TESTS.length) return log('Pick at least one test.', 'err');
   busy(true);
-  try { await runBench({ ...uiOptions(), counts: ALL(), auto: false, profile: true }); }
+  try { await ready; await runBench({ ...uiOptions(), counts: ALL(), auto: false, profile: true }); }
   finally { busy(false); }
 });
-// Every generated dataset, smallest first, over HTTP (the big ones do not fit in memory).
 $('profAll').onclick = guard(async () => {
   TESTS = pickedTests();
   if (!TESTS.length) return log('Pick at least one test.', 'err');
@@ -498,6 +337,7 @@ $('profAll').onclick = guard(async () => {
   if (!list.length) return log('No generated datasets yet: run generate-test-parquet-files.html first.', 'err');
   busy(true);
   try {
+    await ready;
     for (const ds of list) {
       log(`=== Profiling ${ds.name} (${fmtRows(ds.rows)} rows) ===`);
       await runBench({ ...uiOptions(), ds, inMem: false, counts: ALL(), auto: false, profile: true });
@@ -505,16 +345,15 @@ $('profAll').onclick = guard(async () => {
     log('Profile of all datasets finished.', 'ok');
   } finally { busy(false); }
 });
-
 $('unit').onchange = () => results && render();
 
-// ?profile=all&runs=N profiles every generated dataset without clicks (for unattended runs); ?profile=this does the selected one.
+// ?profile=all&runs=N profiles every generated dataset without clicks; ?profile=this does the selected one.
 (async () => {
   const qs = new URLSearchParams(location.search);
   if (!qs.get('profile')) return;
-  await datasetsReady;
+  await datasetsReady; await ready;
   if (qs.get('runs')) $('runs').value = qs.get('runs');
-  if (qs.get('data')) { $('data').value = qs.get('data'); $('data').onchange(); }
+  if (qs.get('data')) $('data').value = qs.get('data');
   if (qs.get('source')) $('source').value = qs.get('source');
   (qs.get('profile') === 'all' ? $('profAll') : $('prof1')).click();
 })();
@@ -552,39 +391,31 @@ function render() {
   if (!counts.length) return;
   const done = results.tests.filter(x => counts.some(n => q[x.id][n]?.length)), base = counts[0];
   const m = (id, n) => q[id][n]?.length ? med(q[id][n]) : null;
-  // Display unit: time, or source rows processed per second (millions on the chart).
   const perSec = $('unit').value === 'rows', rps = ms => results.rows / (ms / 1000);
   const fmtRps = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M rows/s' : Math.round(v / 1e3) + 'k rows/s';
   const show = ms => perSec ? fmtRps(rps(ms)) : fmtMs(ms);
   const series = counts.map((n, i) => ({ n, name: nameOf(n), color: n === 'auto' ? 'var(--auto)' : COLORS[i % COLORS.length] }));
   $('lg1').innerHTML = $('lg2').innerHTML = series.map(s => `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('');
-  $('h1').textContent = perSec ? 'Rows per second by engine count (median, higher is better)' : 'Query time by engine count (median, lower is better)';
+  $('h1').textContent = perSec ? 'Rows per second by worker count (median, higher is better)' : 'Query time by worker count (median, lower is better)';
   bars($('c1'), done.map(x => x.label), series.map(s => ({ ...s,
     vals: done.map(x => m(x.id, s.n) && (perSec ? rps(m(x.id, s.n)) / 1e6 : m(x.id, s.n))),
     fmt: perSec ? v => fmtRps(v * 1e6) : fmtMs })), perSec ? 'M' : ' ms');
   bars($('c2'), done.map(x => x.label), series.map(s => ({ ...s, vals: done.map(x => m(x.id, s.n) && m(x.id, base) / m(x.id, s.n)), fmt: v => v.toFixed(2) + '×' })), '×', 1);
   $('c2').insertAdjacentHTML('beforeend', `<div class="note">Speedup = median time with ${nameOf(base)} ÷ median time for each column. Dashed line = no change.</div>`);
-
   const sum = n => done.reduce((a, x) => a + (m(x.id, n) || 0), 0);
   const ok = (id, n) => check[id][n] == null ? '' : check[id][n] ? ' <span class="ok">✓</span>' : ' <span class="err">✗</span>';
-  // min/max in time = fastest/slowest run; in rows/s the order flips (slowest run = lowest rate).
   const range = a => perSec ? `${show(Math.max(...a))} / ${show(Math.min(...a))}` : `${show(Math.min(...a))} / ${show(Math.max(...a))}`;
   $('tbl').innerHTML = `<table><tr><th>Query</th>${counts.map(n => `<th>${nameOf(n)}</th><th>min / max</th>`).join('')}<th>Best speedup</th></tr>` +
     done.map(x => {
       const best = Math.max(...counts.filter(n => m(x.id, n)).map(n => m(x.id, base) / m(x.id, n)));
-      const tag = x.byKey && results.split === 'rows' ? ' <span class="err" title="Needs all of a customer\'s rows on one engine">(needs split by customer)</span>' : '';
-      return `<tr><td>${x.label}${tag}</td>${counts.map(n => { const a = q[x.id][n]; return a?.length ? `<td>${show(med(a))}${ok(x.id, n)}${n === 'auto' ? ` <span class="off">(${results.plan.byId[x.id]})</span>` : ''}</td><td>${range(a)}</td>` : '<td>-</td><td>-</td>'; }).join('')}<td>${best.toFixed(2)}×</td></tr>`;
+      return `<tr><td>${x.label}</td>${counts.map(n => { const a = q[x.id][n]; return a?.length ? `<td>${show(med(a))}${ok(x.id, n)}${n === 'auto' ? ` <span class="off">(${results.plan.byId[x.id]})</span>` : ''}</td><td>${range(a)}</td>` : '<td>-</td><td>-</td>'; }).join('')}<td>${best.toFixed(2)}×</td></tr>`;
     }).join('') +
     `<tr><td><b>Total</b> (all queries)</td>${counts.map(n => `<td><b>${perSec ? fmtRps(results.rows * done.length / (sum(n) / 1000)) : fmtMs(sum(n))}</b></td><td>${(sum(base) / sum(n)).toFixed(2)}×</td>`).join('')}<td></td></tr>` +
-    `<tr><td>Engine start-up</td>${counts.map(n => `<td colspan="2">${results.start[n] != null ? fmtMs(results.start[n]) : '-'}</td>`).join('')}<td></td></tr>` +
-    (results.inMem ? `<tr><td>Load partitions into memory</td>${counts.map(n => `<td colspan="2">${results.load[n] != null ? fmtMs(results.load[n]) : '-'}</td>`).join('')}<td></td></tr>` : '') +
-    `<tr><td>DuckDB memory (all engines)</td>${counts.map(n => `<td colspan="2">${results.peak[n] != null ? (results.peak[n] / 1048576).toFixed(0) + ' MB' : '-'}</td>`).join('')}<td></td></tr></table>` +
-    `<div class="note">${results.base} (${results.rows.toLocaleString()} rows), ${results.inMem ? 'in-memory tables' : 'Parquet over HTTP'}, split ${results.profile || results.split === 'auto' ? 'per test (equal row ranges; customer split for Join/Window)' : results.split === 'rows' && !results.size ? 'into equal row blocks, one per engine (rows ÷ engines)' : results.split === 'rows' ? `into ${results.blocks} row blocks of ${results.size.toLocaleString()} (dealt round-robin to the engines)` : 'by hash of customer_id (one file per engine)'}. ` +
-    (results.plan ? `<b>Auto</b> (prescan ${fmtMs(results.plan.ms)}): each test was timed on a sample with 1 and ${MAX_AUTO} engines to measure its work and its cost per extra engine; ` +
-      `its engine count (shown in brackets) = √(work ÷ cost). Data is split into equal row blocks, except Join/Window, which use the customer split. ` : '') +
-    `Rows/s = source rows ÷ query time. Times are wall-clock for the whole job: all engines in parallel + combining partial results on engine 1. ` +
-    `✓ = same answer as 1 engine reading the whole file. One discarded warm-up per query. ` +
-    `*Sort: each engine sorts its own partition; merging the sorted runs into one global order is not included.</div>`;
+    (results.inMem ? `<tr><td>Load into engine memory</td><td colspan="${counts.length * 2}">${results.load != null ? fmtMs(results.load) : '-'}</td><td></td></tr>` : '') +
+    `<tr><td>Peak engine memory (server process)</td>${counts.map(n => `<td colspan="2">${results.peak[n] != null ? MemMonitor.fmt(results.peak[n]) : '-'}</td>`).join('')}<td></td></tr></table>` +
+    `<div class="note">${results.base} (${results.rows.toLocaleString()} rows), ${results.inMem ? 'in-memory table' : 'Parquet from disk'}. ` +
+    (results.plan ? `<b>Auto</b>${results.plan.ms ? ` (prescan ${fmtMs(results.plan.ms)})` : ''}: worker count per test (in brackets) from the saved profile, else √(work ÷ cost per worker) measured on a sample. ` : '') +
+    `Times are measured inside the engine (planning + execution). Rows/s = source rows ÷ query time. ✓ = same answer as 1 worker. One discarded warm-up per query.</div>`;
 }
 </script>
 </body>

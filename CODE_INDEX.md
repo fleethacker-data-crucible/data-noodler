@@ -1,147 +1,108 @@
 # Data Noodler — Code Index
 
-Quick map for future edits. Line numbers are as of 2026-09-30; re-check them after edits.
+Quick map for future edits. Line numbers are as of 2026-10-05; re-check them after edits. Runtime story: `ARCHITECTURE.md`.
 
 ## Where we are
 
-- **Data Noodler** is a browser-based flat-file analytics app: projects, Import, Pipeline, Dashboard, Publish, Update, Archives, on DuckDB-WASM engine pools sized by a measured profile.
-- It is hosted by a local PowerShell server (`.server/server.ps1`) that needs no admin rights and no installs.
-- A control panel (`.server/server.html`) opens as a 1400×1000 Edge/Chrome app window. It sets the port and page, starts/stops the site, opens the site in Chrome or Edge, and shows a live log.
-- The site can read and write files **only inside the project root**, through the file API (`/api/fs/*`) and the client helper `js/dn-fs.js`. Data gets into the project by upload (`DNFS.upload`) or by copying it in manually.
-- All paths are relative to the project root, never absolute, so the folder can move to any machine.
+- **Data Noodler** is a browser-based flat-file analytics app: projects, Import, Pipeline, Dashboard, Publish, Update, Archives.
+- All data work runs in the **native C# engine** (`engine/`, ~7.7k lines, C# 5) inside the local PowerShell server (`.server/server.ps1`),
+  compiled at start by `Add-Type` into a cached DLL. No DuckDB, no WebAssembly, no third-party DLLs, no admin rights, no installs.
+- The browser only renders: it sends SQL / declarative queries to `/api/engine/*` (`js/core/engine-client.js`) and gets compact JSON.
+- A control panel (`.server/server.html`) opens as an Edge/Chrome app window: port, page, start/stop, engine check, live log.
+- The site reads/writes files **only inside the project root** (`/api/fs/*`, `js/dn-fs.js`); the engine reads outside data files in place, read-only.
+- All paths are relative to the project root, never absolute.
 
 ## Design rule: keep it modular
 
-Build the app as small single-purpose files, not one massive file:
-- each module owns one job and exposes a small API (for example `DNFS`, `DuckEngine`)
-- a bug stays contained to its module and is easier to find, test and replace
-- new features go in new files under `js/` and load into pages with `<script src="../js/...">`
-
-Known exceptions:
-- `.server/server.html` keeps its CSS/JS inline on purpose, since it is small and self-contained.
-- `.server/server.ps1` (~480 lines) is the largest file. If it grows further, split it into dot-sourced parts (for example `.server/lib/fs-api.ps1`, `browser.ps1`).
+Small single-purpose files, each owning one job behind a small API (`DNFS`, `Engine`, `Widgets`, ...). New features go in new
+files (`js/...` for pages, `engine/<Area>/...cs` for the engine). Exceptions: `.server/server.html` (inline CSS/JS) and
+`.server/server.ps1` (~860 lines; split into dot-sourced parts if it grows, like `import-api.ps1` / `engine-loader.ps1`).
 
 ## Files
 
 | Path | Purpose |
 |---|---|
 | `start-server.cmd` | Entry point. Runs `.server/server.ps1` with a hidden PowerShell window. |
-| `.server/server.ps1` | HTTP server: site (range requests, COOP/COEP, parallel static files), control panel API, file API (incl. copy), project trash, logging, browser launch. |
-| `.server/server.html` | Control panel UI (inline CSS + JS). |
-| `.server/import-api.ps1` | Import API (dot-sourced): read-only access to source files outside the project, background jobs, 10 s warn / 30 s timeout. See ARCHITECTURE.md 4b. |
-| `js/import/external-source.js` | `ExternalSource`: client for the import API (probe, read URL, copy with progress) + `verify()` (columns, types, rows, values). |
-| `config/users.json` | Shared user list (`first, middle, last, type, display`), edited in the panel's User Access dialog (`/api/users`); pages read `/config/users.json` for user drop-downs. |
-| `.server/settings.json` | Saved `port`, `page`, `fileThreads`. Written by the server. |
-| `.server/fonts/` | Exo 2 + Syne Mono for the panel. |
-| `.server/logs/` | `Data_Noodler_Server_Logs_YYYY_MM_DD_HHMMSS.log`, one per session. |
-| `.server/.pid` | PID of the running server, used to stop a stale instance on relaunch. |
-| `%LOCALAPPDATA%\data-noodler\.profile*` | Browser profiles (outside the project): panel (`.profile`), site (`.profile-site-edge` / `-chrome`). |
-| `html/index.html` | Window size/position test page. |
-| `html/thread-bench.html` | Threaded (coi) DuckDB build vs thread count. Threaded build can't load extensions in this DuckDB-WASM, so it falls back to single-threaded. |
-| `html/engine-bench.html` | Engine pool benchmark: 1–16 engines, splits, tests, Auto, Profile (saves `js/duckdb/optimal-engine-profile.json`). |
-| `html/generate-test-parquet-files.html` | Builds the 50-column test datasets in `test-data/gen/` (parallel, resumable, Verify button). |
-| `html/duckdb-test.html` | Minimal DuckEngine query test. |
+| `.server/server.ps1` | HTTP server: site, panel API, file API, engine routing, project trash, logging, browser launch. |
+| `.server/engine-loader.ps1` | `Load-DataEngine` (hash `engine/**/*.cs` → cached DLL in `%LOCALAPPDATA%\data-noodler\engine\`, else `Add-Type` compile), `New-DataEngine`. |
+| `.server/server.html` | Control panel UI (inline CSS + JS); Engine status via `/api/engine`. |
+| `.server/import-api.ps1` | Outside-file probe (`/api/import/probe`, dead-drive timeouts). `read`/`copy` kept, unused. |
+| `.server/settings.json` | `port`, `portMode`, `page`, `browser`, `theme`, `fileThreads`, `engineWorkers` (≤64), `engineMemory` (share of RAM). |
+| `engine/Core/DataEngine.cs` | `DataEngine`: catalog (views, table functions), `Query`, `Describe`, `Write` (dataset), `Export`, `OpenSource`, `CacheLoad`, `RunPipeline` (DAG), `Status`. |
+| `engine/Core/EngineApi.cs` | `/api/engine/*` routes (answered on engine threads), result JSON. |
+| `engine/Core/Jobs.cs` | `Job` (state, stage, progress, rows, cancel), `JobManager`. |
+| `engine/Core/MemoryGuard.cs` | RAM budget, reservations (`MemoryLease`), free-RAM floor. |
+| `engine/Core/EngineOptions.cs` | Options + `EngineLog` (lines drained into the server log). |
+| `engine/Core/EngineError.cs` | `EngineException` (code + message + HTTP status), `EngineError`, `Json` helpers. |
+| `engine/Arrow/DataSchema.cs` | `DataType`, `Field`, `Schema`, `Column`, `Batch`, `Values` (dates, text, JSON cells). |
+| `engine/Arrow/ColumnBuilder.cs` | Growable column. |
+| `engine/Query/SqlParser.cs` | Lexer, syntax tree, `Parser` (SQL subset). |
+| `engine/Query/Planner.cs` | Name resolution, typing, joins, GROUP BY / aggregates, windows, ORDER BY / LIMIT, lateral aliases → operators. |
+| `engine/Query/Optimizer.cs` | Column pruning (Parquet reads only needed columns). |
+| `engine/Query/Operators.cs` | `ExecCtx`, `Source`, `ChainOp` (parallel per row group), `FilterStep`, `ProjectStep`, `AggOp`, `SortOp`, `LimitOp`, `UnionOp`. |
+| `engine/Query/Expressions.cs` | Bound expressions (vectorised per batch). |
+| `engine/Query/Functions.cs` | Scalar functions. |
+| `engine/Query/Aggregates.cs` | `KeyIndex` (group keys), aggregate states, `AggTable` (partial + merge). |
+| `engine/Query/Join.cs` | `HashJoin`, `JoinProbe`, `OuterJoinOp`. |
+| `engine/Query/Window.cs` | Window functions. |
+| `engine/Query/Cast.cs` | Type conversion, common types. |
+| `engine/Query/QuerySpec.cs` | Declarative widget query → SQL. |
+| `engine/Parquet/*.cs` | `Thrift` (compact protocol), `Compression` (Snappy, GZIP), `Encoding` (RLE, DELTA_*), `ParquetWriter`, `ParquetReader`. |
+| `engine/Providers/CsvProvider.cs` | Streaming CSV parser, detection, inference, widening. |
+| `engine/Providers/SqliteProvider.cs` | `winsqlite3.dll` P/Invoke, SQLite source + export. |
+| `engine/Storage/Datasets.cs` | `PathGuard`, dataset file lists, `DatasetWriter` (atomic swap, `dataset.json`). |
+| `engine/Storage/ParquetSource.cs` | Dataset as a splittable source (one unit per row group). |
+| `engine/Workers/WorkerPool.cs` | Worker threads, `Submit`, ordered bounded `Ordered(...)`. |
+| `tests/engine-tests.ps1` | Engine test suite (85 checks incl. `-Big` 4M-row CSV run). |
+| `js/core/engine-client.js` | `Engine`: `query`, `describe`, `count`, `open`, `write`, `exportTo`, `pipeline`, `job`, `cancel`, `status`, `cache`, `src`, `views`. |
 | `js/dn-fs.js` | `DNFS`: client for the project file API. |
-| `js/duckdb-engine.js` | `createDuckEngine()` / `DuckEngine`: DuckDB-WASM engine loaded from the server; reads project files over HTTP (httpfs, range requests). |
-| `js/duckdb-pool.js` | `DuckPool`: N independent engines; `run(partial, final, n)` runs on each engine's share, then combines. |
-| `js/mem-monitor.js` | `MemMonitor`: live memory graph (tab / browser / system vs limit), polls `/api/mem` (server reads browser process memory). |
-| `js/test-data-gen.js` | `TestDataGen`: 50-column synthetic data SQL, dataset sizes, part plans, manifests. |
-| `js/duckdb/` | DuckDB-WASM builds (`eh` single-threaded, `coi` threaded), `duckdb-config.json`, `ext/v1.5.4/<platform>/` extensions (httpfs, parquet, sqlite_scanner), `optimal-engine-profile.json`. |
-| `test-data/gen/<name>/` | Generated datasets: `part-NNNN.parquet` (ids 0..rows-1 in order) + `manifest.json`. |
-| `js/vendor/` | sql.js (`sql-wasm.js` + embedded binary), used by Import for SQLite files. |
-| `css/theme.css` | Universal dark theme for all app pages (matches the server panel). |
-| `html/home.html` | Project Management home page (default page). |
-| `html/import.html` | Import Data: data/raw list (watched), path import (streamed), schema edit; Stage → data/staged, Import Directly → data/source. |
-| `html/pipeline.html` | Pipeline: steps editor, preview, run. |
-| `html/dashboard.html` | Dashboard: grid canvas (20px snap), Add widget (chart/table), drag/resize, right-side settings popout; state in dashboard/dashboard.json v2. |
-| `html/publish.html` | Publish: self-contained dashboard HTML, CSV/Parquet exports. |
-| `html/update.html` | Update: detect changed sources, re-import, re-run pipeline, show changes. |
-| `html/archives.html` | Archives: snapshot, compare, restore, delete. |
-| `js/core/ui.js` | `UI`: toasts, dialogs (confirm/form), formatting, data tables, `guard`. |
-| `js/core/user-picker.js` | `UserPicker`: owner/developer drop-downs with search, fed by `config/users.json`. |
-| `js/core/projects.js` | `Projects`: project CRUD, layout, datasets, trash. |
-| `js/core/project-log.js` | `ProjectLog`: per-project monthly activity log. |
-| `html/app.html` | App shell: global header (module initials, "Data Noodler", module · project, Server + DuckDB status) and a frame the current page loads into. `Shell.go(id, project)`, URL `app.html?m=<id>&project=`. |
-| `js/core/embed.js` | In `<head>` of home + the 6 modules: reloads into the shell if opened alone; inside it, hides the page's own logo/title and adds Back at the left of the toolbar row. |
-| `js/core/windows.js` | `Windows`: module list; opens a module in the same window as Projects (`?project=`). Back (ModulePage) returns to `home.html?project=` with it expanded. |
-| `js/core/module-page.js` | `ModulePage.init()`: shared start-up for module pages (project, header, log). |
-| `js/core/data-engine.js` | `DataEngine`: shared engine, engine count from the profile, `parallel()` row-range or per-part jobs. |
-| `js/core/parquet-writer.js` | `ParquetWriter`: prescan size estimate, write one Parquet or split parts + manifest, `sql(E, d)` reader. |
-| `js/import/source-reader.js` | `SourceReader`: CSV/Parquet over HTTP, SQLite via sql.js. |
-| `js/pipeline/steps.js` | `PipelineSteps`: step types → SQL. |
-| `js/pipeline/runner.js` | `PipelineRunner`: views, run outputs, run history (used by Pipeline and Update). |
-| `js/dashboard/widgets.js` | `Widgets`: widget model (chart: bar/line, X/Y axis; table: ordered fields), `spec`/`ready`, partial/final SQL, size-aware SVG renderers. |
-| `assets/fonts/` | Exo 2 + Syne Mono for site pages. |
-| `projects/` | Analytics projects (see PROJECT_PLAN.md for the layout); `projects/.trash/` holds deleted ones. |
-| `test-data/` | Sample CSVs + `make-test-data.ps1` generator. |
-| `temp/` | Upload temp files (created on demand, cleaned on start). |
+| `js/import/external-source.js` | `ExternalSource`: probe for files outside the project. |
+| `js/pipeline/steps.js` | `PipelineSteps`: step → SQL (pipelines are now `sql` steps; older form steps are converted on load). |
+| `js/pipeline/sql-editor.js` | `SqlEditor`: SQL / JSON (`lang`) code editor (line numbers, colours, Tab/Shift+Tab, auto-indent, SQL completion). CSS in theme.css. |
+| `js/pipeline/runner.js` | `PipelineRunner`: views for preview, `run` via `Engine.pipeline` (optionally only outputs downstream of changed datasets). |
+| `js/dashboard/widgets.js` | `Widgets`: built-in chart/table model, `query(w)` (declarative), SVG renderers. |
+| `widgets/<id>/widget.json` (+ `spec.json`) | Global widget packages: a folder with a valid manifest shows in the Dashboard Add widget list. `chart`, `table` = built-ins; others Vega / Vega-Lite. |
+| `js/widgets/vega-widget.js` | `VegaWidget` (detect inputs/options from a spec, query, theme config, render) and `WidgetRegistry` (list/save/remove packages). Manifest format in the header. |
+| `js/widgets/widget-settings.js` | `WidgetSettings.render`: settings popout built from a manifest (Dashboard + Widget Builder). |
+| `js/widgets/color-picker.js` | `ColorPicker.swatch`: SV square, hue strip, hex, theme palette, recent colours. |
+| `js/vendor/vega.min.js`, `vega-lite.min.js` | Vendored Vega 5.30 / Vega-Lite 5.21 (offline). |
+| `html/widget-builder.html` | Widget Builder (orange button on home; global, no project): paste Vega/Vega-Lite JSON, settings popout, preview on sample or project data, save to widgets/. |
+| `js/mem-monitor.js` | `MemMonitor`: live graph of engine (server process), browser, system memory (`/api/mem`). |
+| `js/test-data-gen.js` | `TestDataGen`: 50-column synthetic data SQL (engine dialect), sizes, part plans. |
+| `js/core/ui.js`, `user-picker.js`, `projects.js`, `project-log.js`, `windows.js`, `module-page.js`, `embed.js`, `theme.js` | Shared page code (unchanged by the engine switch). |
+| `css/theme.css`, `assets/fonts/` | Universal theme (see `THEME_GUIDE.md`). |
+| `html/app.html` | Redirect only (old shell links → the module page). |
+| `js/core/embed.js` | Global header on every page (logo initials, Data Noodler, module · project, Server + Engine status); `GlobalHeader.setInfo`. |
+| `html/home.html`, `import.html`, `pipeline.html`, `dashboard.html`, `publish.html`, `update.html`, `archives.html` | Modules. |
+| `html/engine-bench.html` | Worker-count benchmark, Auto, profile → `config/engine-profile.json`. |
+| `html/thread-bench.html` | Worker sweep per query (Parquet or engine in-memory table). |
+| `html/engine-test.html` | SQL console. |
+| `html/generate-test-parquet-files.html` | Test datasets → `test-data/gen/<name>/` (parts + `manifest.json`). |
+| `config/users.json`, `config/engine-profile.json` | Shared users; saved engine profile. |
+| `projects/<folder>/` | Projects (`data/raw`, `data/staged/<ds>/`, `data/source/<ds>/`, `pipeline/`, `dashboard/`, `publish/`, `archives/`). |
+| `.trash/duckdb-wasm-20261005/` | Retired DuckDB-WASM, sql.js and their JS wrappers (do not use). |
 
-## Data flow
+## Request flow
 
 ```
-start-server.cmd
-  └─ .server/server.ps1
-       ├─ load settings.json ............................ :19
-       ├─ stop stale instance via .pid .................. :92
-       ├─ HttpListener on UI port 8079 .................. :110
-       ├─ open panel: Find-Browser :379 → Open-App :383 → (line :443)
-       └─ main loop :445 ─ request ─┬─ port 8079 → Handle-Ui   :156  (line :462)
-                                    └─ site port → Handle-Site :351  (line :464)
-       exit when: panel sends /api/bye (:474) or no heartbeat for 120s (:475)
+start-server.cmd → .server/server.ps1
+  ├─ engine-loader.ps1: Load-DataEngine :22 → New-DataEngine :55        (server.ps1 :584-596)
+  ├─ main loop :818 → Handle-Ui :260 (panel; 'api/engine' :340) | Handle-Site :638
+  │                   └─ Read-EngineLog :598 each pass (engine log → server log)
+  └─ Handle-Site :638
+       ├─ api/engine/<op> :647 → Test-FsRequest :425 → EngineApi.Handle (engine thread closes the response)
+       ├─ api/fs/<op> → Handle-Fs :439 → Resolve-ProjectPath :401
+       ├─ api/import/<op> → import-api.ps1
+       └─ static → Start-StaticJob :559 (runspace pool) | *.html → Send-File :145 (+ token)
 ```
 
-### Control panel ⇄ server (port 8079)
-
-| Panel (`server.html`) | Calls | Server (`server.ps1`) |
-|---|---|---|
-| `center()` :194 | — | sizes/centers its own window |
-| `poll()` :262 every 1s (heartbeat) | `GET /api/log?since=` | `'api/log'` :164 → reads `$log` from `Add-Log` :38 |
-| `loadState()` :226 | `GET /api/state` | `'api/state'` :158 → `Get-Pages` :50 |
-| `#apply` :281 | `POST /api/settings` | `'api/settings'` :168 → `Set-SitePort` :117, `Save-Settings` :28 |
-| `#random` :299 | `POST /api/random` | `'api/random'` :184 → `Test-PortFree` :112 |
-| `#toggle` :304 | `POST /api/site` | `'api/site'` :201 → `Start-Site` :133 / `Stop-Site` :142 |
-| picker :289 | `POST /api/open {browser}` | `'api/open'` :215 → `Open-App` :383 → `Raise-Window` :426 |
-| `#clear` :298 | `POST /api/clear` | `'api/clear'` :226 |
-| `clientLog()` :210 | `POST /api/clientlog` | `'api/clientlog'` :210 → `Add-Log` |
-| `pagehide` :311 | `POST /api/bye` | `'api/bye'` :227 → shutdown in 4s unless the next poll cancels it |
-| `addLines()` :242 | — | renders log rows (req / sys / err / start / stop) |
-
-### Site pages ⇄ server (site port, default 47823)
+### Engine call path
 
 ```
-browser GET /            → Handle-Site :351 → 302 to /html/<page>
-browser GET /html/x.html → Send-File :76 (-Token injects window.DN_TOKEN before </head>) → Send-Stream :66
-browser GET /js/...      → Send-File :76 → Send-Stream :66
-every request            → Add-Log :38 → live log + session log file
+Engine.query(sql, { views })  (js/core/engine-client.js call() :20)
+  → POST /api/engine/query → EngineApi.Route → DataEngine.Query
+      → Parser.ParseQuery → Planner.Plan → Optimizer.Prune → op.Run(ExecCtx)
+      → ChainOp: WorkerPool.Ordered(row groups) → ParquetReader.ReadRowGroup → steps → AggTable / SortOp / ...
+  ← { cols, types, rows, rowCount, truncated, ms }
+Engine.write / exportTo / pipeline → job id → Engine.job() polls GET /api/engine/job?id=
 ```
-
-### App file access (project root only)
-
-```
-page JS → DNFS.<op>()  (js/dn-fs.js, call() :9 adds X-DN-Token header)
-        → /api/fs/<op> → Handle-Site :351 → Handle-Fs :282
-             ├─ Test-FsRequest :268   Host + Origin + token check (blocks other sites / DNS rebinding)
-             ├─ Resolve-ProjectPath :244   rejects .., absolute paths, ':', dot-folders, links
-             └─ op:  list :286 · stat :293 · read :299 · write :304 · mkdir :322 · delete :327 · move :337
-                     write/upload: stream → temp/upload-<id>.tmp → move into place
-             errors: FsError :241 → JSON {ok:false,error} + light-red log line
-```
-
-| `DNFS` method (js/dn-fs.js) | Line | API op |
-|---|---|---|
-| `list(path, {recursive})` | 24 | `list` |
-| `stat` / `exists` | 26–27 | `stat` |
-| `read` / `readText` / `readJSON` / `readBuffer` | 33–36 | `read` |
-| `readJSONOr(path, fallback)`: optional file, stat first (no 404 for new projects) | 38 | `stat` + `read` |
-| `write` / `writeText` / `writeJSON` | 35–38 | `write` |
-| `upload(file, folder)` | 41 | `write` |
-| `mkdir` / `remove` / `move` | 43–45 | `mkdir` / `delete` / `move` |
-
-### Analytics engine (browser only)
-
-`html/thread-bench.html`, `html/duckdb-test.html` → `js/duckdb-engine.js` `DuckEngine` (:3)
-- `load()` :29 starts the DuckDB worker + wasm from a user-picked folder (`pickFolder` :58 / `restoreFolder` :64)
-- `register` :76 / `openFiles` :84 → `query` :89 / `exec` :98 / `page` :136
-- `exportTo` :119, `exportArrow` :140, `loadArrow` :148 write and read through File System Access handles
-
-Next step: route DuckEngine file I/O through `DNFS` so the engine reads and writes project files directly, without folder pickers.

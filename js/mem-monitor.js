@@ -1,20 +1,20 @@
-// Live memory graph. Global: MemMonitor. Polls /api/mem (server reads the browser's process memory).
+// Live memory graph. Global: MemMonitor. Polls /api/mem (server process = the native engine, browser, system).
 //   const m = MemMonitor.mount(el, { everyMs: 250, windowSec: 120 })
-//   m.setLimit(bytes, 'DuckDB limit 12 × 0.8 GB')   dashed limit line (null to hide)
-//   m.mark('12 engines: Sort')                      labelled marker at the current time
+//   m.setLimit(bytes, 'Engine budget')              dashed limit line (null to hide)
+//   m.mark('12 workers: Sort')                      labelled marker at the current time
 //   m.resetPeak()
-// Lines: this tab (renderer process = page + all engine workers), whole browser, system RAM in use.
+// Lines: the engine (server process, where all queries run), whole browser, system RAM in use.
 const MemMonitor = (() => {
   const GB = 2 ** 30;
   const fmt = b => b >= GB ? (b / GB).toFixed(2) + ' GB' : Math.round(b / 2 ** 20) + ' MB';
   const css = (el, v, d) => getComputedStyle(el).getPropertyValue(v).trim() || d;
 
   function mount(el, { everyMs = 250, windowSec = 120 } = {}) {
-    el.innerHTML = `<div class="legend"><span><i style="background:var(--s1)"></i>This tab <b data-v="tab">-</b></span>
+    el.innerHTML = `<div class="legend"><span><i style="background:var(--s1)"></i>Engine (server) <b data-v="tab">-</b></span>
       <span><i style="background:var(--s3)"></i>Browser <b data-v="browser">-</b></span>
       <span><i style="background:var(--s4)"></i>System in use <b data-v="sys">-</b></span>
       <span><i style="background:var(--err)"></i><span data-v="limitLbl">Limit</span> <b data-v="limit">-</b></span>
-      <span>Peak tab <b data-v="peak">-</b></span><span class="off" data-v="src"></span></div>
+      <span>Peak engine <b data-v="peak">-</b></span><span class="off" data-v="src"></span></div>
       <canvas style="width:100%;height:220px;display:block"></canvas>`;
     const cv = el.querySelector('canvas'), ctx = cv.getContext('2d'), V = k => el.querySelector(`[data-v="${k}"]`);
     const max = Math.ceil(windowSec * 1000 / everyMs);
@@ -26,10 +26,11 @@ const MemMonitor = (() => {
         const r = await fetch('/api/mem', { headers: { 'X-DN-Token': window.DN_TOKEN }, cache: 'no-store' });
         if (!r.ok) throw new Error(r.status);
         const j = await r.json();
-        sysTotal = j.sysTotal; peak = Math.max(peak, j.tab);
-        samples.push({ t: performance.now(), tab: j.tab, browser: j.browser, sys: j.sysTotal - j.sysFree });
+        const eng = j.engine ?? j.tab;
+        sysTotal = j.sysTotal; peak = Math.max(peak, eng);
+        samples.push({ t: performance.now(), tab: eng, browser: j.browser, sys: j.sysTotal - j.sysFree });
         if (samples.length > max) samples.shift();
-        V('tab').textContent = fmt(j.tab); V('browser').textContent = fmt(j.browser);
+        V('tab').textContent = fmt(eng); V('browser').textContent = fmt(j.browser);
         V('sys').textContent = `${fmt(j.sysTotal - j.sysFree)} / ${fmt(j.sysTotal)}`; V('peak').textContent = fmt(peak);
         V('src').textContent = `(${j.source})`;
       } catch { V('src').textContent = '(no data: is the server running?)'; }

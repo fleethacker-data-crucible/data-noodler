@@ -57,7 +57,7 @@
 </style>
 </head>
 <body>
-<h1>Engine benchmark: DuckDB-WASM threads on Parquet</h1>
+<h1>Worker benchmark: native engine workers on Parquet</h1>
 
 <div id="env">Starting engine…</div>
 
@@ -67,11 +67,11 @@
     <option value="test-data/sales_10m">sales_10m (10M rows)</option>
   </select></label>
   <label>Read from <select id="source">
-    <option value="file">Parquet file (HTTP range reads)</option>
-    <option value="table">In-memory table</option>
+    <option value="file">Parquet (read from disk)</option>
+    <option value="table">In-memory table (cached in the engine)</option>
   </select></label>
   <label>Runs <input id="runs" type="number" min="1" max="10" value="3"></label>
-  <span>Threads <span id="threads"></span></span>
+  <span>Workers <span id="threads"></span></span>
   <button id="go" disabled>Run benchmark</button>
 </div>
 
@@ -82,8 +82,8 @@
 </div>
 
 <div class="charts">
-  <div class="box chart"><h3>Query time by thread count (median, lower is better)</h3><div class="legend" id="lg1"></div><div id="c1"></div></div>
-  <div class="box chart"><h3>Speedup vs 1 thread (higher is better)</h3><div class="legend" id="lg2"></div><div id="c2"></div></div>
+  <div class="box chart"><h3>Query time by worker count (median, lower is better)</h3><div class="legend" id="lg1"></div><div id="c1"></div></div>
+  <div class="box chart"><h3>Speedup vs 1 worker (higher is better)</h3><div class="legend" id="lg2"></div><div id="c2"></div></div>
 </div>
 
 <h2>Results</h2>
@@ -91,18 +91,19 @@
 <div id="tip"></div>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/test-data-gen.js"></script>
 <script>
-const E = DuckEngine, $ = id => document.getElementById(id);
+const $ = id => document.getElementById(id);
 const log = (m, c = '') => { const d = document.createElement('div'); d.className = c; d.textContent = m; $('log').append(d); $('log').scrollTop = 1e9; };
 const fmtMs = ms => ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : Math.round(ms) + ' ms';
 const med = a => { const b = [...a].sort((x, y) => x - y), h = b.length >> 1; return b.length % 2 ? b[h] : (b[h - 1] + b[h]) / 2; };
 const COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)'];
 const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };
-const TIMEOUT = 300000;
-const timed = (sql) => Promise.race([E.time(sql), new Promise((_, r) => setTimeout(() => r(new Error('query timed out after 5 min')), TIMEOUT))]);
+// Engine time of one query at n workers (the engine reports its own ms; JSON transfer not included).
+const timed = async (sql, n) => (await Engine.query(sql, { workers: n, limit: 10 })).ms;
 
-// Each query reads from SRC (the Parquet file or the in-memory table).
+// Each query reads from SRC (the Parquet file or the engine's in-memory table).
 let SRC = '';
 const QUERIES = [
   { id: 'scan',   label: 'Scan + sum',  sql: () => `SELECT count(*), sum(total), avg(unit_price), max(order_date) FROM ${SRC}` },
@@ -119,74 +120,71 @@ const paint = () => { $('fill').style.width = (100 * step / total) + '%'; $('msg
 const begin = l => { label = l; t0 = performance.now(); paint(); };
 
 // ---- start ----
+let info;
 (async () => {
   try {
-    const i = await E.init({ build: 'auto' }); // this page tests the threaded build
+    info = await Engine.status();
     $('env').innerHTML = [
-      ['DuckDB', i.version], ['Build', i.build === 'coi' ? 'threaded (coi)' : 'single-threaded (eh)'],
-      ['Cross-origin isolated', i.isolated ? 'yes' : 'no'], ['CPU logical cores', navigator.hardwareConcurrency],
-      ['Max threads', i.maxThreads], ['Default threads (config)', i.threads], ['Memory limit', i.memoryLimit],
+      ['Engine', `native ${info.version}`], ['Workers', info.workers], ['CPU logical cores', info.cores],
+      ['Memory budget', (info.memory.budget / 1073741824).toFixed(1) + ' GB'], ['Process', info.is64 ? '64-bit' : '32-bit'],
     ].map(([k, v]) => `<span>${k}: <b>${v}</b></span>`).join('');
-    const opts = [...new Set([1, 2, 4, 8, 16, 32].filter(n => n <= i.maxThreads).concat(i.maxThreads))];
-    $('threads').innerHTML = opts.map(n => `<label><input type="checkbox" value="${n}" ${n <= 4 ? 'checked' : ''}> ${n}</label>`).join(' ');
-    if (i.note) log(i.note, 'err');
-    else if (i.maxThreads === 1) log('Not cross-origin isolated: only 1 thread is available. Restart the server so it sends the COOP/COEP headers.', 'err');
-    log(`DuckDB ${i.version} ready (${i.build}, ${i.threads} thread${i.threads > 1 ? 's' : ''})`, 'ok');
+    const opts = [...new Set([1, 2, 4, 8, 16, 32, 64].filter(n => n <= info.workers).concat(info.workers))];
+    $('threads').innerHTML = opts.map(n => `<label><input type="checkbox" value="${n}" ${n <= 4 || n === info.workers ? 'checked' : ''}> ${n}</label>`).join(' ');
+    log(`Native engine ${info.version} ready (${info.workers} workers)`, 'ok');
     $('go').disabled = false;
-  } catch (e) { $('env').textContent = 'Engine failed to start: ' + e.message; log(e.message, 'err'); console.error(e); }
+  } catch (e) { $('env').textContent = 'Engine not available: ' + e.message; log(e.message, 'err'); console.error(e); }
 })();
 
+// Generated datasets (test-data/gen/<name>/) are listed too and read as dataset folders.
+TestDataGen.list().then(list => list.forEach(m => $('data').insertAdjacentHTML('beforeend', `<option value="gen:${m.name}">${m.name} (${(m.rows / 1e6).toFixed(1)}M rows)</option>`)));
 // Make sure <base>.parquet exists; build it from <base>.csv on first use.
 async function ensureParquet(base) {
+  if (base.startsWith('gen:')) return `${TestDataGen.DIR}/${base.slice(4)}`;
   const pq = base + '.parquet';
   if ((await DNFS.stat(pq)).exists) return pq;
   begin(`Converting ${base}.csv to Parquet (one time)`);
-  const csv = await E.source(base + '.csv');
-  const w = await E.writeProjectFile(`SELECT * FROM read_csv('${csv}')`, pq, 'FORMAT PARQUET, COMPRESSION ZSTD');
-  await E.unregister(csv);
-  log(`Wrote ${pq}: ${(w.bytes / 1048576).toFixed(1)} MB in ${fmtMs(w.ms)}`, 'ok');
+  const t = performance.now();
+  const w = await Engine.exportTo({ sql: `SELECT * FROM read_csv(${Engine.lit(base + '.csv')})`, to: pq, format: 'parquet' });
+  log(`Wrote ${pq}: ${(w.bytes / 1048576).toFixed(1)} MB in ${fmtMs(performance.now() - t)}`, 'ok');
   return pq;
 }
 
 // ---- benchmark ----
-let results = null; // { threads: [..], q: { id: { [threads]: [ms...] } }, peak: { [threads]: bytes } }
+let results = null; // { threads: [..], q: { id: { [workers]: [ms...] } }, peak: { [workers]: bytes } }
 $('go').onclick = guard(async () => {
   const threads = [...$('threads').querySelectorAll('input:checked')].map(c => +c.value).sort((a, b) => a - b);
-  if (!threads.length) return log('Pick at least one thread count.', 'err');
+  if (!threads.length) return log('Pick at least one worker count.', 'err');
   const runs = Math.max(1, +$('runs').value || 3);
   $('go').disabled = true;
   const tick = setInterval(paint, 100);
   try {
     step = 0; total = QUERIES.length * threads.length * (runs + 1);
     const pq = await ensureParquet($('data').value);
-    const name = await E.source(pq);
     if ($('source').value === 'table') {
       begin('Loading Parquet into an in-memory table');
-      const t = await E.time(`CREATE OR REPLACE TABLE bench_t AS SELECT * FROM read_parquet('${name}')`);
-      log(`Loaded into memory in ${fmtMs(t.ms)}`);
+      const t = await Engine.cache.load('bench_t', `SELECT * FROM read_parquet(${Engine.lit(pq)})`);
+      log(`Loaded into engine memory in ${fmtMs(t.ms)} (${(t.bytes / 1048576).toFixed(0)} MB)`);
       SRC = 'bench_t';
-    } else { await E.drop('bench_t'); SRC = `read_parquet('${name}')`; }
-    const rows = (await E.query(`SELECT count(*) FROM ${SRC}`)).rows[0][0];
-    log(`${pq}: ${rows.toLocaleString()} rows, source = ${$('source').value === 'table' ? 'in-memory table' : E.info.build === 'eh' ? 'Parquet over HTTP' : 'Parquet file (loaded into memory: threaded build has no HTTP reads)'}`);
+    } else { await Engine.cache.drop('bench_t'); SRC = `read_parquet(${Engine.lit(pq)})`; }
+    const rows = Number((await Engine.query(`SELECT count(*) FROM ${SRC}`)).rows[0][0]);
+    log(`${pq}: ${rows.toLocaleString()} rows, source = ${$('source').value === 'table' ? 'in-memory table' : 'Parquet from disk'}`);
 
     results = { threads, q: {}, rows, peak: {} };
     for (const q of QUERIES) {
       results.q[q.id] = Object.fromEntries(threads.map(n => [n, []]));
-      // Warm-up at each thread count, then interleave the runs so drift hits every count equally.
-      for (const n of threads) { await E.setThreads(n); begin(`${q.label}: warm-up, ${n} thread(s)`); await timed(q.sql()); step++; }
+      // Warm-up at each worker count, then interleave the runs so drift hits every count equally.
+      for (const n of threads) { begin(`${q.label}: warm-up, ${n} worker(s)`); await timed(q.sql(), n); step++; }
       for (let r = 0; r < runs; r++) {
         for (const n of threads) {
-          await E.setThreads(n);
-          begin(`${q.label}: run ${r + 1}/${runs}, ${n} thread(s)`);
-          results.q[q.id][n].push((await timed(q.sql())).ms);
-          const m = await E.mem(); results.peak[n] = Math.max(results.peak[n] || 0, m.used);
+          begin(`${q.label}: run ${r + 1}/${runs}, ${n} worker(s)`);
+          results.q[q.id][n].push(await timed(q.sql(), n));
+          const m = (await Engine.status()).memory; results.peak[n] = Math.max(results.peak[n] || 0, m.process);
           step++;
         }
       }
-      log(`${q.label}: ` + threads.map(n => `${n}t ${fmtMs(med(results.q[q.id][n]))}`).join(', '), 'ok');
+      log(`${q.label}: ` + threads.map(n => `${n}w ${fmtMs(med(results.q[q.id][n]))}`).join(', '), 'ok');
       render();
     }
-    await E.setThreads(E.info.threads);
     label = 'Done'; step = total; paint();
   } finally { clearInterval(tick); $('go').disabled = false; }
 });
@@ -230,14 +228,14 @@ function render() {
   $('c2').insertAdjacentHTML('beforeend', `<div class="note">Speedup = median time at ${base} thread${base > 1 ? 's' : ''} ÷ median time at N threads. Dashed line = no change.</div>`);
 
   const sum = n => done.reduce((a, x) => a + med(q[x.id][n]), 0);
-  $('tbl').innerHTML = `<table><tr><th>Query</th>${threads.map(n => `<th>${n}t median</th><th>${n}t min / max</th>`).join('')}<th>Best speedup</th></tr>` +
+  $('tbl').innerHTML = `<table><tr><th>Query</th>${threads.map(n => `<th>${n}w median</th><th>${n}w min / max</th>`).join('')}<th>Best speedup</th></tr>` +
     done.map(x => {
       const best = Math.max(...threads.map(n => med(q[x.id][base]) / med(q[x.id][n])));
       return `<tr><td>${x.label}</td>${threads.map(n => { const a = q[x.id][n]; return `<td>${fmtMs(med(a))}</td><td>${fmtMs(Math.min(...a))} / ${fmtMs(Math.max(...a))}</td>`; }).join('')}<td>${best.toFixed(2)}×</td></tr>`;
     }).join('') +
     `<tr><td><b>Total</b></td>${threads.map(n => `<td><b>${fmtMs(sum(n))}</b></td><td>${(sum(base) / sum(n)).toFixed(2)}×</td>`).join('')}<td></td></tr>` +
-    `<tr><td>Peak DuckDB memory</td>${threads.map(n => `<td colspan="2">${((results.peak[n] || 0) / 1073741824).toFixed(2)} GiB</td>`).join('')}<td></td></tr></table>` +
-    `<div class="note">${results.rows.toLocaleString()} rows. Each query gets one discarded warm-up per thread count; runs are interleaved across thread counts. Times include returning the (small) result to the page. SQL:<br>${done.map(x => `<b>${x.label}</b>: <code>${x.sql().replace(/</g, '&lt;')}</code>`).join('<br>')}</div>`;
+    `<tr><td>Peak engine process memory</td>${threads.map(n => `<td colspan="2">${((results.peak[n] || 0) / 1073741824).toFixed(2)} GiB</td>`).join('')}<td></td></tr></table>` +
+    `<div class="note">${results.rows.toLocaleString()} rows. Each query gets one discarded warm-up per worker count; runs are interleaved across worker counts. Times are measured inside the engine (planning + execution), excluding the trip to the page. SQL:<br>${done.map(x => `<b>${x.label}</b>: <code>${x.sql().replace(/</g, '&lt;')}</code>`).join('<br>')}</div>`;
 }
 </script>
 </body>

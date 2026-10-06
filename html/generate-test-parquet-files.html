@@ -46,14 +46,14 @@
 </head>
 <body>
 <h1>Test Parquet generator</h1>
-<p>Builds datasets of synthetic sales data with 50 columns into <code>test-data/gen/&lt;name&gt;/</code>: Parquet part files (ZSTD, 100k-row row groups) plus a <code>manifest.json</code>.
-Every value is computed from the row id, so the data is the same every time and an interrupted run picks up where it stopped. Parts are generated in parallel by several DuckDB engines.</p>
+<p>Builds datasets of synthetic sales data with 50 columns into <code>test-data/gen/&lt;name&gt;/</code>: Parquet part files (Snappy, 100k-row row groups) plus a <code>manifest.json</code>.
+Every value is computed from the row id, so the data is the same every time and an interrupted run picks up where it stopped. The native engine generates each part on all its workers; several parts can be in progress at once.</p>
 
 <div class="row">
   <span>Datasets <span id="sizes"></span></span>
 </div>
 <div class="row">
-  <label>Engines <input id="engines" type="number" min="1" max="16"></label>
+  <label>Parts at once <input id="engines" type="number" min="1" max="8"></label>
   <button id="go">Generate</button>
   <button id="verify">Verify</button>
   <button id="stop" disabled>Stop after current parts</button>
@@ -72,8 +72,7 @@ Every value is computed from the row id, so the data is the same every time and 
 <div class="box scroll"><code id="cols"></code></div>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
-<script src="../js/duckdb-pool.js"></script>
+<script src="../js/core/engine-client.js"></script>
 <script src="../js/test-data-gen.js"></script>
 <script>
 const $ = id => document.getElementById(id), T = TestDataGen;
@@ -82,8 +81,7 @@ const fmtS = ms => ms >= 60000 ? `${Math.floor(ms / 60000)}m ${Math.round(ms % 6
 const MB = b => (b / 1048576).toFixed(0) + ' MB';
 const fmtRows = n => n >= 1e6 ? (n / 1e6) + 'M' : (n / 1e3) + 'k';
 const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };
-const cores = navigator.hardwareConcurrency || 4;
-$('engines').value = Math.max(1, Math.min(16, cores - 1));
+$('engines').value = 2;
 $('sizes').innerHTML = T.SIZES.map(([n, r]) => `<label><input type="checkbox" value="${n}" checked> ${fmtRows(r)}</label>`).join(' ');
 $('cols').textContent = T.COLUMNS.map(([n]) => n).join(', ');
 
@@ -115,14 +113,14 @@ $('stop').onclick = () => { stopping = true; $('stop').disabled = true; log('Sto
 $('go').onclick = guard(async () => {
   const want = [...$('sizes').querySelectorAll('input:checked')].map(c => c.value);
   if (!want.length) return log('Pick at least one dataset.', 'err');
-  const n = Math.max(1, Math.min(16, +$('engines').value || 1));
+  const n = Math.max(1, Math.min(8, +$('engines').value || 1));
   $('go').disabled = $('verify').disabled = true; $('stop').disabled = false; stopping = false;
   await scan();
   // One job per missing part, smallest datasets first.
   const jobs = [];
   for (const name of want) { const s = status[name]; for (const p of s.parts) if (!(await DNFS.stat(p.path)).exists) jobs.push({ name, p }); }
   const totalRows = jobs.reduce((s, j) => s + j.p.rows, 0);
-  log(`${jobs.length} part(s) to build, ${totalRows.toLocaleString()} rows, with ${n} engine(s).`);
+  log(`${jobs.length} part(s) to build, ${totalRows.toLocaleString()} rows, ${n} part(s) at a time.`);
   const t0 = performance.now();
   let doneRows = 0, doneParts = 0, next = 0;
   const tick = setInterval(() => {
@@ -131,31 +129,30 @@ $('go').onclick = guard(async () => {
     $('msg').textContent = `${doneParts}/${jobs.length} parts · ${doneRows.toLocaleString()} rows · ${Math.round(rate).toLocaleString()} rows/s · ${fmtS(el)}` +
       (rate && doneRows < totalRows ? ` · about ${fmtS((totalRows - doneRows) / rate * 1000)} left` : '');
   }, 500);
-  const pool = jobs.length ? await DuckPool.create(Math.min(n, jobs.length), { memoryLimitGB: 1 }) : null;
   try {
-    // Each engine takes the next job until none are left.
-    await (pool ? pool.each(async e => {
+    // n lanes; each takes the next part until none are left.
+    await Promise.all(Array.from({ length: Math.min(n, jobs.length) }, async () => {
       while (!stopping && next < jobs.length) {
         const { name, p } = jobs[next++];
-        // A failed write (e.g. a transient server I/O error) is retried; one bad part must not stop the run.
+        // A failed write (e.g. a transient I/O error) is retried; one bad part must not stop the run.
         let ok = false;
         for (let attempt = 1; attempt <= 3 && !ok; attempt++) {
-          try { await e.writeProjectFile(T.sql(p.first, p.first + p.rows), p.path, 'FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000'); ok = true; }
+          try { await Engine.exportTo({ sql: T.sql(p.first, p.first + p.rows), to: p.path, format: 'parquet' }); ok = true; }
           catch (err) {
             log(`${p.path}: ${err.message}${attempt < 3 ? `; retrying (${attempt}/3)` : '; skipped. Run Generate again to build it.'}`, 'err');
             await new Promise(r => setTimeout(r, 1000 * attempt));
           }
         }
-        if (!ok) { doneRows += p.rows; doneParts++; continue; } // no manifest for this dataset until the part exists
         doneRows += p.rows; doneParts++;
+        if (!ok) continue;   // no manifest for this dataset until the part exists
         const s = status[name]; s.done++;
         if (s.done === s.parts.length) await finish(s);
       }
-    }) : null);
+    }));
     for (const name of want) if (status[name].done === status[name].parts.length && !status[name].manifest) await finish(status[name]);
     log(stopping ? 'Stopped.' : `All done in ${fmtS(performance.now() - t0)}.`, 'ok');
   } finally {
-    clearInterval(tick); await pool?.close();
+    clearInterval(tick);
     $('go').disabled = $('verify').disabled = false; $('stop').disabled = true;
     await scan();
   }
@@ -178,24 +175,23 @@ async function finish(s) {
 // count = rows, min = 0, max = rows-1 and sum = rows*(rows-1)/2 together catch missing, extra and duplicated parts.
 $('verify').onclick = guard(async () => {
   $('go').disabled = $('verify').disabled = true;
-  const e = createDuckEngine();
   try {
-    await e.init({ build: 'eh' });
     await scan();
     for (const [name] of T.SIZES) {
       const s = status[name]; if (!s.manifest) continue;
       $('msg').textContent = `Verifying ${name}…`;
-      const files = '[' + s.parts.map(p => `'${e.url(p.path)}'`).join(', ') + ']';
+      const src = `read_parquet(${Engine.lit(`${T.DIR}/${name}`)})`;
       const t0 = performance.now();
-      const [[c, mn, mx, sm, cols]] = (await e.query(`SELECT count(*), min(id), max(id), sum(id)::VARCHAR, (SELECT count(*) FROM (DESCRIBE SELECT * FROM read_parquet(${files}))) FROM read_parquet(${files})`)).rows;
+      const [[c, mn, mx, sm]] = (await Engine.query(`SELECT count(*), min(id), max(id), CAST(sum(id) AS VARCHAR) FROM ${src}`)).rows;
+      const cols = (await Engine.describe(`SELECT * FROM ${src}`)).length;
       const want = (BigInt(s.rows) * BigInt(s.rows - 1) / 2n).toString();
-      const ok = +c === s.rows && +mn === 0 && +mx === s.rows - 1 && sm === want && +cols === 50;
+      const ok = +c === s.rows && +mn === 0 && +mx === s.rows - 1 && sm === want && cols === 50;
       s.verified = ok ? `<span class="ok">✓ ${(+c).toLocaleString()} rows, ids 0..${(s.rows - 1).toLocaleString()}, ${cols} columns</span>` : `<span class="err">✗ count ${c}, ids ${mn}..${mx}, sum ${sm} (want ${want}), ${cols} columns</span>`;
       log(`${name}: ${ok ? 'OK' : 'PROBLEM'} (${fmtS(performance.now() - t0)})`, ok ? 'ok' : 'err');
       render();
     }
     $('msg').textContent = 'Verify done.';
-  } finally { await e.close(); $('go').disabled = $('verify').disabled = false; }
+  } finally { $('go').disabled = $('verify').disabled = false; }
 });
 
 // ?auto=1&engines=N starts generating all datasets straight away (for unattended runs).

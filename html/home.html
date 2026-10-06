@@ -35,6 +35,7 @@
       <div class="spacer" style="flex:1"></div>
       <button id="refresh" class="ghost">Refresh</button>
       <button id="new" class="go">New project</button>
+      <button id="wbuilder" class="dev" title="Developer tool: build Vega / Vega-Lite widget packages (widgets folder)">Widget Builder</button>
     </div>
     <div class="table-wrap">
       <table class="grid" id="tbl">
@@ -91,7 +92,7 @@ function render() {
 }
 
 function detail(p) {
-  const mods = Windows.MODULES.map(m => `<button data-mod="${m.id}" ${m.enabled && !p.broken ? '' : 'disabled'} title="${m.enabled ? `Open ${m.label}` : 'Not built yet'}">${m.label}</button>`).join('');
+  const mods = Windows.MODULES.filter(m => !m.global).map(m => `<button data-mod="${m.id}" ${m.enabled && !p.broken ? '' : 'disabled'} title="${m.enabled ? `Open ${m.label}` : 'Not built yet'}">${m.label}</button>`).join('');
   const last = Object.entries(p.modules || {}).filter(([, v]) => v?.lastRun).map(([k, v]) => `${k}: ${UI.date(v.lastRun)}`).join(' · ');
   return `<tr class="detail"><td colspan="${COLS}">
     <div class="desc">${p.description ? esc(p.description) : '<span class="muted">No description.</span>'}</div>
@@ -110,6 +111,7 @@ async function loadLog(folder) {
 $('q').oninput = UI.debounce(render, 120);
 $('fPhase').onchange = $('fStatus').onchange = $('fClass').onchange = render;
 $('refresh').onclick = load;
+$('wbuilder').onclick = () => Windows.open('widget-builder');
 document.querySelectorAll('th.sort').forEach(th => th.onclick = () => { sortDir = sortKey === th.dataset.k ? -sortDir : DATES.includes(th.dataset.k) ? -1 : 1; sortKey = th.dataset.k; render(); });
 $('tbl').onclick = UI.guard(async ev => {
   const mod = ev.target.closest('[data-mod]'), act = ev.target.closest('[data-act]');

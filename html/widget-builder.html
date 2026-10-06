@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Widget Builder</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  .wbm { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr); gap: 14px; padding: 14px 20px 20px; transition: padding-right .18s ease-out; }
+  body.sideopen .wbm { padding-right: 360px; }
+  .pane { min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+  .pane h2 { margin: 0; display: flex; align-items: center; gap: 8px; }
+  .pane h2 .spacer { flex: 1; }
+  .pane .sqled { flex: 1; height: auto; min-height: 0; }
+  #status { font-size: 12px; color: var(--muted); min-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #status.err { color: var(--err); }
+  .pbox { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .pbox .wh { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .pbox .wh b { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pbox .wh small { color: var(--muted); font-size: 11px; }
+  .pbox .wb { flex: 1; min-height: 0; overflow: hidden; padding: 6px 8px; }
+  .pbox .wb > svg { display: block; }
+  .pbox .note { height: 100%; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 10px; }
+  #pkg { min-width: 220px; }
+  .side .sb .field select { width: 100%; }
+</style>
+</head>
+<body class="sideopen">
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">WB</span><div><h1 id="title">Widget Builder</h1><div class="sub" id="sub"></div></div></div>
+    <div class="row">
+      <select id="pkg" title="Open a widget package from the widgets folder"></select>
+      <button id="new" class="ghost">New</button>
+      <button id="save" class="go">Save widget</button>
+      <button id="saveas" class="ghost">Save as…</button>
+      <button id="del" class="danger">Delete</button>
+      <button id="toggle" class="ghost" title="Show or hide the settings popout">Settings</button>
+    </div>
+    <div class="spacer"></div>
+  </header>
+  <div class="wbm">
+    <div class="pane">
+      <h2>Vega / Vega-Lite code <span class="badge" id="kind">vega-lite</span><span class="spacer"></span><button class="ghost small" id="fmt" title="Re-indent the JSON">Format</button></h2>
+      <div id="code"></div>
+      <div id="status"></div>
+    </div>
+    <div class="pane">
+      <h2>Preview <span class="spacer"></span><small class="muted" style="text-transform:none;letter-spacing:0" id="pinfo"></small></h2>
+      <div class="pbox"><div class="wh"><b id="ptitle">Widget</b><small id="pms"></small></div><div class="wb" id="prev"></div></div>
+    </div>
+  </div>
+</div>
+
+<aside class="side open" id="side">
+  <header><b>Widget settings</b><button class="x" id="sClose" title="Close">✕</button></header>
+  <div class="sb">
+    <label class="field">Preview data<select id="src"></select></label>
+    <div id="sBody" style="display:flex;flex-direction:column;gap:12px"></div>
+  </div>
+  <footer><small class="muted" id="sfoot">Changes become the widget's defaults when you save.</small></footer>
+</aside>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/pipeline/sql-editor.js"></script>
+<script src="../js/vendor/vega.min.js"></script>
+<script src="../js/vendor/vega-lite.min.js"></script>
+<script src="../js/widgets/color-picker.js"></script>
+<script src="../js/widgets/vega-widget.js"></script>
+<script src="../js/widgets/widget-settings.js"></script>
+<script>
+// Widget Builder (global, no project): paste Vega or Vega-Lite JSON; the code is read for data inputs (every `field`)
+// and options (colours, numbers, switches, choices, text). The settings popout is built from that manifest,
+// the same popout the Dashboard shows. Save = widgets/<id>/widget.json + spec.json; it then shows in Add widget.
+const { $, esc } = UI, V = VegaWidget, R = WidgetRegistry;
+const TEMPLATE = {
+  $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+  data: { values: [{ label: 'A', value: 12 }, { label: 'B', value: 30 }, { label: 'C', value: 21 }, { label: 'D', value: 44 }] },
+  mark: { type: 'bar' },
+  encoding: { x: { field: 'label', type: 'nominal', axis: { labelAngle: 0 } }, y: { field: 'value', type: 'quantitative' } },
+};
+let manifest = null, spec = null, saved = '', w = { inputs: {}, opts: {}, limit: 5000 }, source = null, projects = [];
+const rowsCache = new Map();
+const ed = SqlEditor.mount($('code'), { lang: 'json', onChange: UI.debounce(() => parse(), 350) });
+
+function status(msg, err = false) { $('status').textContent = msg; $('status').className = err ? 'err' : ''; }
+const dirty = () => JSON.stringify({ c: ed.value, m: manifest && { ...manifest, specJson: undefined }, o: w.opts }) !== saved;
+const markSaved = () => { saved = JSON.stringify({ c: ed.value, m: manifest && { ...manifest, specJson: undefined }, o: w.opts }); };
+
+// ---- code -> manifest ----
+function parse() {
+  let s;
+  try { s = JSON.parse(ed.value); } catch (e) { status(`JSON: ${e.message}`, true); return; }
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return status('The code must be one JSON object (a Vega or Vega-Lite spec).', true);
+  const d = V.detect(s);
+  const base = { id: manifest?.id || '', name: manifest?.name || '', description: manifest?.description || '', version: manifest?.version || 0 };
+  manifest = V.merge(manifest, { ...base, kind: d.kind, spec: 'spec.json', dataName: d.dataName, inputs: d.inputs, options: d.options });
+  spec = d.spec;
+  for (const k of Object.keys(w.opts)) if (!manifest.options.some(o => o.path === k)) delete w.opts[k];
+  $('kind').textContent = d.kind;
+  status(`${d.kind}: ${manifest.inputs.length} data input(s), ${manifest.options.length} option(s).`);
+  panel(); draw();
+}
+
+// ---- preview ----
+const dsOf = () => source && projects.find(p => p.folder === source.folder)?.datasets?.find(d => d.name === source.name);
+let drawing = Promise.resolve(), pending = false;
+function draw(fresh) {
+  if (pending) return; pending = true;
+  drawing = drawing.then(async () => {
+    pending = false;
+    if (!spec) return;
+    const el = $('prev'), t0 = performance.now();
+    $('ptitle').textContent = manifest.name || 'Untitled widget';
+    try {
+      let rows = null;
+      const d = dsOf();
+      if (d) {
+        const pw = { ...w, dataset: d.name };
+        if (!V.ready(manifest, pw)) { el._vv?.finalize(); el._vv = null; el.innerHTML = '<div class="note">Connect every data input in the settings popout.</div>'; $('pms').textContent = ''; return; }
+        const q = V.query(manifest, pw), key = JSON.stringify([source, q]);
+        if (fresh || !rowsCache.has(key)) rowsCache.set(key, V.objects(await Engine.call('query', { query: q, views: Engine.views([d]) })));
+        rows = rowsCache.get(key);
+        $('pinfo').textContent = `${rows.length.toLocaleString()} rows from ${d.name}`;
+      } else $('pinfo').textContent = 'sample data in the code';
+      await V.render(el, manifest, spec, w, rows);
+      $('pms').textContent = UI.ms(performance.now() - t0);
+    } catch (e) { el._vv?.finalize(); el._vv = null; el.innerHTML = `<div class="note err">${esc(String(e.message || e).split('\n')[0])}</div>`; $('pms').textContent = ''; }
+  });
+}
+// Look-only changes while dragging a colour or slider: redraw at most once per frame.
+let raf = 0;
+const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); };
+
+function panel() {
+  if (!manifest) return;
+  const d = dsOf();
+  WidgetSettings.render($('sBody'), { manifest, w, columns: d ? d.columns || [] : null, builder: true,
+    onChange: kind => { if (kind === 'manifest') { panel(); draw(); } else if (kind === 'look') redraw(); else draw(); } });
+}
+
+// ---- preview data source: the sample in the code, or any project dataset ----
+async function loadSources() {
+  projects = await Projects.list().catch(() => []);
+  $('src').innerHTML = `<option value="">Sample data in the code</option>` + projects.filter(p => p.datasets?.length).map(p =>
+    `<optgroup label="${esc(p.name)}">${p.datasets.map(d => `<option value="${esc(p.folder + '|' + d.name)}">${esc(d.name)}</option>`).join('')}</optgroup>`).join('');
+}
+$('src').onchange = () => {
+  const v = $('src').value; source = v ? { folder: v.split('|')[0], name: v.slice(v.indexOf('|') + 1) } : null;
+  w.inputs = {};
+  // Auto-connect inputs to columns with the same name as the sample field.
+  const cols = dsOf()?.columns || [];
+  for (const i of manifest?.inputs || []) { const c = cols.find(c => c.name.toLowerCase() === String(i.sample).toLowerCase()); if (c) w.inputs[i.key] = { col: c.name, agg: i.agg }; }
+  panel(); draw();
+};
+
+// ---- packages ----
+async function loadList(sel) {
+  const list = (await R.list(true)).filter(m => m.kind !== 'builtin');
+  $('pkg').innerHTML = `<option value="">Open a widget…</option>` + list.map(m => `<option value="${esc(m.id)}" ${m.id === sel ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
+}
+function setCode(obj) { ed.value = JSON.stringify(obj, null, 2); }
+function info() { window.GlobalHeader?.setInfo('Widget Builder', manifest?.name || 'new widget'); $('del').hidden = !manifest?.id; }
+async function confirmDiscard() { return !dirty() || await UI.confirm('Discard the unsaved changes?', { ok: 'Discard' }); }
+
+$('pkg').onchange = UI.guard(async () => {
+  const id = $('pkg').value; if (!id) return;
+  if (!await confirmDiscard()) return loadList(manifest?.id);
+  const m = await R.get(id);
+  manifest = JSON.parse(JSON.stringify({ ...m, specJson: undefined })); w.opts = {}; w.inputs = {};
+  setCode(m.specJson); parse(); $('src').onchange(); info(); markSaved();
+});
+$('new').onclick = UI.guard(async () => {
+  if (!await confirmDiscard()) return;
+  manifest = null; w.opts = {}; w.inputs = {}; setCode(TEMPLATE); parse(); $('pkg').value = ''; info(); markSaved();
+});
+async function save(asNew) {
+  if (!manifest || !spec) throw new Error('Fix the code first.');
+  if (asNew || !manifest.id) {
+    const f = await UI.form(asNew ? 'Save widget as' : 'Save widget', [
+      { name: 'name', label: 'Name', value: manifest.name || '', required: true, placeholder: 'e.g. Sales by region' },
+      { name: 'description', label: 'Description (shown in Add widget)', value: manifest.description || '' }]);
+    if (!f) return;
+    const id = R.slug(f.name);
+    if (['chart', 'table'].includes(id)) throw new Error(`"${id}" is a built-in widget name.`);
+    if ((await R.list(true)).some(m => m.id === id) && !await UI.confirm(`A widget "${id}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;
+    Object.assign(manifest, { id, name: f.name.trim(), description: f.description.trim(), version: 0 });
+  }
+  // Current settings become the package defaults.
+  manifest.options.forEach(o => { if (o.path in w.opts) o.default = w.opts[o.path]; });
+  manifest.inputs.forEach(i => { const b = w.inputs[i.key]; if (b?.agg && i.role === 'measure') i.agg = b.agg; });
+  w.opts = {};
+  const m = await R.save(manifest, JSON.parse(ed.value));
+  manifest.version = m.version;
+  await loadList(manifest.id); info(); markSaved(); panel(); draw();
+  UI.toast(`Saved widgets/${manifest.id}. It is now in the Dashboard's Add widget list.`, 'ok');
+}
+$('save').onclick = UI.guard(() => save(false));
+$('saveas').onclick = UI.guard(() => save(true));
+$('del').onclick = UI.guard(async () => {
+  if (!manifest?.id || !await UI.confirm(`Delete the widget package "${manifest.name}"? Dashboards using it will show an error.`, { danger: true, ok: 'Delete' })) return;
+  await R.remove(manifest.id); UI.toast(`Deleted widgets/${manifest.id}.`, 'ok');
+  manifest = null; w.opts = {}; setCode(TEMPLATE); parse(); await loadList(); info(); markSaved();
+});
+$('fmt').onclick = () => { try { setCode(JSON.parse(ed.value)); parse(); } catch (e) { status(`JSON: ${e.message}`, true); } };
+const side = open => { $('side').classList.toggle('open', open); document.body.classList.toggle('sideopen', open); setTimeout(draw, 200); };
+$('toggle').onclick = () => side(!$('side').classList.contains('open'));
+$('sClose').onclick = () => side(false);
+addEventListener('resize', UI.debounce(() => draw(), 150));
+addEventListener('beforeunload', e => { if (dirty()) e.preventDefault(); });
+// Theme switched (server panel): redraw with the new colours.
+new MutationObserver(() => draw()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+
+(async () => {
+  try {
+    await Promise.all([loadList(), loadSources()]);
+    setCode(TEMPLATE); parse(); info(); markSaved();
+  } catch (e) { UI.toast(e.message, 'err'); }
+})();
+</script>
+</body>
+</html>

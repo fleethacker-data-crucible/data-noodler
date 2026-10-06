@@ -14,7 +14,7 @@
   --bg: #1a1a19; --panel: #242422; --border: #3a3936; --sel: #44433f;
   --text: #ffffff; --text-2: #c3c2b7; --muted: #8d8b82;
   --blue: #3987e5; --blue-h: #5a9cec; --ok: #4cc27f; --warn: #d9b343; --err: #e24c4c;
-  --pink: #f27ab8; --duck: #3cc8c8; --lerr: #ff9090; --time: #aeaca4;
+  --pink: #f27ab8; --engine: #3cc8c8; --lerr: #ff9090; --time: #aeaca4;
   --thumb: #3a3936; --thumb-h: #55534e;
 }
 :root[data-theme="light"] {
@@ -22,7 +22,7 @@
   --bg: #fcfcfb; --panel: #f4f4f2; --border: #dddcd6; --sel: #dcdbd5;
   --text: #0b0b0b; --text-2: #52514e; --muted: #85837c;
   --blue: #2a78d6; --blue-h: #1f66bd; --ok: #0a7a3d; --warn: #a8850f; --err: #c42b2b;
-  --pink: #d63a8a; --duck: #0e8a8a; --lerr: #c42b2b; --time: #85837c;
+  --pink: #d63a8a; --engine: #0e8a8a; --lerr: #c42b2b; --time: #85837c;
   --thumb: #c9c8c2; --thumb-h: #a9a8a1;
 }
 
@@ -53,8 +53,8 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 }
 .sub { color: var(--muted); font-size: 12px; }
 
-#s-status.on, #s-duck.on { color: var(--ok); } #s-status.off, #s-duck.off { color: var(--err); }
-#s-duck { cursor: pointer; }
+#s-status.on, #s-engine.on { color: var(--ok); } #s-status.off, #s-engine.off { color: var(--err); }
+#s-engine { cursor: pointer; }
 
 
 main { flex: 1; min-height: 0; display: grid; grid-template-columns: 365px 1fr; gap: 0; }
@@ -126,7 +126,7 @@ button[hidden] { display: none; }
 .log .c2, .log .c3 { color: var(--ok); } .log .c4 { color: var(--warn); } .log .c5 { color: var(--lerr); }
 .log .sys { color: var(--pink); grid-column: 2 / -1; }
 .log .err { color: var(--lerr); grid-column: 2 / -1; }
-.log .duck { color: var(--duck); grid-column: 2 / -1; }
+.log .engine { color: var(--engine); grid-column: 2 / -1; }
 .log .warn { color: #d9822b; grid-column: 2 / -1; }
 .log .r.start, .log .r.stop { color: #fff; border-radius: 4px; margin: 0 -6px; padding: 0 6px; }
 .log .r.start { background: var(--ok); }
@@ -138,7 +138,7 @@ button[hidden] { display: none; }
 .log .client { color: var(--text-2); grid-column: 2 / -1; }
 .notes { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: min(520px, 90%); z-index: 11; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .note { pointer-events: auto; position: relative; color: #fff; font-weight: 600; padding: 10px 34px 10px 14px; border-radius: 4px; box-shadow: 0 4px 14px #0006; animation: drop .25s ease-out; }
-.note.ok { background: var(--ok); } .note.warn { background: #d9822b; } .note.err { background: var(--err); } .note.sys { background: var(--pink); } .note.duck { background: var(--duck); }
+.note.ok { background: var(--ok); } .note.warn { background: #d9822b; } .note.err { background: var(--err); } .note.sys { background: var(--pink); } .note.engine { background: var(--engine); }
 .note .x { position: absolute; top: 4px; right: 8px; background: none; border: 0; padding: 0; height: auto; color: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
 .note .x:hover { background: none; opacity: .8; }
 @keyframes drop { from { transform: translateY(-100%); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -199,7 +199,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
         <div class="stat"><label>Requests</label><b id="s-hits">0</b></div>
         <div class="stat"><label>Uptime</label><b id="s-uptime">0:00:00</b></div>
         <div class="stat wide"><label>PowerShell Server</label><b id="s-status">CONNECTING</b></div>
-        <div class="stat wide"><label>DuckDB</label><b id="s-duck" title="Click to re-run the test">TESTING</b></div>
+        <div class="stat wide"><label>Engine</label><b id="s-engine" title="Click to re-run the test">TESTING</b></div>
       </div>
       </section>
 
@@ -229,6 +229,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
   <div id="mdlg" class="overlay" hidden>
     <div class="dialog wide">
       <b>Modules</b>
+      <input id="msearch" type="text" placeholder="Search modules" spellcheck="false" autocomplete="off" style="width:100%;margin:8px 0">
       <div id="pages" class="pages"></div>
       <div class="row sorted dlg-btns">
         <button id="open" hidden>Open Module</button>
@@ -281,11 +282,10 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
     </div>
   </div>
 
-  <script src="js/duckdb-engine.js"></script>
   <script>
 // Control panel for .server/server.ps1. The server writes every log entry to
 // .server/logs/ as it happens; this panel mirrors the same entries.
-const W = 1400, H = 1000;
+const W = Math.round(screen.availWidth * 0.85), H = Math.round(screen.availHeight * 0.85);   // 85% of the screen, like every app window
 const $ = id => document.getElementById(id);
 let state = null, selPage = null, since = 0, live = false;
 
@@ -317,9 +317,10 @@ const fmtTime = s => [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function renderPages() {
-  $('pages').innerHTML = state.pages.map(p =>
+  const f = ($('msearch').value || '').trim().toLowerCase();
+  $('pages').innerHTML = state.pages.filter(p => !f || p.name.toLowerCase().includes(f)).map(p =>
     `<div data-p="${esc(p.name)}" class="${p.name === selPage ? 'sel' : ''}"><span>${esc(p.name)}${p.name === state.page ? ' <small class="def">(default)</small>' : ''}</span><small>${fmtSize(p.size)}</small></div>`
-  ).join('') || '<div>No .html files found</div>';
+  ).join('') || `<div>${f ? 'No matching modules' : 'No .html files found'}</div>`;
 }
 
 // ---- Light/dark: one global setting (Settings > Appearance, settings.json theme, default dark) ----
@@ -381,7 +382,7 @@ function addLines(lines) {
     if (live) {
       if (l.k === 'sys') note(l.p, 'sys');
       else if (l.k === 'err') note(l.p, 'err');
-      else if (l.k === 'duck') note(l.p, 'duck');
+      else if (l.k === 'engine' && /loaded|failed/i.test(l.p)) note(l.p, 'engine');
       else if (l.k === 'warn') note(l.p, 'warn');
       else if (l.k === 'req' && l.c >= 400) note(`${l.c} ${WHY[l.c] || (l.c >= 500 ? 'Server error' : 'Request rejected')}: ${l.m} ${l.p}`, l.c >= 500 ? 'err' : 'warn');
     }
@@ -434,7 +435,8 @@ addEventListener('keydown', e => { if (e.key === 'Escape') DIALOGS.forEach(id =>
 DIALOGS.forEach(id => $(id).addEventListener('click', e => { if (e.target === $(id)) $(id).hidden = true; }));
 
 // ---- Modules (developer shortcut): pick the served module, open the site ----
-$('modules').onclick = async () => { await loadState(true); $('mdlg').hidden = false; };
+$('modules').onclick = async () => { $('msearch').value = ''; await loadState(true); $('mdlg').hidden = false; $('msearch').focus(); };
+$('msearch').oninput = renderPages;
 $('m-close').onclick = () => { $('mdlg').hidden = true; };
 $('pages').addEventListener('click', e => {
   const d = e.target.closest('[data-p]');
@@ -583,26 +585,24 @@ $('ulist').addEventListener('click', async e => {
   renderUsers();
 });
 
-// ---- DuckDB check: start the engine and run one query; click the value to re-run ----
-async function duckTest() {
-  const el = $('s-duck');
+// ---- Engine check: the native C# engine (in this server process) runs one query; click the value to re-run ----
+async function engineTest() {
+  const el = $('s-engine');
   el.textContent = 'TESTING'; el.className = ''; el.title = 'Click to re-run the test';
-  const eng = createDuckEngine(), t0 = performance.now();
   try {
-    const info = await eng.init();
-    const r = await eng.query('SELECT sum(i) AS s FROM range(1000000) t(i)');
-    if (r.rows[0][0] !== 499999500000) throw new Error(`wrong answer: ${r.rows[0][0]}`);
-    el.textContent = `READY ${info.version} (${Math.round(performance.now() - t0)} ms)`; el.className = 'on';
-    clientLog('duck', `DuckDB ${info.version} ready (${info.build} build). RAM limit: ${info.memoryLimit} (capped for the browser). Test query ${Math.round(r.ms)} ms.`);
+    const r = await api('engine');
+    if (!r.ok) throw new Error(r.error || 'not loaded');
+    el.textContent = `READY ${r.version} (${r.workers} workers, ${r.ms} ms)`; el.className = 'on';
+    el.title = `Native engine ${r.version}: ${r.workers} workers on ${r.cores} cores, memory budget ${(r.memory.budget / 1073741824).toFixed(1)} GB. Click to re-run.`;
   } catch (e) {
     el.textContent = 'FAILED'; el.className = 'off'; el.title = e.message;
-    clientLog('duck', `DuckDB check failed: ${e.message}`);
-  } finally { eng.close().catch(() => {}); }
+    clientLog('err', `Engine check failed: ${e.message}`);
+  }
 }
-$('s-duck').onclick = duckTest;
+$('s-engine').onclick = engineTest;
 
 loadState(true).then(poll);
-duckTest();
+engineTest();
   </script>
 </body>
 </html>

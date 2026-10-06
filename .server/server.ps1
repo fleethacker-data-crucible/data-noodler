@@ -35,7 +35,9 @@ $mime = @{
 # fileThreads = how many file requests are served at the same time (background runspaces).
 # portMode = 'manual' (keep port) or 'random' (new 5-digit port each launch). browser = 'edge' or 'chrome' for Open Module.
 # theme = 'dark' or 'light': one setting for every window (panel and site), so they all follow the toggle.
-$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; page = 'html/index.html'; fileThreads = 16 }
+# engineWorkers = max C# engine worker threads (capped at 64 and at the CPU's logical cores).
+# engineMemory = share of physical RAM the engine may hold (0.1 - 0.9).
+$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; page = 'html/index.html'; fileThreads = 16; engineWorkers = 64; engineMemory = 0.5 }
 if (Test-Path $settingsFile) {
     try {
         $j = Get-Content $settingsFile -Raw | ConvertFrom-Json
@@ -45,6 +47,8 @@ if (Test-Path $settingsFile) {
         if ($j.browser -in 'edge', 'chrome') { $settings.browser = [string]$j.browser }
         if ($j.theme -in 'dark', 'light') { $settings.theme = [string]$j.theme }
         if ($j.fileThreads) { $settings.fileThreads = [Math]::Max(1, [Math]::Min(64, [int]$j.fileThreads)) }
+        if ($j.engineWorkers) { $settings.engineWorkers = [Math]::Max(1, [Math]::Min(64, [int]$j.engineWorkers)) }
+        if ($j.engineMemory) { $settings.engineMemory = [Math]::Max(0.1, [Math]::Min(0.9, [double]$j.engineMemory)) }
     } catch {}
 }
 function Save-Settings { $settings | ConvertTo-Json | Set-Content $settingsFile -Encoding UTF8 }
@@ -90,15 +94,15 @@ $fsToken = [Guid]::NewGuid().ToString('N')
 $tokenTag = "<script>window.DN_TOKEN='$fsToken'</script>"
 
 # Streams a file to the response; returns bytes sent.
-# Honours a single "Range: bytes=a-b" request (206) so DuckDB can read only the
-# parts of a Parquet file it needs, and HEAD (headers only).
+# Honours a single "Range: bytes=a-b" request (206) so a client can read only the
+# parts of a file it needs, and HEAD (headers only).
 # $prog (optional, synchronized hashtable): .at / .done are updated per chunk so a stalled read can be detected.
 function Send-Stream($res, $path, $req, $prog) {
     $ext = [IO.Path]::GetExtension($path).ToLower()
     $res.ContentType = if ($mime[$ext]) { $mime[$ext] } else { 'application/octet-stream' }
     $res.Headers['Cache-Control'] = 'no-store'
     $res.AddHeader('Accept-Ranges', 'bytes')
-    # DuckDB's HTTP reader computes file age from these; without them it can fail with "Overflow in timestamp subtraction".
+    # Last-Modified for HTTP readers that compute file age.
     $mtime = [IO.File]::GetLastWriteTimeUtc($path)
     $res.AddHeader('Last-Modified', $mtime.ToString('R'))
     $res.AddHeader('ETag', '"' + $mtime.Ticks.ToString('x') + '"')
@@ -221,9 +225,7 @@ function Start-Site {
 # so the browser doesn't load the page, get redirected and cancel its half-loaded files.
 function Get-ShellUrl([string]$page) {
     $file = Join-Path $root $page
-    if ((Test-Path $file -PathType Leaf) -and (Select-String -LiteralPath $file -Pattern 'core/embed.js' -SimpleMatch -Quiet)) {
-        return "html/app.html?m=$([IO.Path]::GetFileNameWithoutExtension($page))"
-    }
+    # Every page opens on its own (no app shell); the global header comes from js/core/embed.js.
     return $page
 }
 
@@ -308,7 +310,7 @@ function Handle-Ui($req, $res, $rel) {
         }
         'api/clientlog' {
             $body = Read-Json $req
-            Add-Log $(if ($body.level -in 'err', 'duck') { $body.level } else { 'client' }) ([string]$body.text)
+            Add-Log $(if ($body.level -in 'err', 'engine') { $body.level } else { 'client' }) ([string]$body.text)
             Send-Json $res @{ ok = $true }
         }
         'api/open' {
@@ -332,12 +334,25 @@ function Handle-Ui($req, $res, $rel) {
                 Send $res ([Text.Encoding]::UTF8.GetBytes($text)) 'application/json'
             }
         }
+        # Panel engine check: one query through the native engine + its status.
+        'api/engine' {
+            if (-not $engine) { Send-Json $res @{ ok = $false; error = $script:engineError }; break }
+            $out = $null
+            try {
+                $sw = [Diagnostics.Stopwatch]::StartNew()
+                $v = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+                $r = $engine.Query('SELECT sum(range) AS s FROM range(1000000)', $v, 1, 0, [Threading.CancellationToken]::None)
+                $got = $r.Batches[0].Cols[0].I[0]
+                if ($got -ne 499999500000) { throw "wrong answer: $got" }
+                $st = $engine.Status(); $st['ms'] = $sw.ElapsedMilliseconds
+                $out = [NativeDataEngine.Json]::Write($st)
+            } catch { $out = ConvertTo-Json -Compress @{ ok = $false; error = $_.Exception.Message } }
+            Send $res ([Text.Encoding]::UTF8.GetBytes($out)) 'application/json'
+        }
         'api/bye'   { $script:byeAt = (Get-Date).AddSeconds(4); Send-Json $res @{ ok = $true } }
         default {
             if ($rel -eq '') { $rel = 'server.html' }
-            # The panel's DuckDB check loads the engine from the project's js/ folder.
-            $base = if ($rel -eq 'js/duckdb-engine.js' -or $rel -like 'js/duckdb/*') { $root } else { $here }
-            if ((Send-File $res $base $rel) -lt 0) { $res.StatusCode = 404 }
+            if ((Send-File $res $here $rel -req $req) -lt 0) { $res.StatusCode = 404 }
         }
     }
 }
@@ -501,7 +516,7 @@ function Handle-Fs($req, $res, $op) {
 
 # --- parallel static files ---
 # Plain file requests (data, js, wasm; not .html, not the API) are served on a pool of
-# background runspaces, so many DuckDB engines can read Parquet at the same time.
+# background runspaces, so many files can be served at the same time.
 # Each job returns a log record; the main loop writes it to the log when the job ends.
 $iss = [Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
 $iss.Commands.Add([Management.Automation.Runspaces.SessionStateFunctionEntry]::new('Send-Stream', ${function:Send-Stream}.ToString()))
@@ -566,11 +581,33 @@ function Complete-StaticJobs {
 # --- import api (source files outside the project) ---
 . (Join-Path $here 'import-api.ps1')
 
+# --- native data engine: C# sources in engine\, compiled by Add-Type (cached DLL), runs in this process ---
+. (Join-Path $here 'engine-loader.ps1')
+$engine = $null; $script:engineError = 'The data engine is not loaded; see the server log.'
+try {
+    $how = Load-DataEngine -Root $root
+    $engine = New-DataEngine -Root $root -MaxWorkers $settings.engineWorkers -MemoryFraction $settings.engineMemory
+    Add-Log 'engine' "Engine loaded ($how)."
+} catch {
+    $script:engineError = "Engine failed to load: $($_.Exception.Message)"
+    Add-Log 'err' $script:engineError
+}
+# Engine log lines -> server log. 'req|METHOD|code|bytes|ms|path' lines are engine API requests.
+function Read-EngineLog {
+    if (-not $engine) { return }
+    for ($i = 0; $i -lt 500; $i++) {
+        $l = [NativeDataEngine.EngineLog]::Next()
+        if ($null -eq $l) { break }
+        $k, $t = $l.Split('|', 2)
+        if ($k -eq 'req') { $p = $t.Split('|', 5); $script:hits++; Add-Log 'req' $p[4] ([int]$p[1]) $p[0] ([long]$p[2]) ([long]$p[3]) }
+        else { Add-Log $(if ($k -eq 'err') { 'err' } else { 'engine' }) $t }
+    }
+}
+
 # Returns $true if the request was handed to a background job (which closes the response itself).
 # --- browser memory (engine-bench live graph) ---
-# All DuckDB engines of a page are workers inside that tab's renderer process, so the renderer's private
-# memory is what the engines really use. The process list (via CIM, slow) is refreshed every 5 s;
-# memory is read fresh on each call (fast).
+# Browser tab/process memory plus this server process (where the native engine runs). The process
+# list (via CIM, slow) is refreshed every 5 s; memory is read fresh on each call (fast).
 Add-Type -AssemblyName Microsoft.VisualBasic
 $memInfo = [Microsoft.VisualBasic.Devices.ComputerInfo]::new()
 $script:memProcs = @{ at = [datetime]::MinValue; renderers = @(); all = @(); source = '' }
@@ -593,18 +630,24 @@ function Get-BrowserMem {
         $total += $m
         if ($id -in $script:memProcs.renderers -and $m -gt $tab) { $tab = $m }
     }
-    @{ ok = $true; tab = $tab; browser = $total; sysTotal = $memInfo.TotalPhysicalMemory; sysFree = $memInfo.AvailablePhysicalMemory; source = $script:memProcs.source }
+    @{ ok = $true; tab = $tab; browser = $total; engine = [Diagnostics.Process]::GetCurrentProcess().PrivateMemorySize64; sysTotal = $memInfo.TotalPhysicalMemory; sysFree = $memInfo.AvailablePhysicalMemory; source = $script:memProcs.source }
 }
 
 function Handle-Site($req, $res, $rel, $ctx) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $static = Get-StaticPath $rel
     if ($static) { Start-StaticJob $ctx $static ("/$rel" + $req.Url.Query); return $true }
-    # Cross-origin isolation: lets pages use SharedArrayBuffer, which the
-    # multithreaded DuckDB-WASM build needs. Everything is same-origin anyway.
+    # Cross-origin isolation: everything is same-origin; keeps pages isolated from other sites.
     $res.AddHeader('Cross-Origin-Opener-Policy', 'same-origin')
     $res.AddHeader('Cross-Origin-Embedder-Policy', 'require-corp')
     $res.AddHeader('Cross-Origin-Resource-Policy', 'same-origin')
+    # Native engine: checked here, answered by the engine on its own thread (it closes the response).
+    if ($rel.StartsWith('api/engine/')) {
+        if (-not (Test-FsRequest $req)) { $res.StatusCode = 403; Add-Log 'req' "/$rel" 403 $req.HttpMethod 0 0; return $false }
+        if (-not $engine) { $res.StatusCode = 503; Send-Json $res @{ ok = $false; error = $script:engineError }; return $false }
+        [NativeDataEngine.EngineApi]::Handle($engine, $ctx, $rel.Substring(11))
+        return $true
+    }
     # Reading source files from outside the project (import). Background jobs own their responses.
     if ($rel.StartsWith('api/import/')) {
         $op = $rel.Substring(11)
@@ -693,16 +736,17 @@ $browsers = @{
 }
 function Find-Browser($name) { $browsers[$name] | Where-Object { Test-Path $_ } | Select-Object -First 1 }
 
-# Opens $url as a 1400x1000 app window centered on the primary screen.
+# Opens $url as an app window sized to 85% of the primary screen's working area, centered.
 # Each profile is its own browser process, so the size/position flags apply.
 function Open-App($exe, $url, $profileName) {
     Add-Type -AssemblyName System.Windows.Forms
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $x = $wa.X + [Math]::Max(0, [int](($wa.Width - 1400) / 2)); $y = $wa.Y + [Math]::Max(0, [int](($wa.Height - 1000) / 2))
+    $w = [int]($wa.Width * 0.85); $h = [int]($wa.Height * 0.85)
+    $x = $wa.X + [int](($wa.Width - $w) / 2); $y = $wa.Y + [int](($wa.Height - $h) / 2)
     # Profiles live outside the project; flags keep them minimal (no component downloads, cache, sync, extensions).
     $dir = Join-Path $env:LOCALAPPDATA "data-noodler\$profileName"
     Start-Process $exe @("--app=$url", "--user-data-dir=`"$dir`"",
-        '--window-size=1400,1000', "--window-position=$x,$y", '--no-first-run', '--no-default-browser-check',
+        "--window-size=$w,$h", "--window-position=$x,$y", '--no-first-run', '--no-default-browser-check',
         '--disable-component-update', '--disable-background-networking', '--disable-sync', '--disable-extensions',
         '--disable-default-apps', '--disk-cache-size=1', '--media-cache-size=1')
     return $dir
@@ -786,13 +830,14 @@ try {
                     $async = Handle-Site $req $res $rel $ctx
                 }
             } catch {
-                $res.StatusCode = 500
-                Add-Log 'err' $_.Exception.Message
+                try { $res.StatusCode = 500 } catch {}
+                Add-Log 'err' "$($req.HttpMethod) /$rel : $($_.Exception.Message)"
             } finally {
                 if (-not $async) { try { $res.Close() } catch {} }
             }
         }
         if ($staticJobs.Count) { Complete-StaticJobs }
+        Read-EngineLog
         if ($importJobs.Count) { Watch-ImportJobs }
         # Auto start: 2 s after the panel first connects (so its notifications show), start the site
         # if a module is selected; otherwise say why not.
@@ -816,6 +861,7 @@ try {
     Add-Log 'err' "Fatal: $($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)"
 } finally {
     Add-Log 'sys' 'Server stopped.'
+    try { if ($engine) { $engine.Dispose() } } catch {}
     try { $staticPool.Close(); $staticPool.Dispose() } catch {}
     try { $importPool.Close(); $importPool.Dispose() } catch {}
     $listener.Stop()

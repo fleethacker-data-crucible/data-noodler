@@ -1,4 +1,4 @@
-// Dashboard widgets: query building (split into per-engine "partial" + combining "final" SQL) and SVG rendering.
+// Dashboard widgets: declarative queries for the native engine (Widgets.query) and SVG rendering.
 // Global: Widgets. Used by html/dashboard.html and inlined into published dashboards (html/publish.html).
 //   widget (dashboard.json v2) = { id, type: 'chart' | 'table', title, dataset, x, y, w, h (grid cells),
 //     chart: 'bar' | 'line', measure: { agg, col }, category: { col, sort: 'value' | 'label', limit },   (charts)
@@ -28,43 +28,25 @@ const Widgets = (() => {
     return true;
   }
 
-  // Measure split into a per-engine part and a combining part, so the job can run on several engines.
-  function measure(s) {
-    const c = s.col ? q(s.col) : '*';
-    switch (s.agg) {
-      case 'count': return { p: [`count(${s.col ? c : '*'}) AS m`], f: 'sum(m)' };
-      case 'sum': return { p: [`sum(${c}) AS m`], f: 'sum(m)' };
-      case 'min': return { p: [`min(${c}) AS m`], f: 'min(m)' };
-      case 'max': return { p: [`max(${c}) AS m`], f: 'max(m)' };
-      case 'avg': return { p: [`sum(${c}) AS s`, `count(${c}) AS n`], f: 'sum(s) / sum(n)' };
-      case 'count_distinct': return { p: [], f: `count(DISTINCT ${c})`, distinct: c };
-      default: throw new Error(`Unknown aggregate ${s.agg}`);
+  // Declarative query for the engine (plan: dashboard widgets describe WHAT to calculate; the engine calculates).
+  //   chart -> rows [category, measure]; kpi -> [[measure]]; table -> the chosen fields.
+  function query(w) {
+    const s = spec(w), where = s.where?.trim() || undefined;
+    if (s.type === 'table') {
+      const sort = s.sort && s.sort !== 'label' && s.sort !== 'value' ? [{ expr: s.sort }] : undefined;
+      return { dataset: w.dataset, select: s.cols?.length ? s.cols : ['*'], where, sort, limit: Math.min(+s.limit || 100, 1000) };
     }
-  }
-  // { partial(src), final, kind } for charts (and v1 kpi); kind = profile test used to pick the engine count.
-  function aggQuery(w) {
-    const s = spec(w), m = measure(s), dim = s.type === 'kpi' || !s.dim ? null : q(s.dim);
-    const where = s.where?.trim() ? ` WHERE ${s.where}` : '';
-    const label = dim ? `${dim} AS d, ` : '';
-    const partial = m.distinct
-      ? src => `SELECT DISTINCT ${dim ? `${dim} AS d, ` : ''}${m.distinct} AS v FROM ${src}${where}`
-      : src => `SELECT ${label}${m.p.join(', ')} FROM ${src}${where}${dim ? ' GROUP BY 1' : ''}`;
-    const fm = m.distinct ? 'count(DISTINCT v)' : m.f;
-    const order = s.type === 'line' || s.sort === 'label' ? 'ORDER BY d' : 'ORDER BY m DESC NULLS LAST';
-    const final = dim
-      ? `SELECT d, ${fm} AS m FROM __parts GROUP BY d ${order}${+s.limit > 0 ? ` LIMIT ${+s.limit}` : ''}`
-      : `SELECT ${fm} AS m FROM __parts`;
-    return { partial, final, kind: m.distinct ? 'dist' : dim ? 'group' : 'scan' };
-  }
-  function tableQuery(w, src) {
-    const s = spec(w), cols = s.cols?.length ? s.cols.map(q).join(', ') : '*';
-    return `SELECT ${cols} FROM ${src}${s.where?.trim() ? ` WHERE ${s.where}` : ''}${s.sort && s.sort !== 'label' && s.sort !== 'value' ? ` ORDER BY ${s.sort}` : ''} LIMIT ${Math.min(+s.limit || 100, 1000)}`;
+    if (!AGGS.includes(s.agg)) throw new Error(`Unknown aggregate ${s.agg}`);
+    const aggregate = [{ function: s.agg, column: s.col || undefined, as: 'm' }];
+    if (s.type === 'kpi' || !s.dim) return { dataset: w.dataset, aggregate, where };
+    const sort = s.type === 'line' || s.sort === 'label' ? [{ column: s.dim, direction: 'asc' }] : [{ column: 'm', direction: 'desc' }];
+    return { dataset: w.dataset, groupBy: [s.dim], aggregate, where, sort, limit: +s.limit > 0 ? +s.limit : undefined };
   }
 
   // ---- rendering (sized to the element, so a resized widget redraws crisply) ----
   const fmt = v => typeof v === 'number' ? (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : Math.abs(v) >= 1e4 ? Math.round(v).toLocaleString() : +v.toFixed(2) + '') : String(v ?? '');
   const nice = max => { const p = 10 ** Math.floor(Math.log10(max || 1)); for (const k of [1, 2, 5, 10]) if (k * p >= max) return k * p; return max; };
-  const size = el => [Math.max(200, el.clientWidth || 760), Math.max(120, el.clientHeight || 260)];
+  const size = el => { const cs = getComputedStyle(el); return [Math.max(60, (el.clientWidth || 760) - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)), Math.max(60, (el.clientHeight || 260) - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom))]; };
   let tip;
   const bindTips = el => {
     tip ||= document.body.appendChild(Object.assign(document.createElement('div'), { className: 'tip' }));
@@ -111,5 +93,5 @@ const Widgets = (() => {
     UI.dataTable(el, res.cols, res.rows, { max: 1000 });
   }
 
-  return { AGGS, AGG_LABEL, NUMERIC, TYPES, CHARTS, spec, ready, aggQuery, tableQuery, render, q };
+  return { AGGS, AGG_LABEL, NUMERIC, TYPES, CHARTS, spec, ready, query, render, q };
 })();

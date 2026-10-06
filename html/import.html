@@ -64,7 +64,7 @@
           </div>
           <h2>Schema</h2>
           <div class="table-wrap" style="max-height:300px;overflow-x:hidden"><table class="grid schema" id="schema"></table></div>
-          <div class="row"><button id="validate" class="ghost">Check types</button><button id="import" class="go" title="Apply the column choices above and save a Parquet file in data/staged">Stage</button><button id="direct" title="Convert the whole file to Parquet as it is (column choices are ignored) and save it in data/source">Import Directly</button><span id="status" class="muted"></span></div>
+          <div class="row"><button id="validate" class="ghost">Check types</button><button id="import" class="go" title="Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)">Stage</button><span id="status" class="muted"></span></div>
           <div id="warnings" class="warn-box"></div>
           <div class="progress"><i id="bar"></i></div>
           <h2>Preview (first 100 rows only)</h2>
@@ -78,18 +78,16 @@
 </div>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
+<script src="../js/core/engine-client.js"></script>
 <script src="../js/core/ui.js"></script>
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/core/parquet-writer.js"></script>
-<script src="../js/import/source-reader.js"></script>
 <script src="../js/import/external-source.js"></script>
 <script>
-const { $, esc } = UI, R = SourceReader;
+const { $, esc } = UI;
 const TYPES = ['VARCHAR', 'BIGINT', 'INTEGER', 'SMALLINT', 'DOUBLE', 'DECIMAL(18,2)', 'DECIMAL(38,6)', 'DATE', 'TIMESTAMP', 'BOOLEAN'];
-let ctx, E, cur = null; // cur = { path, label, ext?, src, table, cols: [{ name, type, newName, newType, keep }] }
+let ctx, cur = null; // cur = { path, label, ext?, src, table, cols: [{ name, type, newName, newType, keep }] }
 // cur.ext (file outside the project, read where it is; nothing is copied) = { src, size, modified }
 
 const dsSlug = s => s.toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'dataset';
@@ -105,7 +103,7 @@ async function listSources(force = true) {
   if (!force && sig === rawSig) return;
   rawSig = sig;
   $('sources').hidden = !files.length;
-  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${cur?.path === f.path ? 'sel' : ''}" title="${esc(f.path)}"><span>${esc(f.name)}${R.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small>${UI.bytes(f.size)}</small></div>`).join('');
+  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${cur?.path === f.path ? 'sel' : ''}" title="${esc(f.path)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small>${UI.bytes(f.size)}</small></div>`).join('');
 }
 async function listDatasets() {
   const cfg = await ctx.reload();
@@ -132,10 +130,15 @@ drop.ondrop = UI.guard(async ev => { ev.preventDefault(); drop.classList.remove(
 $('sources').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-p]'); if (!el) return;
   const path = el.dataset.p;
-  if (!R.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet or SQLite.', 'err');
-  await openReader({ path, label: path.split('/').pop() }, () => R.open(E, path));
+  if (!Engine.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet or SQLite.', 'err');
+  await openReader({ path, label: path.split('/').pop() }, () => reader(path));
 });
-// Shows a source in the editor. c = { path, label, ext? }; open() -> SourceReader handle.
+// A source the engine reads in place (project path, or a full local/network path): { kind, tables, sql(table) }.
+async function reader(src) {
+  const o = await Engine.open(src);
+  return { kind: o.kind, tables: o.tables?.length ? o.tables : [''], sql: t => Engine.src(src, t) };
+}
+// Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
 async function openReader(c, open) {
   $('empty').hidden = true; $('editor').hidden = false; $('status').textContent = 'Reading…';
   const r = await open();
@@ -174,16 +177,16 @@ $('extPath').addEventListener('paste', ev => {
 $('extGo').onclick = UI.guard(async () => {
   const src = $('extPath').value = unquote($('extPath').value);
   if (!X.isPath(src)) throw new Error('Enter a full path like X:\\folder\\file.csv or \\\\server\\share\\file.csv.');
-  const name = X.name(src), k = R.kind(name);
+  const name = X.name(src), k = Engine.kind(name);
   if (!k) throw new Error('Unsupported file type. Use CSV, Parquet or SQLite.');
   $('extGo').disabled = true;
   try {
     extMsg('Checking source…');
     const info = await X.probe(src, { onWait }).catch(e => extFail(e, src));
     extMsg(`Found ${name}: ${UI.bytes(info.size)}, modified ${UI.date(info.modified)}.`, 'ok');
-    // Read where it is (DuckDB streams it through the server); nothing is copied into the project.
-    await openReader({ path: null, label: name, ext: { src, size: info.size, modified: info.modified } }, () => R.openUrl(E, X.url(src), name));
-    extMsg('Ready: set columns and Stage, or Import Directly.', 'ok');
+    // Read where it is (the engine reads the file in place); nothing is copied into the project.
+    await openReader({ path: null, label: name, ext: { src, size: info.size, modified: info.modified } }, () => reader(src));
+    extMsg('Ready: set columns and Stage.', 'ok');
   } finally { $('extGo').disabled = false; }
 });
 
@@ -194,14 +197,14 @@ async function loadTable(table) {
   const src = await cur.reader.sql(table);
   cur.table = table; cur.src = src; cur.rows = null;
   $('dsName').value = dsSlug(table || cur.label);
-  const cols = await R.schema(E, src);
+  const cols = await Engine.describe(`SELECT * FROM ${src}`);
   cur.cols = cols.map(c => { const n = c.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || c.name; return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
   renderSchema();
   $('colCount').textContent = cols.length; $('rowCount').textContent = '…'; $('warnings').textContent = '';
-  const p = await E.query(`SELECT * FROM ${src} LIMIT 100`);
+  const p = await Engine.query(`SELECT * FROM ${src} LIMIT 100`);
   UI.dataTable($('preview'), p.cols, p.rows);
   $('status').textContent = 'Counting rows…';
-  const n = (await E.query(`SELECT count(*) FROM ${src}`)).rows[0][0];
+  const n = await Engine.count(src);
   cur.rows = Number(n); $('rowCount').textContent = UI.num(n); $('status').textContent = '';
 }
 function renderSchema() {
@@ -217,13 +220,13 @@ $('schema').onchange = ev => {
 
 // SELECT list with renames and conversions. TRY_CAST so one bad value does not stop the import; checkTypes() counts them first.
 const selectList = () => cur.cols.filter(c => c.keep).map(c =>
-  `${c.newType === c.type ? R.quote(c.name) : `TRY_CAST(${R.quote(c.name)} AS ${c.newType})`} AS ${R.quote(c.newName)}`).join(', ');
+  `${c.newType === c.type ? Engine.q(c.name) : `TRY_CAST(${Engine.q(c.name)} AS ${c.newType})`} AS ${Engine.q(c.newName)}`).join(', ');
 
 // Values that are not empty in the source but would become empty after the type change.
 async function checkTypes() {
   const changed = cur.cols.filter(c => c.keep && c.newType !== c.type);
   if (!changed.length) { $('warnings').innerHTML = '<span class="ok">No type changes.</span>'; return 0; }
-  const r = await E.query(`SELECT ${changed.map((c, i) => `count(*) FILTER (WHERE ${R.quote(c.name)} IS NOT NULL AND TRY_CAST(${R.quote(c.name)} AS ${c.newType}) IS NULL) AS c${i}`).join(', ')} FROM ${cur.src}`);
+  const r = await Engine.query(`SELECT ${changed.map((c, i) => `count(*) FILTER (WHERE ${Engine.q(c.name)} IS NOT NULL AND TRY_CAST(${Engine.q(c.name)} AS ${c.newType}) IS NULL) AS c${i}`).join(', ')} FROM ${cur.src}`);
   const bad = changed.map((c, i) => [c, Number(r.rows[0][i])]).filter(([, n]) => n > 0);
   $('warnings').innerHTML = bad.length
     ? bad.map(([c, n]) => `⚠ ${esc(c.name)} → ${esc(c.newType)}: ${UI.num(n)} value(s) cannot be converted and would become null.`).join('<br>')
@@ -235,9 +238,8 @@ $('validate').onclick = UI.guard(checkTypes);
 // ---- import ----
 // Every dataset is Parquet; Import is the only module that reads CSV / SQLite.
 //   Stage:           column choices applied (keep, rename, retype) -> data/staged/  (Pipeline works on it)
-//   Import Directly: whole source as is                             -> data/source/  (ready for Dashboard)
-// Prescan first: a sample is written in memory to estimate the Parquet size; too big for browser memory ->
-// written in parts (ParquetWriter), each saved and freed before the next. All rows end up in the output.
+// The engine streams the source into a partitioned Parquet dataset folder (part-NNNNNN.parquet + dataset.json),
+// written to a temp folder and swapped in only when complete, so a failed import keeps the previous version.
 const changedCols = () => cur.cols.some(c => !c.keep || c.newType !== c.type || c.newName !== c.defName);   // user edits only
 async function runImport(direct) {
   const name = $('dsName').value.trim();
@@ -256,50 +258,45 @@ async function runImport(direct) {
     if (bad && !await UI.confirm(`${UI.num(bad)} value(s) cannot be converted and will be imported as null. Continue?`, { ok: 'Import anyway' })) return;
     select = selectList(); want = keep.map(c => c.newName);
   }
-  const folder = direct ? 'source' : 'staged', dest = `${ctx.dir}/data/${folder}/${name}`;
+  const folder = 'staged', dest = `${ctx.dir}/data/${folder}/${name}`;
   const cfg = await ctx.reload();
   if (cfg.datasets?.some(d => d.name === name) && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;
   const t0 = performance.now(), bar = p => $('bar').style.width = `${Math.round(p)}%`;
-  $('import').disabled = $('direct').disabled = true; bar(5);
+  $('import').disabled = true; bar(5);
   try {
-    $('status').textContent = 'Prescan: estimating size…';
-    const plan = await ParquetWriter.prescan(E, cur.src, cur.rows, select);
-    const fits = plan.parts === 1;
-    ctx.log(`Prescan ${cur.label}: ${UI.num(cur.rows)} rows, about ${UI.bytes(plan.estBytes)} of Parquet → ${fits ? 'fits in memory, one file' : `${plan.parts} parts of up to ${UI.num(plan.rowsPerPart)} rows (part limit ${UI.bytes(plan.partBytes)})`}`);
-    const w = await ParquetWriter.write(E, { select, src: cur.src, rows: cur.rows, dest, plan,
-      onProgress: (i, n, msg) => { bar(10 + 75 * i / n); $('status').textContent = msg; } });
+    $('status').textContent = 'Writing Parquet…';
+    const w = await Engine.write({ sql: `SELECT ${select} FROM ${cur.src}`, dest, meta: { source: cur.ext?.src || cur.path } }, j => {
+      if (j.progress != null) bar(5 + 85 * j.progress);
+      $('status').textContent = `${j.stage || 'Working'}… ${UI.num(j.rowsProcessed)} rows`;
+    });
     bar(90); $('status').textContent = 'Checking…';
-    // Read back what was written: row count and schema come from the Parquet file(s) themselves.
-    const out = ParquetWriter.sql(E, w);
-    // Check: header count, order and names as chosen, and every source row written.
-    const rows = Number((await E.query(`SELECT count(*) FROM ${out}`)).rows[0][0]);
-    const columns = await R.schema(E, out);
+    // Check what was written (from the dataset's own manifest): header count, order and names, every source row.
+    const rows = w.rowCount, columns = Engine.columnsOf(w), parts = w.files;
     const got = columns.map(c => c.name), diff = want.findIndex((n, i) => n !== got[i]);
     const checks = [
       { name: 'Column count', ok: want.length === got.length, detail: `${want.length} expected, ${got.length} written` },
       { name: 'Column names and order', ok: diff < 0 && want.length === got.length, detail: diff < 0 ? 'match' : `#${diff + 1}: "${want[diff]}" expected, "${got[diff]}" written` },
-      { name: 'Row count', ok: rows === cur.rows, detail: `${UI.num(cur.rows)} in source, ${UI.num(rows)} written${w.parts ? ` in ${w.parts.length} parts` : ''}` },
+      { name: 'Row count', ok: rows === cur.rows, detail: `${UI.num(cur.rows)} in source, ${UI.num(rows)} written in ${parts.length} part${parts.length > 1 ? 's' : ''}` },
     ];
     logChecks(checks);
     if (checks.some(c => !c.ok)) {
-      await DNFS.remove(w.path, { recursive: !!w.parts }).catch(() => {});
+      await DNFS.remove(w.path, { recursive: true }).catch(() => {});
       throw new Error(`Import check failed (${checks.filter(c => !c.ok).map(c => c.name).join(', ')}); the output was removed.`);
     }
     // Update compares size/modified to spot a changed source file.
     const st = cur.ext ? { size: cur.ext.size, modified: cur.ext.modified } : await DNFS.stat(cur.path);
     await Projects.upsertDataset(ctx.folder, {
-      name, path: w.path, parts: w.parts, stage: folder, direct, rows, bytes: w.bytes, columns, imported: new Date().toISOString(),
+      name, path: w.path, parts, stage: folder, direct, rows, bytes: w.bytes, columns, version: w.version, imported: new Date().toISOString(),
       source: { path: cur.ext ? null : cur.path, origin: cur.ext?.src || null, table: cur.table || null, kind: cur.reader.kind, select, size: st.size, modified: st.modified },
     });
     await Projects.touchModule(ctx.folder, 'import');
-    ctx.log(`${direct ? 'Imported' : 'Staged'} ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}${w.parts ? `/ (${w.parts.length} parts)` : '.parquet'}: ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
+    ctx.log(`${direct ? 'Imported' : 'Staged'} ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
     UI.toast(`${direct ? 'Imported' : 'Staged'} ${name}`, 'ok');
     bar(100); $('status').textContent = '';
     await listDatasets();
-  } finally { $('import').disabled = $('direct').disabled = false; setTimeout(() => bar(0), 1200); }
+  } finally { $('import').disabled = false; setTimeout(() => bar(0), 1200); }
 }
 $('import').onclick = UI.guard(() => runImport(false));
-$('direct').onclick = UI.guard(() => runImport(true));
 
 // ---- staged dataset preview / delete ----
 $('datasets').onclick = UI.guard(async ev => {
@@ -308,7 +305,7 @@ $('datasets').onclick = UI.guard(async ev => {
   const v = await UI.dialog(d.name, `<div class="muted">${esc(d.path)} · ${UI.num(d.rows)} rows · imported ${UI.date(d.imported)}</div><div class="mono" style="max-height:260px;overflow:auto">${d.columns.map(c => `${esc(c.name)} <span class="muted">${esc(c.type)}</span>`).join('<br>')}</div>`,
     [{ label: 'Delete dataset', value: 'del', kind: 'danger' }, { label: 'Close', value: null, kind: 'ghost' }]);
   if (v === 'del' && await UI.confirm(`Delete dataset "${d.name}" and its Parquet ${d.parts ? 'parts' : 'file'}?`, { danger: true, ok: 'Delete' })) {
-    await DNFS.remove(d.path, { recursive: !!d.parts }).catch(() => {});
+    await DNFS.remove(d.path, { recursive: !/\.parquet$/.test(d.path) }).catch(() => {});
     await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(x => x.name !== d.name) });
     ctx.log(`Deleted dataset ${d.name}`); await listDatasets();
   }
@@ -317,7 +314,6 @@ $('datasets').onclick = UI.guard(async ev => {
 (async () => {
   try {
     ctx = await ModulePage.init('import', 'Import Data');
-    E = DuckEngine; await E.init();
     await listSources(); await listDatasets();
     setInterval(() => listSources(false).catch(() => {}), 3000);
   } catch (e) { UI.toast(e.message, 'err'); $('empty').textContent = e.message; }

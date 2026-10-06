@@ -3,92 +3,14 @@
 <head>
 <meta charset="utf-8">
 <title>Data Noodler</title>
-<script src="../js/core/theme.js"></script>
-<link rel="stylesheet" href="../css/theme.css">
-<style>
-  /* App shell: one global header; the current module loads in the frame below it. */
-  html, body { height: 100%; overflow: hidden; }
-  .shell { display: flex; flex-direction: column; height: 100%; }
-  .status { display: flex; gap: 28px; }
-  .status .stat b { font-size: 15px; white-space: nowrap; }
-  .status .on { color: var(--ok); } .status .off { color: var(--err); } .status .wait { color: var(--muted); }
-  #frame { flex: 1; width: 100%; border: 0; display: block; min-height: 0; background: var(--bg); }
-</style>
-</head>
-<body>
-<div class="shell">
-  <header class="topbar shell-top">
-    <div class="brand">
-      <span class="logo" id="logo">DN</span>
-      <div><h1>Data Noodler</h1><div class="sub" id="modTitle">Loading…</div></div>
-    </div>
-    <div class="spacer"></div>
-    <div class="status">
-      <div class="stat"><label>Server</label><b id="srv" class="wait">CONNECTING</b></div>
-      <div class="stat"><label>DuckDB</label><b id="duck" class="wait" title="Click to re-run the test">TESTING</b></div>
-    </div>
-  </header>
-  <iframe id="frame" title="Module"></iframe>
-</div>
-
-<script src="../js/duckdb-engine.js"></script>
-<script src="../js/core/windows.js"></script>
 <script>
-// Global shell. Global: Shell.
-//   Shell.go('import', 'sales-demo')   load a module (home = Projects) for a project, keeping the header
-//   Shell.setInfo('Import Data', 'Sales Demo')   module title / project name under "Data Noodler"
-// The URL tracks the module (app.html?m=import&project=...), so refresh and browser Back work.
-const $ = id => document.getElementById(id);
-const PAGES = { home: { label: 'Projects', page: 'home.html', initials: 'PR' } };
-for (const m of Windows.MODULES) PAGES[m.id] = m;
-let cur = null;
-
-const Shell = window.Shell = {   // on window so module pages can reach it as parent.Shell
-  go(id, project, push = true) {
-    const m = PAGES[id] || PAGES.home; id = PAGES[id] ? id : 'home';
-    const q = new URLSearchParams({ m: id }); if (project) q.set('project', project);
-    if (push) history.pushState(null, '', `?${q}`);
-    const fq = new URLSearchParams(); if (project) fq.set('project', project);
-    cur = { id, project };
-    $('logo').textContent = m.initials;
-    Shell.setInfo(m.label, null);
-    $('frame').src = `/html/${m.page}${fq.size ? `?${fq}` : ''}`;
-  },
-  setInfo(title, project) {
-    $('modTitle').textContent = project ? `${title} · ${project}` : title;
-    document.title = `${title} · Data Noodler`;
-  },
-};
-addEventListener('popstate', () => { const q = new URLSearchParams(location.search); Shell.go(q.get('m'), q.get('project'), false); });
-{ const q = new URLSearchParams(location.search); Shell.go(q.get('m') || 'home', q.get('project'), false); }
-
-// ---- Server status: polls the site every 5 s ----
-async function serverStatus() {
-  const el = $('srv');
-  try {
-    const r = await fetch('/api/status', { headers: { 'X-DN-Token': window.DN_TOKEN }, cache: 'no-store' });
-    const s = await r.json();
-    if (s.theme && s.theme !== Theme.current) Theme.apply(s.theme);   // changed from another window
-    el.textContent = `ONLINE v${s.ps}`; el.className = 'on'; el.title = `Port ${s.port}, up ${s.uptime} s`;
-  } catch { el.textContent = 'OFFLINE'; el.className = 'off'; el.title = 'The server is not responding.'; }
-}
-serverStatus(); setInterval(serverStatus, 5000);
-
-// ---- DuckDB status: start an engine, run one query, close it (frees its memory) ----
-async function duckStatus() {
-  const el = $('duck'); el.textContent = 'TESTING'; el.className = 'wait';
-  const e = createDuckEngine(), t0 = performance.now();
-  try {
-    const info = await e.init();
-    const r = await e.query('SELECT sum(i) AS s FROM range(1000000) t(i)');
-    if (r.rows[0][0] !== 499999500000) throw new Error(`wrong answer: ${r.rows[0][0]}`);
-    el.textContent = `READY ${info.version}`; el.className = 'on';
-    el.title = `${info.build} build, RAM limit ${info.memoryLimit} (browser cap), ${Math.round(performance.now() - t0)} ms. Click to re-test.`;
-  } catch (err) { el.textContent = 'FAILED'; el.className = 'off'; el.title = err.message; }
-  finally { e.close().catch(() => {}); }
-}
-$('duck').style.cursor = 'pointer'; $('duck').onclick = duckStatus;
-duckStatus();
+// Old shell address (app.html?m=<module>&project=...): every module now opens as its own page with the global header.
+(() => {
+  const q = new URLSearchParams(location.search), m = q.get('m') || 'home'; q.delete('m');
+  const page = /^[a-z-]+$/.test(m) ? m : 'home';
+  location.replace(`/html/${page}.html${q.size ? `?${q}` : ''}`);
+})();
 </script>
-</body>
+</head>
+<body></body>
 </html>

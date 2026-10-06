@@ -1,14 +1,14 @@
 // Synthetic test data: 50 columns of realistic, reproducible values. Global: TestDataGen.
 // Each row is computed from its id with hash(id, k), so any range of ids can be generated
 // on its own (in parallel, or resumed later) and always gives the same values.
-// A dataset is a folder of Parquet part files plus manifest.json:
+// A dataset is a folder of Parquet part files plus manifest.json (the engine reads the folder as one dataset):
 //   test-data/gen/<name>/part-0000.parquet ...   ids are 0..rows-1, in order across the parts
 //   test-data/gen/<name>/manifest.json           { name, rows, columns, parts: [{ path, rows, first }] }
+// SQL is the native engine's dialect: choose(k, ...) picks the k-th value, add_seconds(t, n) shifts a timestamp.
 const TestDataGen = (() => {
   const DIR = 'test-data/gen';
-  const L = a => '[' + a.map(s => `'${s}'`).join(', ') + ']';
   const h = k => `hash(i, ${k})`;
-  const pick = (a, k) => `${L(a)}[1 + (${h(k)} % ${a.length})::INT]`;
+  const pick = (a, k) => `choose(1 + ${h(k)} % ${a.length}, ${a.map(s => `'${s}'`).join(', ')})`;
   const LISTS = {
     region: ['North', 'South', 'East', 'West', 'Central', 'International'],
     country: ['US', 'CA', 'MX', 'BR', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'SE', 'PL', 'IN', 'CN', 'JP', 'KR', 'AU', 'NZ', 'ZA', 'AE'],
@@ -27,7 +27,7 @@ const TestDataGen = (() => {
     ['id', 'i'],
     ['order_date', `DATE '2020-01-01' + (${h(1)} % 2192)::INT`],
     ['ship_date', `order_date + (1 + ${h(2)} % 14)::INT`],
-    ['order_ts', `order_date + to_seconds((${h(3)} % 86400)::BIGINT)`],
+    ['order_ts', `add_seconds(order_date, ${h(3)} % 86400)`],
     ['customer_id', `(${h(4)} % 50000)::INT`],
     ['product_id', `(${h(5)} % 5000)::INT`],
     ['store_id', `(${h(6)} % 300)::SMALLINT`],
@@ -68,8 +68,8 @@ const TestDataGen = (() => {
     ['sku', `'SKU-' || lpad(product_id::VARCHAR, 5, '0')`],
     ['email', `'user' || customer_id::VARCHAR || '@example.com'`],
     ['notes', pick(LISTS.notes, 38)],
-    ['created_at', `order_ts - to_seconds((${h(39)} % 604800)::BIGINT)`],
-    ['updated_at', `order_ts + to_seconds((${h(40)} % 2592000)::BIGINT)`],
+    ['created_at', `add_seconds(order_ts, -(${h(39)} % 604800))`],
+    ['updated_at', `add_seconds(order_ts, ${h(40)} % 2592000)`],
     ['fiscal_quarter', `'FY' || year(order_date)::VARCHAR || '-Q' || quarter(order_date)::VARCHAR`],
     ['batch_no', `(i // 10000)::INT`],
     ['ref_code', `'R' || lpad((${h(41)} % 1000)::VARCHAR, 3, '0')`],

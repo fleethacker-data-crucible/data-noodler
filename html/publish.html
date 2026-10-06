@@ -29,7 +29,7 @@
         <h3>Datasets</h3>
         <div class="muted">Copies of staged datasets for other tools.</div>
         <div class="opts" id="dsOpts"></div>
-        <label class="field">Format<select id="fmt"><option value="csv">CSV (with header)</option><option value="parquet">Parquet (ZSTD)</option></select></label>
+        <label class="field">Format<select id="fmt"><option value="csv">CSV (with header)</option><option value="parquet">Parquet (Snappy)</option><option value="sqlite">SQLite</option></select></label>
         <button id="pubData" class="go">Export selected</button>
       </section>
     </div>
@@ -41,14 +41,11 @@
 </div>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
-<script src="../js/duckdb-pool.js"></script>
+<script src="../js/core/engine-client.js"></script>
 <script src="../js/core/ui.js"></script>
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/core/data-engine.js"></script>
-<script src="../js/core/parquet-writer.js"></script>
 <script src="../js/dashboard/widgets.js"></script>
 <script>
 const { $, esc } = UI;
@@ -75,14 +72,11 @@ $('pubDash').onclick = UI.guard(async () => {
   if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
   $('pubDash').disabled = true;
   try {
-    await DataEngine.loadProfile();
     const results = [];
-    for (const w of dash.widgets.filter(Widgets.ready)) {   // widgets not set up yet are left out
+    for (const w of dash.widgets.filter(w => w.type !== 'widget' && Widgets.ready(w))) {   // not set up yet, or Vega packages (not in published pages yet): left out
       const d = ctx.cfg.datasets.find(x => x.name === w.dataset);
       if (!d) { results.push({ w, error: `Dataset ${w.dataset} not found` }); continue; }
-      let r;
-      if (Widgets.spec(w).type === 'table') { const e = await DataEngine.main(); r = await e.query(Widgets.tableQuery(w, ParquetWriter.sql(e, d))); }
-      else { const a = Widgets.aggQuery(w); r = await DataEngine.parallel({ path: d.path, parts: d.parts, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final }); }
+      const r = await Engine.call('query', { query: Widgets.query(w), views: Engine.views([d]) });
       results.push({ w, cols: r.cols, rows: r.rows });
     }
     const [css, ui, widgets] = await Promise.all(['/css/theme.css', '/js/core/ui.js', '/js/dashboard/widgets.js'].map(async u => (await fetch(u)).text()));
@@ -111,19 +105,14 @@ D.results.forEach((r, i) => { const c = document.createElement('div'); c.classNa
 $('pubData').onclick = UI.guard(async () => {
   const names = [...document.querySelectorAll('#dsOpts input:checked')].map(c => c.value);
   if (!names.length) throw new Error('Tick at least one dataset.');
-  const fmt = $('fmt').value, e = await DataEngine.main(), dir = `${ctx.dir}/publish/data-${stamp()}`;
+  const fmt = $('fmt').value, dir = `${ctx.dir}/publish/data-${stamp()}`;
   $('pubData').disabled = true;
   try {
     for (const n of names) {
       const d = ctx.cfg.datasets.find(x => x.name === n), t0 = performance.now();
-      // Split datasets export part by part (folder <name>/), so a big one never has to fit in memory at once.
-      const parts = d.parts || [d.path], one = !d.parts;
-      for (const [i, f] of parts.entries()) {
-        const to = one ? `${dir}/${n}.${fmt}` : `${dir}/${n}/part-${String(i + 1).padStart(4, '0')}.${fmt}`;
-        if (fmt === 'parquet') await DNFS.copy(f, to);
-        else await e.writeProjectFile(`SELECT * FROM read_parquet('${e.url(f)}')`, to, 'FORMAT CSV, HEADER');
-      }
-      ctx.log(`Exported ${n} as ${fmt.toUpperCase()} (${UI.ms(performance.now() - t0)})`, 'ok');
+      // One file per dataset; the engine streams it, so a big dataset never has to fit in memory.
+      const r = await Engine.exportTo({ sql: `SELECT * FROM ${Engine.dataset(d)}`, to: `${dir}/${n}.${fmt}`, format: fmt, table: n });
+      ctx.log(`Exported ${n} as ${fmt.toUpperCase()}: ${UI.num(r.rows)} rows, ${UI.bytes(r.bytes)} (${UI.ms(performance.now() - t0)})`, 'ok');
     }
     await Projects.touchModule(ctx.folder, 'publish');
     UI.toast('Export finished', 'ok'); await listPubs();

@@ -1,0 +1,21 @@
+{
+  "id": "vl-bar-chart",
+  "name": "Column chart (Vega-Lite)",
+  "description": "Sample Vega-Lite package",
+  "kind": "vega-lite",
+  "spec": "spec.json",
+  "version": 1,
+  "inputs": [
+    { "key": "category", "label": "Category", "role": "dimension", "paths": ["encoding.x.field"], "sample": "category" },
+    { "key": "amount", "label": "Amount", "role": "measure", "agg": "sum", "paths": ["encoding.y.field"], "sample": "amount" }
+  ],
+  "options": [
+    { "path": "mark.color", "label": "Bar color", "group": "Mark", "type": "color", "default": null, "show": true },
+    { "path": "mark.opacity", "label": "Opacity", "group": "Mark", "type": "number", "default": 1, "min": 0, "max": 1, "step": 0.05, "show": true },
+    { "path": "mark.cornerRadiusEnd", "label": "Corner radius", "group": "Mark", "type": "number", "default": 4, "min": 0, "max": 30, "step": 1, "show": true },
+    { "path": "mark.tooltip", "label": "Tooltips", "group": "Mark", "type": "boolean", "default": true, "show": true },
+    { "path": "encoding.x.axis.labelAngle", "label": "X label angle", "group": "X", "type": "number", "default": 0, "min": -90, "max": 90, "step": 5, "show": true },
+    { "path": "encoding.x.axis.title", "label": "X title", "group": "X", "type": "text", "default": "Category", "show": true },
+    { "path": "encoding.y.axis.title", "label": "Y title", "group": "Y", "type": "text", "default": "Amount", "show": true }
+  ]
+}

@@ -8,17 +8,15 @@
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   aside { display: flex; flex-direction: column; gap: 24px; }
-  .steps { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); }
-  .steps .s { display: grid; grid-template-columns: 22px 1fr auto; gap: 6px; align-items: center; padding: 6px 8px; cursor: pointer; }
-  .steps .s + .s { border-top: 1px solid var(--border); }
-  .steps .s:hover { background: var(--panel); }
-  .steps .s.sel { background: var(--sel); }
-  .steps .n { color: var(--muted); font-family: var(--mono); }
-  .steps small { color: var(--muted); display: block; }
-  .tag { font-size: 11px; color: var(--ok); }
-  .list div { padding: 3px 0; font-size: 13px; }
-  #sqlview { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 8px; color: var(--text-2); }
+  .lst { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 300px; overflow: auto; }
+  .lst > div { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; cursor: pointer; }
+  .lst > div + div { border-top: 1px solid var(--border); }
+  .lst > div:hover { background: var(--panel); }
+  .lst > div.sel { background: var(--sel); font-weight: 600; }
+  .lst small { color: var(--muted); white-space: nowrap; }
+  .lst .n { color: var(--muted); font-family: var(--mono); margin-right: 6px; }
   .runs div { font-size: 12.5px; padding: 2px 0; }
+  #outName { min-width: 260px; font-family: var(--mono); }
 </style>
 </head>
 <body>
@@ -33,26 +31,25 @@
     <div class="split">
       <aside>
         <section>
-          <h2>Steps</h2>
-          <div class="row" style="margin-bottom:8px"><select id="newType"></select><button id="add">Add step</button></div>
-          <div class="steps" id="steps"></div>
+          <h2>Staged datasets <small class="muted" style="text-transform:none;letter-spacing:0">click to insert</small></h2>
+          <div class="lst" id="dsList"></div>
         </section>
-        <section><h2>Datasets</h2><div class="list" id="dsList"></div></section>
+        <section>
+          <h2>Queries <small class="muted" style="text-transform:none;letter-spacing:0">run top to bottom</small></h2>
+          <div class="row" style="margin-bottom:8px"><button id="add">Add</button><button id="up" class="ghost small">Move up</button><button id="down" class="ghost small">Move down</button><button id="del" class="danger small">Delete</button></div>
+          <div class="lst" id="qList"></div>
+        </section>
         <section><h2>Runs</h2><div class="runs" id="runs"></div></section>
       </aside>
       <section class="stack">
-        <div id="none" class="muted">Add a step to start. Steps run top to bottom; each one is a table that later steps can use by name.</div>
+        <div id="none" class="muted">Click Add to write a query. Every query writes an output dataset (Parquet in data/source). The simplest one is <span class="mono">SELECT * FROM &lt;staged dataset&gt;</span>.</div>
         <div id="editor" hidden class="stack">
+          <h2>SQL <small class="muted" style="text-transform:none;letter-spacing:0">Tab / Shift+Tab indent · Ctrl+Space suggestions · Ctrl+Enter preview</small></h2>
+          <div id="sql"></div>
           <div class="row">
-            <label class="field">Step name<input id="sName" type="text" pattern="[a-z0-9_]+"></label>
-            <label class="row" style="margin-top:18px"><input id="sOut" type="checkbox"> Save result as a dataset (Parquet in data/source, ready for Dashboard)</label>
-            <div class="spacer" style="flex:1"></div>
-            <button id="up" class="ghost small">Move up</button><button id="down" class="ghost small">Move down</button><button id="del" class="danger small">Delete step</button>
+            <label class="field">Output dataset name<input id="outName" type="text" placeholder="lower_case_name" spellcheck="false"></label>
+            <button id="preview" style="margin-top:18px">Preview</button><span id="pinfo" class="muted" style="margin-top:18px"></span>
           </div>
-          <div id="fields" class="stack"></div>
-          <h2>SQL</h2>
-          <div id="sqlview" class="mono"></div>
-          <div class="row"><button id="preview">Preview step</button><span id="pinfo" class="muted"></span></div>
           <div id="result"></div>
         </div>
         <h2>Activity</h2>
@@ -63,110 +60,113 @@
 </div>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
+<script src="../js/core/engine-client.js"></script>
 <script src="../js/core/ui.js"></script>
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/core/parquet-writer.js"></script>
 <script src="../js/pipeline/steps.js"></script>
 <script src="../js/pipeline/runner.js"></script>
+<script src="../js/pipeline/sql-editor.js"></script>
 <script>
+// Pipeline = ordered SQL queries. Each reads staged datasets (and earlier queries by their output name) and writes
+// an output dataset to data/source/<name>/ (Parquet, split every 2M rows). Saved in pipeline/pipeline.json as
+// steps { id, name (output dataset), type: 'sql', config: { query }, output: true }.
 const { $, esc } = UI, S = PipelineSteps;
-let ctx, E, pipe = { steps: [] }, sel = -1, dirty = false;
-const FILE = () => `${ctx.dir}/pipeline/pipeline.json`, RUNS = () => `${ctx.dir}/pipeline/runs.json`;
-$('newType').innerHTML = Object.entries(S.TYPES).map(([k, t]) => `<option value="${k}">${t.label}</option>`).join('');
+let ctx, pipe = { steps: [] }, sel = -1, dirty = false;
+const FILE = () => `${ctx.dir}/pipeline/pipeline.json`;
+const NAME = /^[a-z0-9_]+$/;
+const staged = () => (ctx?.cfg.datasets || []).filter(d => Projects.stageOf(d) === 'staged');
 
-const names = () => [...(ctx.cfg.datasets || []).map(d => d.name), ...pipe.steps.map(s => s.name)];
-const sourcesBefore = i => [...(ctx.cfg.datasets || []).filter(d => !pipe.steps.some(s => s.name === d.name)).map(d => d.name), ...pipe.steps.slice(0, i).map(s => s.name)];
+// Older pipelines (form steps, optional outputs) become SQL queries that all write a dataset.
+function migrate(p) {
+  p.steps = (p.steps || []).map(s => s.type === 'sql' && s.output ? s : { id: s.id || crypto.randomUUID(), name: s.name, type: 'sql', config: { query: (() => { try { return S.sqlOf(s); } catch { return ''; } })() }, output: true });
+  return p;
+}
 
-function renderSteps() {
-  $('steps').innerHTML = pipe.steps.map((s, i) => `<div class="s ${i === sel ? 'sel' : ''}" data-i="${i}"><span class="n">${i + 1}</span><span>${esc(s.name)}<small>${esc(S.TYPES[s.type].label)}</small></span>${s.output ? '<span class="tag">dataset</span>' : '<span></span>'}</div>`).join('') || '<div class="s muted">No steps yet.</div>';
-  $('dsList').innerHTML = (ctx.cfg.datasets || []).map(d => `<div>${esc(d.name)} <span class="muted">${UI.rows(d.rows)} rows${d.source?.kind === 'pipeline' ? ' · from pipeline' : ''}</span></div>`).join('') || '<div class="muted">No datasets. Import data first.</div>';
+const ed = SqlEditor.mount($('sql'), {
+  onChange: v => { if (pipe.steps[sel]) { pipe.steps[sel].config.query = v; dirty = true; } },
+  words: () => ({ tables: [...staged().map(d => d.name), ...pipe.steps.slice(0, Math.max(0, sel)).map(s => s.name)],
+                  columns: [...new Set((ctx?.cfg.datasets || []).flatMap(d => (d.columns || []).map(c => c.name)))] }),
+});
+
+function render() {
+  $('dsList').innerHTML = staged().map(d => `<div data-ds="${esc(d.name)}" title="${esc(d.columns.map(c => `${c.name} ${c.type}`).join('\n'))}"><span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows · ${d.columns.length} cols</small></div>`).join('') || '<div class="muted">Nothing staged. Import data first.</div>';
+  $('qList').innerHTML = pipe.steps.map((s, i) => `<div data-i="${i}" class="${i === sel ? 'sel' : ''}"><span><span class="n">${i + 1}</span>${esc(s.name || '(no output name)')}</span><small>→ data/source</small></div>`).join('') || '<div class="muted">No queries yet.</div>';
   $('none').hidden = sel >= 0; $('editor').hidden = sel < 0;
+  ['up', 'down', 'del'].forEach(id => $(id).disabled = sel < 0);
 }
-function renderEditor() {
-  const s = pipe.steps[sel]; if (!s) return renderSteps();
-  $('sName').value = s.name; $('sOut').checked = !!s.output;
-  const src = sourcesBefore(sel);
-  $('fields').innerHTML = S.TYPES[s.type].fields.map(([k, label, kind, ph, opts]) => {
-    const v = s.config[k] ?? '';
-    if (kind === 'source') return `<label class="field">${esc(label)}<select data-k="${k}"><option value=""></option>${src.map(n => `<option ${n === v ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>`;
-    if (kind === 'select') return `<label class="field">${esc(label)}<select data-k="${k}">${opts.map(o => `<option ${o === v ? 'selected' : ''}>${o}</option>`).join('')}</select></label>`;
-    if (kind === 'area') return `<label class="field">${esc(label)}<textarea data-k="${k}" placeholder="${esc(ph)}">${esc(v)}</textarea></label>`;
-    return `<label class="field">${esc(label)}<input type="text" data-k="${k}" value="${esc(v)}" placeholder="${esc(ph)}"></label>`;
-  }).join('');
-  showSql(); renderSteps();
+function select(i) {
+  sel = i; const s = pipe.steps[i];
+  ed.value = s ? s.config.query : ''; $('outName').value = s ? s.name : '';
+  $('result').innerHTML = ''; $('pinfo').textContent = ''; render();
 }
-function showSql() { try { $('sqlview').textContent = S.sqlOf(pipe.steps[sel]); } catch (e) { $('sqlview').innerHTML = `<span class="err">${esc(e.message)}</span>`; } }
 
-$('fields').oninput = ev => { const k = ev.target.dataset.k; if (!k) return; pipe.steps[sel].config[k] = ev.target.value; dirty = true; showSql(); };
-$('sName').onchange = () => {
-  const v = $('sName').value.trim();
-  if (!/^[a-z0-9_]+$/.test(v)) return UI.toast('Step names: lower-case letters, digits and _ only.', 'err');
-  if (names().filter(n => n === v).length && v !== pipe.steps[sel].name) return UI.toast(`"${v}" is already used.`, 'err');
-  const old = pipe.steps[sel].name; pipe.steps[sel].name = v; dirty = true;
-  for (const s of pipe.steps) for (const k in s.config) if (s.config[k] === old) s.config[k] = v; // keep references working
-  renderSteps();
-};
-$('sOut').onchange = () => { pipe.steps[sel].output = $('sOut').checked; dirty = true; renderSteps(); };
-$('steps').onclick = ev => { const el = ev.target.closest('[data-i]'); if (!el) return; sel = +el.dataset.i; renderEditor(); $('result').innerHTML = ''; $('pinfo').textContent = ''; };
+$('dsList').onclick = ev => { const el = ev.target.closest('[data-ds]'); if (el && sel >= 0) ed.insert(el.dataset.ds); };
+$('qList').onclick = ev => { const el = ev.target.closest('[data-i]'); if (el) select(+el.dataset.i); };
+$('outName').oninput = () => { const s = pipe.steps[sel]; if (!s) return; s.name = $('outName').value.trim(); dirty = true; render(); };
 $('add').onclick = () => {
-  const type = $('newType').value; let n = 1;
-  while (names().includes(`${type}_${n}`)) n++;
-  const prev = pipe.steps.length ? pipe.steps.at(-1).name : (ctx.cfg.datasets || [])[0]?.name || '';
-  const config = {}; for (const [k, , kind] of S.TYPES[type].fields) if (kind === 'source') config[k] = prev; // chain from the previous step
-  pipe.steps.push({ id: crypto.randomUUID(), name: `${type}_${n}`, type, config, output: false });
-  sel = pipe.steps.length - 1; dirty = true; renderEditor();
+  const first = staged()[0]?.name || 'my_dataset';
+  let n = 1; while (pipe.steps.some(s => s.name === `output_${n}`)) n++;
+  pipe.steps.push({ id: crypto.randomUUID(), name: `output_${n}`, type: 'sql', config: { query: `SELECT *\nFROM ${first}` }, output: true });
+  dirty = true; select(pipe.steps.length - 1); ed.focus();
 };
-const move = d => { const j = sel + d; if (j < 0 || j >= pipe.steps.length) return; [pipe.steps[sel], pipe.steps[j]] = [pipe.steps[j], pipe.steps[sel]]; sel = j; dirty = true; renderEditor(); };
+const move = d => { const j = sel + d; if (j < 0 || j >= pipe.steps.length) return; [pipe.steps[sel], pipe.steps[j]] = [pipe.steps[j], pipe.steps[sel]]; dirty = true; select(j); };
 $('up').onclick = () => move(-1); $('down').onclick = () => move(1);
 $('del').onclick = UI.guard(async () => {
   const s = pipe.steps[sel];
-  const used = pipe.steps.filter(x => S.inputsOf(x).includes(s.name) || (x.type === 'sql' && new RegExp(`\\b${s.name}\\b`).test(x.config.query || '')));
-  if (!await UI.confirm(`Delete step "${s.name}"?${used.length ? ` It is used by: ${used.map(x => x.name).join(', ')}.` : ''}`, { danger: true, ok: 'Delete' })) return;
-  pipe.steps.splice(sel, 1); sel = Math.min(sel, pipe.steps.length - 1); dirty = true; renderEditor(); renderSteps();
+  if (!await UI.confirm(`Delete query "${s.name}"? Its output dataset stays until you delete it in Import.`, { danger: true, ok: 'Delete' })) return;
+  pipe.steps.splice(sel, 1); dirty = true; select(Math.min(sel, pipe.steps.length - 1));
 });
 
-// ---- views ----
-const defineViews = upto => PipelineRunner.defineViews(E, ctx, pipe, upto);
+// Every query needs SQL and a unique, valid output name that is not a staged dataset.
+function validate() {
+  if (!pipe.steps.length) throw new Error('Add at least one query (e.g. SELECT * FROM a staged dataset) with an output name.');
+  const names = new Set(), stagedNames = new Set(staged().map(d => d.name));
+  pipe.steps.forEach((s, i) => {
+    const where = `Query ${i + 1}`;
+    if (!s.config.query.trim()) throw new Error(`${where}: write a SQL query.`);
+    if (!NAME.test(s.name || '')) throw new Error(`${where}: output name must use lower-case letters, digits and _ only.`);
+    if (stagedNames.has(s.name)) throw new Error(`${where}: "${s.name}" is a staged dataset; pick another output name.`);
+    if (names.has(s.name)) throw new Error(`${where}: output name "${s.name}" is used twice.`);
+    names.add(s.name);
+  });
+}
+
 $('preview').onclick = UI.guard(async () => {
+  if (sel < 0) return;
   $('pinfo').textContent = 'Running…';
-  await defineViews(sel);
-  const name = S.q(pipe.steps[sel].name), t0 = performance.now();
-  const r = await E.query(`SELECT * FROM ${name} LIMIT 100`);
-  const n = (await E.query(`SELECT count(*) FROM ${name}`)).rows[0][0];
+  const views = await PipelineRunner.views(ctx, pipe, sel), name = Engine.q(pipe.steps[sel].name || '__preview'), t0 = performance.now();
+  if (!pipe.steps[sel].name) views.__preview = pipe.steps[sel].config.query;
+  const r = await Engine.query(`SELECT * FROM ${name} LIMIT 100`, { views });
+  const n = await Engine.count(name, views);
   UI.dataTable($('result'), r.cols, r.rows);
   $('pinfo').textContent = `${UI.num(n)} rows · ${r.cols.length} columns · ${UI.ms(performance.now() - t0)}`;
 });
+$('sql').addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.ctrlKey) { ev.preventDefault(); $('preview').click(); } });
 
-// ---- save / run ----
-async function save() { pipe.updated = new Date().toISOString(); await DNFS.writeJSON(FILE(), pipe); dirty = false; }
+async function save() { pipe.updated = new Date().toISOString(); pipe.rev = (pipe.rev || 0) + 1; await DNFS.writeJSON(FILE(), pipe); dirty = false; }
 $('save').onclick = UI.guard(async () => { await save(); UI.toast('Pipeline saved', 'ok'); ctx.log('Pipeline saved'); });
-const runs = () => PipelineRunner.runs(ctx);
 async function renderRuns() {
-  $('runs').innerHTML = (await runs()).slice(-10).reverse().map(r => `<div class="${r.ok ? '' : 'err'}">${UI.date(r.at)} · ${UI.ms(r.ms)} · ${r.ok ? r.outputs.map(o => `${esc(o.name)} ${UI.rows(o.rows)}`).join(', ') || 'no outputs' : esc(r.error)}</div>`).join('') || '<div class="muted">Not run yet.</div>';
+  $('runs').innerHTML = (await PipelineRunner.runs(ctx)).slice(-10).reverse().map(r => `<div class="${r.ok ? '' : 'err'}">${UI.date(r.at)} · ${UI.ms(r.ms)} · ${r.ok ? r.outputs.map(o => `${esc(o.name)} ${UI.rows(o.rows)}`).join(', ') || 'no outputs' : esc(r.error)}</div>`).join('') || '<div class="muted">Not run yet.</div>';
 }
 $('run').onclick = UI.guard(async () => {
-  if (!pipe.steps.length) throw new Error('No steps to run.');
-  if (!pipe.steps.some(s => s.output) && !await UI.confirm('No step is set to save a dataset, so a run only checks the steps. Run anyway?')) return;
+  validate();
   await save();
   $('run').disabled = true;
   try {
-    const rec = await PipelineRunner.run(E, ctx, pipe, (m, l) => ctx.log(m, l));
+    const rec = await PipelineRunner.run(ctx, pipe, (m, l) => ctx.log(m, l));
     if (!rec.ok) throw new Error(`Run failed: ${rec.error}`);
     ctx.log(`Pipeline run finished in ${UI.ms(rec.ms)}`, 'ok'); UI.toast('Pipeline finished', 'ok');
-  } finally { $('run').disabled = false; renderSteps(); renderRuns(); }
+  } finally { $('run').disabled = false; await ctx.reload(); render(); renderRuns(); }
 });
 window.addEventListener('beforeunload', ev => { if (dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 
 (async () => {
   try {
     ctx = await ModulePage.init('pipeline', 'Pipeline');
-    E = DuckEngine; await E.init();
-    pipe = await PipelineRunner.load(ctx);
-    sel = pipe.steps.length ? 0 : -1;
-    sel >= 0 ? renderEditor() : renderSteps();
+    pipe = migrate(await PipelineRunner.load(ctx));
+    select(pipe.steps.length ? 0 : -1);
     renderRuns();
   } catch (e) { UI.toast(e.message, 'err'); $('none').textContent = e.message; }
 })();

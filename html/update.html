@@ -27,19 +27,17 @@
 </div>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
 <script src="../js/core/ui.js"></script>
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/core/parquet-writer.js"></script>
-<script src="../js/import/source-reader.js"></script>
+<script src="../js/core/engine-client.js"></script>
 <script src="../js/import/external-source.js"></script>
 <script src="../js/pipeline/steps.js"></script>
 <script src="../js/pipeline/runner.js"></script>
 <script>
-const { $, esc } = UI, R = SourceReader;
-let ctx, E, state = []; // [{ d, stat, status }]
+const { $, esc } = UI;
+let ctx, state = []; // [{ d, stat, status }]
 
 // Sources live in the project (source.path) or outside it (source.origin: local/network path, via the server).
 const X = ExternalSource;
@@ -67,20 +65,17 @@ async function check() {
 }
 $('check').onclick = UI.guard(check);
 
-// Re-import one dataset; returns a description of what changed.
+// Re-import one dataset (the engine reads the source where it is, same columns as the first import);
+// returns a description of what changed.
 async function reimport(d) {
   const oldCols = d.columns, ext = !d.source.path;
-  // Read the source where it is (outside files stream through the server), same columns as the first import.
-  const r = ext ? await R.openUrl(E, X.url(d.source.origin), srcName(d)) : await R.open(E, d.source.path), src = await r.sql(d.source.table || '');
-  const total = Number((await E.query(`SELECT count(*) FROM ${src}`)).rows[0][0]);
-  const dest = d.parts ? d.path : d.path.replace(/\.parquet$/, '');
-  const w = await ParquetWriter.write(E, { select: d.source.select, src, rows: total, dest });
-  const out = ParquetWriter.sql(E, w);
-  const rows = Number((await E.query(`SELECT count(*) FROM ${out}`)).rows[0][0]);
-  const columns = await R.schema(E, out);
+  const from = Engine.src(ext ? d.source.origin : d.source.path, d.source.table || '');
+  const total = await Engine.count(from);
+  const w = await Engine.write({ sql: `SELECT ${d.source.select} FROM ${from}`, dest: d.path.replace(/\.parquet$/, ''), meta: { source: d.source.origin || d.source.path } });
+  const rows = w.rowCount, columns = Engine.columnsOf(w);
   if (rows !== total) throw new Error(`${d.name}: ${UI.num(total)} rows in source, ${UI.num(rows)} written.`);
   const st = await statSource(d);
-  await Projects.upsertDataset(ctx.folder, { ...d, path: w.path, parts: w.parts, rows, bytes: w.bytes, columns, imported: new Date().toISOString(), source: { ...d.source, size: st.size, modified: st.modified } });
+  await Projects.upsertDataset(ctx.folder, { ...d, path: w.path, parts: w.files, rows, bytes: w.bytes, columns, version: w.version, imported: new Date().toISOString(), source: { ...d.source, size: st.size, modified: st.modified } });
   const was = new Map(oldCols.map(c => [c.name, c.type])), now = new Map(columns.map(c => [c.name, c.type]));
   return {
     name: d.name, before: d.rows, after: rows,
@@ -105,7 +100,8 @@ $('go').onclick = UI.guard(async () => {
     let run = null;
     if ($('rerun').checked) {
       const pipe = await PipelineRunner.load(ctx);
-      if (pipe.steps.length) { ctx.log('Re-running the pipeline…'); run = await PipelineRunner.run(E, ctx, pipe, (m, l) => ctx.log(m, l)); }
+      // Only the outputs downstream of re-imported datasets run again (all of them when nothing was re-imported).
+      if (pipe.steps.length) { ctx.log('Re-running the pipeline…'); run = await PipelineRunner.run(ctx, pipe, (m, l) => ctx.log(m, l), out.length ? out.map(c => c.name) : null); }
     }
     await Projects.touchModule(ctx.folder, 'update', { datasets: out.length });
     $('changes').innerHTML = `<div class="table-wrap"><table class="grid"><thead><tr><th>Dataset</th><th>Rows</th><th>Columns added</th><th>Columns removed</th><th>Type changes</th></tr></thead><tbody>` +
@@ -119,7 +115,6 @@ $('go').onclick = UI.guard(async () => {
 (async () => {
   try {
     ctx = await ModulePage.init('update', 'Update');
-    E = DuckEngine; await E.init();
     await check();
   } catch (e) { UI.toast(e.message, 'err'); }
 })();

@@ -32,24 +32,20 @@
   .wd .wb { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px; cursor: pointer; }
   .wd .wb .table-wrap { max-height: none; }
   .wd .note { height: 100%; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 10px; }
-  .wd .rz { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize;
-    background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); }
+  /* Resize handles on every edge and corner (data-dir = n s e w ne nw se sw). */
+  .wd .rz { position: absolute; z-index: 3; }
+  .wd .rz[data-dir="n"], .wd .rz[data-dir="s"] { left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+  .wd .rz[data-dir="e"], .wd .rz[data-dir="w"] { top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+  .wd .rz[data-dir="n"] { top: 0; } .wd .rz[data-dir="s"] { bottom: 0; } .wd .rz[data-dir="w"] { left: 0; } .wd .rz[data-dir="e"] { right: 0; }
+  .wd .rz[data-dir$="e"]:not([data-dir="e"]), .wd .rz[data-dir$="w"]:not([data-dir="w"]) { width: 12px; height: 12px; }
+  .wd .rz[data-dir="ne"] { top: 0; right: 0; cursor: nesw-resize; } .wd .rz[data-dir="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+  .wd .rz[data-dir="se"] { bottom: 0; right: 0; cursor: nwse-resize; } .wd .rz[data-dir="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
+  .wd:hover .rz[data-dir="se"] { background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); }
+  /* Charts always fit their widget: the SVG scales to the box, never scrolls. */
+  .wd .wb:has(> svg) { overflow: hidden; }
+  .wd .wb > svg { width: 100%; height: 100%; display: block; }
   .ghostbox { position: absolute; border: 1px dashed var(--blue); border-radius: 4px; background: color-mix(in srgb, var(--blue) 10%, transparent); pointer-events: none; z-index: 5; }
 
-  /* Settings popout: slides in from the right. */
-  .side { position: fixed; top: 0; right: 0; bottom: 0; width: 340px; max-width: 92vw; z-index: 40; display: flex; flex-direction: column;
-    background: var(--panel); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0, 0, 0, .3); transform: translateX(100%); transition: transform .18s ease-out; }
-  .side.open { transform: none; }
-  .side header { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-  .side header b { flex: 1; font-size: 15px; }
-  .side .x { background: none; color: var(--muted); padding: 0 6px; font-size: 16px; }
-  .side .x:hover { color: var(--text); }
-  .side .sb { flex: 1; overflow: auto; padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
-  .side h2 { margin: 12px 0 0; }
-  .side footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; }
-  .seg { display: flex; gap: 5px; }
-  .seg button { flex: 1; }
-  .seg button:not(.on) { background: var(--sel); color: var(--text); }
   .flist { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 360px; overflow: auto; }
   .flist div { display: flex; align-items: center; gap: 8px; padding: 4px 8px; cursor: grab; }
   .flist div + div { border-top: 1px solid var(--border); }
@@ -66,10 +62,7 @@
     <div class="brand"><span class="logo">DN</span><div><h1 id="title">Dashboard</h1><div class="sub" id="sub"></div></div></div>
     <div class="row">
       <div class="addwrap"><button id="add" class="go">Add widget ▾</button>
-        <div class="addmenu" id="addmenu">
-          <div data-type="chart">Chart<small>Bar or line</small></div>
-          <div data-type="table">Table<small>Pick and order fields</small></div>
-        </div>
+        <div class="addmenu" id="addmenu"></div>
       </div>
       <button id="refresh" class="ghost" title="Re-run every widget (ignores the cache)">Refresh all</button>
     </div>
@@ -85,15 +78,17 @@
 </aside>
 
 <script src="../js/dn-fs.js"></script>
-<script src="../js/duckdb-engine.js"></script>
-<script src="../js/duckdb-pool.js"></script>
+<script src="../js/core/engine-client.js"></script>
 <script src="../js/core/ui.js"></script>
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/core/data-engine.js"></script>
-<script src="../js/core/parquet-writer.js"></script>
 <script src="../js/dashboard/widgets.js"></script>
+<script src="../js/vendor/vega.min.js"></script>
+<script src="../js/vendor/vega-lite.min.js"></script>
+<script src="../js/widgets/color-picker.js"></script>
+<script src="../js/widgets/vega-widget.js"></script>
+<script src="../js/widgets/widget-settings.js"></script>
 <script>
 // Dashboard canvas. State: <project>/dashboard/dashboard.json (v2) = { version: 2, grid, widgets: [...] }
 // (widget shape: js/dashboard/widgets.js). Positions/sizes are in grid cells; drag the header to move,
@@ -103,6 +98,16 @@ const G = 20;                                   // grid cell, px
 const SIZE = { chart: [24, 14], table: [30, 14] }, MIN = [8, 5];
 let ctx, dash = { version: 2, grid: G, widgets: [] }, selId = null;
 const results = new Map();                      // id -> last result (redraw on resize without re-querying)
+// Widget packages (global widgets/ folder): built-ins (chart, table) and Vega / Vega-Lite packages (type 'widget').
+let pkgs = new Map();
+const pkgOf = w => w.type === 'widget' ? pkgs.get(w.pkg) : null;
+const isReady = w => { if (w.type !== 'widget') return W.ready(w); const m = pkgOf(w); return !!m && VegaWidget.ready(m, w); };
+const queryOf = w => { if (w.type !== 'widget') return W.query(w); const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found in widgets/.`); return VegaWidget.query(m, w); };
+function paint(el, w, r) {
+  if (w.type !== 'widget') return W.render(el, w, r);
+  const m = pkgOf(w);
+  return VegaWidget.render(el, m, m.specJson, w, r.objs ||= VegaWidget.objects(r)).catch(e => { el.innerHTML = `<div class="note err">${esc(String(e.message || e).split('\n')[0])}</div>`; });
+}
 const FILE = () => `${ctx.dir}/dashboard/dashboard.json`;
 const cachePath = w => `${ctx.dir}/data/cache/widget-${w.id}.json`;
 const dsOf = name => (ctx.cfg.datasets || []).find(d => d.name === name);
@@ -126,21 +131,15 @@ function migrate(d) {
   return { version: 2, grid: G, widgets };
 }
 
-// ---- queries (one at a time: widgets share the engines) ----
-const keyOf = w => JSON.stringify({ ds: w.dataset, s: W.spec(w), imported: dsOf(w.dataset)?.imported });
+// ---- queries (one at a time; the engine itself runs each query on all its workers) ----
+// Cache key = dataset version + the widget's declarative query: a new dataset version makes the cache stale.
+const keyOf = w => { const d = dsOf(w.dataset); return JSON.stringify({ q: queryOf(w), pv: pkgOf(w)?.version, v: d?.version ?? null, imported: d?.imported }); };
 async function compute(w, fresh) {
   const d = dsOf(w.dataset); if (!d) throw new Error(`Dataset "${w.dataset}" not found.`);
   if (!fresh) { try { const c = await DNFS.readJSONOr(cachePath(w), {}); if (c.key === keyOf(w)) return { ...c.res, cached: true }; } catch {} }
   const t0 = performance.now();
-  let res;
-  if (W.spec(w).type === 'table') {
-    const e = await DataEngine.main();
-    res = { ...(await e.query(W.tableQuery(w, ParquetWriter.sql(e, d)))), engines: 1 };
-  } else {
-    const a = W.aggQuery(w);
-    res = await DataEngine.parallel({ path: d.path, parts: d.parts, rows: d.rows, kind: a.kind, partial: a.partial, final: a.final });
-  }
-  const out = { cols: res.cols, rows: res.rows, ms: performance.now() - t0, engines: res.engines };
+  const res = await Engine.call('query', { query: queryOf(w), views: Engine.views([d]) });
+  const out = { cols: res.cols, rows: res.rows, ms: performance.now() - t0, engineMs: res.ms };
   DNFS.writeJSON(cachePath(w), { key: keyOf(w), at: new Date().toISOString(), res: out }).catch(() => {});
   return out;
 }
@@ -150,22 +149,23 @@ function draw(w, fresh = false) {
     const el = document.querySelector(`.wd[data-id="${w.id}"]`); if (!el) return;
     const body = el.querySelector('.wb'), meta = el.querySelector('.wh small');
     results.delete(w.id);
-    if (!W.ready(w)) {
+    if (w.type === 'widget' && !pkgOf(w)) { meta.textContent = ''; body.innerHTML = `<div class="note err">Widget package "${esc(w.pkg)}" not found in widgets/.</div>`; return; }
+    if (!isReady(w)) {
       meta.textContent = '';
-      body.innerHTML = `<div class="note">${!w.dataset ? 'Click to choose a dataset' : w.type === 'table' ? 'Click to pick fields' : 'Click to set the X and Y axis'}</div>`;
+      body.innerHTML = `<div class="note">${!w.dataset ? 'Click to choose a dataset' : w.type === 'table' ? 'Click to pick fields' : w.type === 'widget' ? 'Click to connect the data inputs' : 'Click to set the X and Y axis'}</div>`;
       return;
     }
     body.innerHTML = '<div class="note">Loading…</div>';
     try {
       const r = await compute(w, fresh);
       results.set(w.id, r);
-      W.render(body, w, r);
-      meta.textContent = r.cached ? 'cached' : `${UI.ms(r.ms)}${r.engines > 1 ? ` · ${r.engines} engines` : ''}`;
+      await paint(body, w, r);
+      meta.textContent = r.cached ? 'cached' : UI.ms(r.ms);
     } catch (e) { body.innerHTML = `<div class="note err">${esc(e.message.split('\n')[0])}</div>`; meta.textContent = ''; }
   });
   return queue;
 }
-const titleOf = w => w.title || (w.type === 'table' ? 'Table' : w.category?.col ? `${W.AGG_LABEL[w.measure.agg]}${w.measure.col ? ` of ${w.measure.col}` : ''} by ${w.category.col}` : 'Chart');
+const titleOf = w => w.title || (w.type === 'widget' ? pkgOf(w)?.name || w.pkg : w.type === 'table' ? 'Table' : w.category?.col ? `${W.AGG_LABEL[w.measure.agg]}${w.measure.col ? ` of ${w.measure.col}` : ''} by ${w.category.col}` : 'Chart');
 
 // ---- canvas ----
 function place(el, w) {
@@ -174,7 +174,7 @@ function place(el, w) {
 function widgetEl(w) {
   const el = document.createElement('div');
   el.className = 'wd' + (w.id === selId ? ' sel' : ''); el.dataset.id = w.id;
-  el.innerHTML = `<div class="wh"><b></b><small></small></div><div class="wb"></div><div class="rz" title="Resize"></div>`;
+  el.innerHTML = `<div class="wh"><b></b><small></small></div><div class="wb"></div>${["n", "s", "e", "w", "ne", "nw", "se", "sw"].map(d => `<div class="rz" data-dir="${d}"></div>`).join("")}`;
   el.querySelector('b').textContent = titleOf(w);
   place(el, w);
   return el;
@@ -197,7 +197,7 @@ const cols = () => Math.max(MIN[0], Math.floor($('wrap').clientWidth / G));
 // Move / resize with the pointer; both snap to the grid. A press without movement = click (opens settings).
 $('canvas').addEventListener('pointerdown', ev => {
   const el = ev.target.closest('.wd'); if (!el || ev.button !== 0) return;
-  const w = byId(el.dataset.id), mode = ev.target.closest('.rz') ? 'size' : ev.target.closest('.wh') ? 'move' : null;
+  const w = byId(el.dataset.id), mode = ev.target.closest('.rz') ? 'size:' + ev.target.closest('.rz').dataset.dir : ev.target.closest('.wh') ? 'move' : null;
   if (!mode) return;   // body: plain click
   ev.preventDefault();
   const sx = ev.clientX, sy = ev.clientY, start = { ...w };
@@ -207,21 +207,34 @@ $('canvas').addEventListener('pointerdown', ev => {
     const dx = Math.round((e.clientX - sx) / G), dy = Math.round((e.clientY - sy) / G);
     if (!moved && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 4) return;
     if (!moved) { moved = true; el.classList.add('moving'); $('canvas').append(ghost); }
-    if (mode === 'move') { w.x = Math.max(0, Math.min(cols() - w.w, start.x + dx)); w.y = Math.max(0, start.y + dy); }
-    else { w.w = Math.max(MIN[0], Math.min(cols() - w.x, start.w + dx)); w.h = Math.max(MIN[1], start.h + dy); }
-    place(ghost, w);
-    const px = { left: start.x * G + (mode === 'move' ? e.clientX - sx : 0), top: start.y * G + (mode === 'move' ? e.clientY - sy : 0) };
-    Object.assign(el.style, mode === 'move' ? { left: `${px.left}px`, top: `${px.top}px` } : { width: `${Math.max(MIN[0] * G, start.w * G + e.clientX - sx)}px`, height: `${Math.max(MIN[1] * G, start.h * G + e.clientY - sy)}px` });
+    if (mode === 'move') {
+      w.x = Math.max(0, Math.min(cols() - w.w, start.x + dx)); w.y = Math.max(0, start.y + dy);
+      place(ghost, w); Object.assign(el.style, { left: `${start.x * G + e.clientX - sx}px`, top: `${start.y * G + e.clientY - sy}px` });
+    } else {
+      // Edges: the dragged side moves, the opposite side stays put (in grid cells).
+      const dir = mode.slice(5), right = start.x + start.w, bottom = start.y + start.h;
+      let x = start.x, y = start.y, x2 = right, y2 = bottom;
+      if (dir.includes('e')) x2 = Math.max(start.x + MIN[0], Math.min(cols(), right + dx));
+      if (dir.includes('w')) x = Math.max(0, Math.min(right - MIN[0], start.x + dx));
+      if (dir.includes('s')) y2 = Math.max(start.y + MIN[1], bottom + dy);
+      if (dir.includes('n')) y = Math.max(0, Math.min(bottom - MIN[1], start.y + dy));
+      Object.assign(w, { x, y, w: x2 - x, h: y2 - y });
+      place(ghost, w); place(el, w);   // the widget follows the snapped box
+      const r = results.get(w.id); if (r) liveRedraw(el.querySelector('.wb'), w, r);   // charts redraw live to the new size
+    }
   };
   const onUp = () => {
     removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp);
     ghost.remove(); el.classList.remove('moving'); place(el, w);
     if (!moved) return select(w.id);
     fitCanvas(); save();
-    if (mode === 'size' && (w.w !== start.w || w.h !== start.h)) { const r = results.get(w.id); if (r) W.render(el.querySelector('.wb'), w, r); }
+    if (mode !== 'move') { const r = results.get(w.id); if (r) paint(el.querySelector('.wb'), w, r); }
   };
   addEventListener('pointermove', onMove); addEventListener('pointerup', onUp);
 });
+// Vega charts are heavier to redraw: at most once per frame while dragging.
+let lrFrame = 0, lrArgs;
+function liveRedraw(el, w, r) { if (w.type !== 'widget') return W.render(el, w, r); lrArgs = [el, w, r]; if (!lrFrame) lrFrame = requestAnimationFrame(() => { lrFrame = 0; paint(...lrArgs); }); }
 $('canvas').addEventListener('click', ev => {
   const el = ev.target.closest('.wd');
   if (!el) return select(null);
@@ -232,18 +245,20 @@ $('canvas').addEventListener('click', ev => {
 $('add').onclick = ev => { ev.stopPropagation(); $('addmenu').classList.toggle('open'); };
 addEventListener('click', () => $('addmenu').classList.remove('open'));
 $('addmenu').onclick = UI.guard(async ev => {
-  const t = ev.target.closest('[data-type]')?.dataset.type; if (!t) return;
+  const pid = ev.target.closest('[data-pkg]')?.dataset.pkg; if (!pid) return;
   $('addmenu').classList.remove('open');
-  const [cw, ch] = SIZE[t], ds = readyDs();
+  const m = pkgs.get(pid), t = m.kind === 'builtin' ? m.builtin : 'widget';
+  const [cw, ch] = SIZE[t] || SIZE.chart, ds = readyDs();
   const w = { id: crypto.randomUUID().slice(0, 8), type: t, title: '', dataset: ds.length === 1 ? ds[0].name : '',
     x: 0, y: Math.max(0, ...dash.widgets.map(o => o.y + o.h + 1)), w: Math.min(cw, cols()), h: ch };
   if (t === 'chart') Object.assign(w, { chart: 'bar', measure: { agg: 'count', col: '' }, category: { col: '', sort: 'value', limit: 20 } });
-  else Object.assign(w, { fields: [], limit: 100 });
+  else if (t === 'table') Object.assign(w, { fields: [], limit: 100 });
+  else Object.assign(w, { pkg: m.id, inputs: {}, opts: {}, limit: 5000 });
   dash.widgets.push(w); await saveNow();
   $('canvas').append(widgetEl(w)); fitCanvas(); draw(w);
   select(w.id);
   document.querySelector(`.wd[data-id="${w.id}"]`).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  ctx.log(`Widget added: ${t}`);
+  ctx.log(`Widget added: ${m.name}`);
 });
 $('refresh').onclick = UI.guard(async () => { await ctx.reload(); renderAll(true); await Projects.touchModule(ctx.folder, 'dashboard'); });
 
@@ -266,12 +281,20 @@ const colOpts = (w, cur, { numeric = false, blank = '' } = {}) => (blank ? opt('
   (dsOf(w.dataset)?.columns || []).filter(c => !numeric || W.NUMERIC.test(c.type)).map(c => opt(c.name, c.name, cur)).join('');
 
 function panel(w) {
-  $('sTitle').textContent = w.type === 'table' ? 'Table' : 'Chart';
+  $('sTitle').textContent = w.type === 'widget' ? pkgOf(w)?.name || w.pkg : w.type === 'table' ? 'Table' : 'Chart';
   const ds = readyDs(), list = ds.some(d => d.name === w.dataset) || !w.dataset ? ds : [...ds, dsOf(w.dataset) || { name: w.dataset }];
   let h = `<label class="field">Title<input id="pTitle" type="text" value="${esc(w.title)}" placeholder="${esc(titleOf({ ...w, title: '' }))}"></label>
     <label class="field">Dataset<select id="pDs">${opt('', 'Select a dataset…', w.dataset)}${list.map(d => opt(d.name, d.name, w.dataset)).join('')}</select></label>`;
   if (!ds.length) h += `<div class="muted">No ready datasets. Use Import Directly, or run the Pipeline on staged data.</div>`;
-  if (w.type === 'chart') {
+  if (w.type === 'widget') {
+    $('sBody').innerHTML = h + '<div id="wsBody" style="display:flex;flex-direction:column;gap:12px"></div>';
+    bindPanel(w);
+    const m = pkgOf(w); if (!m) return;
+    const look = () => { const r = results.get(w.id), el = document.querySelector(`.wd[data-id="${w.id}"] .wb`); if (r && el) liveRedraw(el, w, r); };
+    WidgetSettings.render($('wsBody'), { manifest: m, w, columns: dsOf(w.dataset)?.columns || [],
+      onChange: (kind, live) => { if (kind === 'look') { look(); if (!live) save(); } else changed(w); } });
+    return;
+  } else if (w.type === 'chart') {
     const m = w.measure, c = w.category, numeric = m.agg === 'sum' || m.agg === 'avg';
     const measure = `<label class="field">Aggregation<select id="pAgg">${W.AGGS.map(a => opt(a, W.AGG_LABEL[a], m.agg)).join('')}</select></label>
       <label class="field">Field<select id="pCol">${colOpts(w, m.col, { numeric, blank: m.agg === 'count' ? 'All rows' : '' })}</select></label>`;
@@ -298,9 +321,10 @@ function bindPanel(w) {
   on('pTitle', 'input', e => { w.title = e.target.value; changed(w, false); });
   on('pDs', 'change', e => {
     w.dataset = e.target.value;
-    if (w.type === 'chart') { w.measure.col = ''; w.category.col = ''; } else w.fields = [];
+    if (w.type === 'chart') { w.measure.col = ''; w.category.col = ''; } else if (w.type === 'widget') w.inputs = {}; else w.fields = [];
     changed(w); panel(w);
   });
+  if (w.type === 'widget') return;
   if (w.type === 'chart') {
     $('pChart').onclick = e => { const v = e.target.closest('[data-v]')?.dataset.v; if (!v || v === w.chart) return; w.chart = v; changed(w); panel(w); };
     on('pAgg', 'change', e => {
@@ -350,21 +374,27 @@ $('sDel').onclick = UI.guard(async () => {
   ctx.log(`Widget deleted: ${titleOf(w)}`);
 });
 
+// Add widget list = every folder in widgets/ with a valid widget.json.
+async function loadPkgs() {
+  const list = await WidgetRegistry.list(true);
+  pkgs = new Map(list.map(m => [m.id, m]));
+  $('addmenu').innerHTML = list.map(m => `<div data-pkg="${esc(m.id)}">${esc(m.name)}<small>${esc(m.description || (m.kind === 'builtin' ? '' : m.kind))}</small></div>`).join('') || '<div class="muted">No widgets in the widgets folder.</div>';
+}
+$('add').addEventListener('click', () => loadPkgs().catch(() => {}));   // pick up packages saved in the Widget Builder meanwhile
 // Window resized: redraw charts at their new pixel size (from the last result, no re-query).
-addEventListener('resize', UI.debounce(() => dash.widgets.forEach(w => { const r = results.get(w.id), el = document.querySelector(`.wd[data-id="${w.id}"] .wb`); if (r && el) W.render(el, w, r); }), 200));
+addEventListener('resize', UI.debounce(() => dash.widgets.forEach(w => { const r = results.get(w.id), el = document.querySelector(`.wd[data-id="${w.id}"] .wb`); if (r && el) paint(el, w, r); }), 200));
 
 (async () => {
   try {
     document.documentElement.style.setProperty('--g', `${G}px`);
     ctx = await ModulePage.init('dashboard', 'Dashboard');
-    await DataEngine.loadProfile();
+    await loadPkgs();
     const raw = await DNFS.readJSONOr(FILE(), null);
     dash = raw ? migrate(raw) : { version: 2, grid: G, widgets: [] };
     if (raw && raw.version !== 2) { await saveNow(); ctx.log('Dashboard converted to the grid layout.'); }
     renderAll();
   } catch (e) { UI.toast(e.message, 'err'); $('canvas').innerHTML = `<div class="hint err">${esc(e.message)}</div>`; }
 })();
-window.addEventListener('beforeunload', () => DataEngine.close());
 </script>
 </body>
 </html>

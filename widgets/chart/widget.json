@@ -1,0 +1,8 @@
+{
+  "id": "chart",
+  "name": "Chart",
+  "description": "Bar or line",
+  "kind": "builtin",
+  "builtin": "chart",
+  "version": 1
+}

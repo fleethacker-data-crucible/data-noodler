@@ -1,8 +1,10 @@
 ﻿{
-    "port":  54979,
     "fileThreads":  16,
+    "engineWorkers":  64,
+    "engineMemory":  0.5,
+    "port":  42060,
     "browser":  "edge",
-    "page":  "html/home.html",
     "portMode":  "random",
-    "theme":  "dark"
+    "theme":  "dark",
+    "page":  "html/home.html"
 }
