@@ -20,4 +20,6 @@ projects/*
 *.xls
 *.arrow
 *.feather
-data-noodler.bundle.txt
+
+# Always tracked: the single-file app package
+!__app.manifest

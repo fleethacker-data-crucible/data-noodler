@@ -29,6 +29,7 @@ namespace NativeDataEngine
         public Job(string kind, string label) { Id = "job-" + Interlocked.Increment(ref seq); Kind = kind; Label = label; }
         public void AddRows(long n) { Interlocked.Add(ref rows, n); }
         public void SetBytes(long b) { Interlocked.Exchange(ref bytes, b); if (BytesTotal > 0) Progress = Math.Min(0.99, b / (double)BytesTotal); }
+        public void AddBytes(long n) { long b = Interlocked.Add(ref bytes, n); if (BytesTotal > 0) Progress = Math.Min(0.99, b / (double)BytesTotal); }
         public long Rows { get { return Interlocked.Read(ref rows); } }
 
         public Dictionary<string, object> ToJson()

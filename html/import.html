@@ -13,7 +13,7 @@
   .list div:hover { background: var(--panel); }
   .list div.sel { background: var(--sel); font-weight: 600; }
   .list small { color: var(--muted); white-space: nowrap; }
-  .drop { border: 1px dashed var(--border); border-radius: 4px; padding: 14px; text-align: center; color: var(--muted); margin: 8px 0; }
+  .drop { border: 1px dashed var(--border); border-radius: 4px; padding: 27px 14px 26px; text-align: center; color: var(--muted); margin: 8px 0; }
   .drop.over { border-color: var(--blue); color: var(--text); }
   aside { display: flex; flex-direction: column; gap: 24px; }
   /* Schema: fills the panel, never scrolls sideways. Keep/types fit their content; names share the rest. */
@@ -24,7 +24,18 @@
   table.schema td.nn { width: 50%; }
   table.schema input[type=text] { width: 100%; min-width: 120px; font-family: inherit; }
   #preview .table-wrap { max-height: 480px; }
+  #dsName { width: 440px; }
+  #rowCount { display: inline-block; min-width: 13ch; }
+  /* Activity log: 5 lines visible, newest on top. */
+  .progress.busy > i { width: 30% !important; animation: busy 1.2s linear infinite; }
+  @keyframes busy { from { margin-left: -30%; } to { margin-left: 100%; } }
+  h2.hw { color: var(--text); font-weight: 700; }
+  #schema select, #schema select option, #schema select option:checked { font-weight: 400; }
+  #schema select.bad { border-color: #f08c00; outline: 1px solid #f08c00; }
   .warn-box { color: var(--warn); font-size: 13px; }
+  /* No page scroll bars (the page still scrolls with the wheel); only the tables show bars. */
+  html, body, .main { scrollbar-width: none; }
+  html::-webkit-scrollbar, body::-webkit-scrollbar, .main::-webkit-scrollbar { display: none; }
 </style>
 </head>
 <body>
@@ -36,46 +47,50 @@
     <div class="split">
       <aside>
         <section>
-          <h2>Source files <small class="muted" style="text-transform:none;letter-spacing:0">data/raw</small></h2>
-          <div class="row"><button id="pick">Upload files</button></div>
+          <h2>Raw source files</h2>
+          <div class="row"><button id="pick">Browse</button><button id="fromPath" class="ghost">From Path</button></div>
           <input id="file" type="file" multiple hidden accept=".csv,.tsv,.txt,.parquet,.sqlite,.sqlite3,.db">
           <div class="drop" id="drop">Drop CSV, Parquet or SQLite files here</div>
           <div class="list" id="sources"></div>
         </section>
         <section>
-          <h2>From a path</h2>
-          <label class="field">Local or network file<input id="extPath" type="text" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" name="dn-src-path" placeholder="X:\folder\file.csv or \\server\share\file.csv"></label>
-          <div class="row"><button id="extGo">Import from path</button></div>
-          <div id="extStatus" class="muted"></div>
-        </section>
-        <section>
-          <h2>Datasets</h2>
+          <h2>Staged Datasets</h2>
           <div class="list" id="datasets"></div>
         </section>
       </aside>
       <section class="stack">
-        <h2 id="srcTitle">Preview</h2>
         <div id="empty" class="muted">Pick a source file on the left, or upload one.</div>
         <div id="editor" hidden class="stack">
+          <div class="ok" id="howto"></div>
+          <h2 class="hw">Schema</h2>
+          <div class="table-wrap" style="max-height:300px"><table class="grid schema" id="schema"></table></div>
           <div class="row">
             <label class="field" id="tableLbl" hidden>Table<select id="table"></select></label>
-            <label class="field">Dataset name<input id="dsName" type="text" pattern="[a-z0-9_]+" placeholder="lower_case_name"></label>
+            <label class="field">Output Dataset Name<input id="dsName" type="text" pattern="[A-Za-z0-9_]+" placeholder="UPPER_CASE_NAME"></label>
+            <div style="width:25px"></div>
             <div class="stats"><div class="stat"><label>Rows</label><b id="rowCount">-</b></div><div class="stat"><label>Columns</label><b id="colCount">-</b></div></div>
           </div>
-          <h2>Schema</h2>
-          <div class="table-wrap" style="max-height:300px;overflow-x:hidden"><table class="grid schema" id="schema"></table></div>
-          <div class="row"><button id="validate" class="ghost">Check types</button><button id="import" class="go" title="Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)">Stage</button><span id="status" class="muted"></span></div>
-          <div id="warnings" class="warn-box"></div>
+          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)">Stage</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
           <div class="progress"><i id="bar"></i></div>
-          <h2>Preview (first 100 rows only)</h2>
+          <div class="log" id="log"></div>
+          <h2 class="hw">Preview (first 100 rows only)</h2>
           <div id="preview"></div>
         </div>
-        <h2>Activity</h2>
-        <div class="log" id="log"></div>
       </section>
     </div>
   </div>
 </div>
+
+<dialog id="pathDlg">
+  <header>Import from a path</header>
+  <div class="body">
+    <div>Paste in the path to the raw source file, then click GO.</div>
+    <div class="muted">For a network path, use the full UNC path including the leading slashes, e.g. <span class="mono">\\snnsvrXXX\folder</span></div>
+    <label class="field">Path to the raw source file<input id="extPath" type="text" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-lpignore="true" name="dn-src-path" placeholder="X:\folder\file.csv or \\snnsvrXXX\folder\file.csv"></label>
+    <div id="extStatus" class="muted"></div>
+  </div>
+  <footer><button id="extCancel" class="ghost">Cancel</button><button id="extGo">GO</button></footer>
+</dialog>
 
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/engine-client.js"></script>
@@ -86,11 +101,21 @@
 <script src="../js/import/external-source.js"></script>
 <script>
 const { $, esc } = UI;
+// Plain-English hint shown next to each type in the Change Type list.
+const TYPE_HINT = { VARCHAR: 'text', BIGINT: 'whole number, very large', INTEGER: 'whole number', SMALLINT: 'small whole number (±32,767)',
+  DOUBLE: 'number with decimals', 'DECIMAL(18,2)': 'money, 2 decimal places', 'DECIMAL(38,6)': 'exact number, 6 decimal places',
+  DATE: 'calendar date', TIMESTAMP: 'date and time', BOOLEAN: 'true / false' };
+// What a value must look like to convert (used to explain failed type checks).
+const TYPE_NEED = { BIGINT: 'Needs whole numbers only (no decimals, letters or symbols).', INTEGER: 'Needs whole numbers between ±2,147,483,647.',
+  SMALLINT: 'Needs whole numbers between ±32,767.', DOUBLE: 'Needs numbers (no letters, currency signs or thousands commas).',
+  'DECIMAL(18,2)': 'Needs numbers (no letters, currency signs or thousands commas).', 'DECIMAL(38,6)': 'Needs numbers (no letters, currency signs or thousands commas).',
+  DATE: 'Needs dates like 2024-01-31.', TIMESTAMP: 'Needs date-times like 2024-01-31 13:45:00.', BOOLEAN: 'Needs true/false, yes/no or 1/0.' };
+const typeLabel = t => TYPE_HINT[t.toUpperCase()] ? `${t} - ${TYPE_HINT[t.toUpperCase()]}` : t;
 const TYPES = ['VARCHAR', 'BIGINT', 'INTEGER', 'SMALLINT', 'DOUBLE', 'DECIMAL(18,2)', 'DECIMAL(38,6)', 'DATE', 'TIMESTAMP', 'BOOLEAN'];
 let ctx, cur = null; // cur = { path, label, ext?, src, table, cols: [{ name, type, newName, newType, keep }] }
 // cur.ext (file outside the project, read where it is; nothing is copied) = { src, size, modified }
 
-const dsSlug = s => s.toLowerCase().replace(/\.[^.]+$/, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'dataset';
+const dsSlug = s => s.toUpperCase().replace(/\.[^.]+$/, '').replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'DATASET';
 
 // Raw source files live in data/raw: uploaded/dropped here, or copied in by hand. The list is re-read every
 // 3 s, so files dropped into the folder outside the app show up on their own.
@@ -107,7 +132,7 @@ async function listSources(force = true) {
 }
 async function listDatasets() {
   const cfg = await ctx.reload();
-  $('datasets').innerHTML = (cfg.datasets || []).map(d => `<div data-ds="${esc(d.name)}" title="${esc(d.path)}"><span>${esc(d.name)}</span><small>${Projects.stageOf(d)}${d.parts ? ` · ${d.parts.length} parts` : ''} · ${UI.rows(d.rows)} rows · ${d.columns.length} cols · ${UI.bytes(d.bytes)}</small></div>`).join('') || '<div class="muted">None yet.</div>';
+  $('datasets').innerHTML = (cfg.datasets || []).map(d => `<div data-ds="${esc(d.name)}" title="${esc(d.path)}"><span>${esc(d.name)}</span></div>`).join('') || '<div class="muted">None yet.</div>';
 }
 
 // ---- upload ----
@@ -140,10 +165,10 @@ async function reader(src) {
 }
 // Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
 async function openReader(c, open) {
-  $('empty').hidden = true; $('editor').hidden = false; $('status').textContent = 'Reading…';
+  $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Stage</b> to convert this raw source (.csv, .sqlite or .parquet) into a Parquet dataset optimized for use in this project.`;
+  $('empty').hidden = true; $('editor').hidden = false; live('Reading source…');
   const r = await open();
   cur = { ...c, reader: r };
-  $('srcTitle').textContent = `Preview · ${c.label}${c.ext ? ' (read at source)' : ''}`;
   $('tableLbl').hidden = r.kind !== 'sqlite';
   $('table').innerHTML = r.tables.map(t => `<option>${esc(t)}</option>`).join('');
   await listSources();
@@ -166,7 +191,9 @@ $('extPath').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('extG
 // Explorer's "Copy as path" wraps the path in quotes: drop them as soon as it is pasted.
 // The box holds one path, so a paste replaces whatever is there (paste again any time).
 // The clipboard is only read, never changed.
-const unquote = s => s.trim().replace(/^"+|"+$/g, '').trim();
+// Strips spaces and straight or curly quotes at either end; a path without quotes is left as it is.
+const unquote = s => String(s).replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, '');
+$('extPath').addEventListener('input', ev => { const v = ev.target.value.replace(/^["'“”‘’]+|["'“”‘’]+$/g, ''); if (v !== ev.target.value) ev.target.value = v; });
 $('extPath').addEventListener('paste', ev => {
   const text = unquote(ev.clipboardData?.getData('text/plain') || '');
   if (!text) return;   // nothing usable: let the browser handle it
@@ -174,6 +201,12 @@ $('extPath').addEventListener('paste', ev => {
   ev.target.value = text;
   ev.target.setSelectionRange(text.length, text.length);
 });
+// From Path: popup where the user pastes the path.
+$('fromPath').onclick = async () => {
+  $('extPath').value = ''; extMsg('');
+  $('pathDlg').showModal(); $('extPath').focus();
+};
+$('extCancel').onclick = () => $('pathDlg').close();
 $('extGo').onclick = UI.guard(async () => {
   const src = $('extPath').value = unquote($('extPath').value);
   if (!X.isPath(src)) throw new Error('Enter a full path like X:\\folder\\file.csv or \\\\server\\share\\file.csv.');
@@ -187,6 +220,7 @@ $('extGo').onclick = UI.guard(async () => {
     // Read where it is (the engine reads the file in place); nothing is copied into the project.
     await openReader({ path: null, label: name, ext: { src, size: info.size, modified: info.modified } }, () => reader(src));
     extMsg('Ready: set columns and Stage.', 'ok');
+    $('pathDlg').close();
   } finally { $('extGo').disabled = false; }
 });
 
@@ -197,25 +231,48 @@ async function loadTable(table) {
   const src = await cur.reader.sql(table);
   cur.table = table; cur.src = src; cur.rows = null;
   $('dsName').value = dsSlug(table || cur.label);
-  const cols = await Engine.describe(`SELECT * FROM ${src}`);
-  cur.cols = cols.map(c => { const n = c.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || c.name; return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
+  // Schema and preview together. The preview runs on one worker: LIMIT 100 then stops after the first rows instead of
+  // splitting the whole file for a parallel scan (the row count below does that).
+  const [cols, p] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), Engine.query(`SELECT * FROM ${src} LIMIT 100`, { workers: 1 })]);
+  cur.cols = cols.map(c => { const n = c.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || c.name; return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
   renderSchema();
-  $('colCount').textContent = cols.length; $('rowCount').textContent = '…'; $('warnings').textContent = '';
-  const p = await Engine.query(`SELECT * FROM ${src} LIMIT 100`);
+  $('colCount').textContent = cols.length; $('rowCount').textContent = '…';
   UI.dataTable($('preview'), p.cols, p.rows);
-  $('status').textContent = 'Counting rows…';
-  const n = await Engine.count(src);
-  cur.rows = Number(n); $('rowCount').textContent = UI.num(n); $('status').textContent = '';
+  // Row count: the engine splits the work across its workers (Parquet row groups); no % is known, so the bar runs busy.
+  live(null); const st = ctx.step('Counting rows…'); $('bar').parentElement.classList.add('busy');
+  // Rows shows "Calculating" with 1-4 dots cycling every 500 ms.
+  let dots = 0; const calc = () => $('rowCount').textContent = 'Calculating' + '.'.repeat(dots++ % 4 + 1);
+  calc(); const dotTick = setInterval(calc, 500);
+  let n;
+  try { n = await Engine.count(src); } catch (e) { st.fail(`Counting rows failed: ${e.message}`); throw e; }
+  finally { clearInterval(dotTick); $('bar').parentElement.classList.remove('busy'); }
+  cur.rows = Number(n); $('rowCount').textContent = UI.num(n);
+  st.done(`Counted ${UI.num(n)} rows`);
 }
 function renderSchema() {
   $('schema').innerHTML = `<thead><tr><th class="fit">Keep</th><th>Source Field</th><th class="fit">Detected Type</th><th class="fit">Change Type</th><th>New Field Name</th></tr></thead><tbody>` +
     cur.cols.map((c, i) => `<tr><td class="fit"><input type="checkbox" data-i="${i}" data-k="keep" ${c.keep ? 'checked' : ''}></td><td class="mono src">${esc(c.name)}</td><td class="muted fit">${esc(c.type)}</td>
-      <td class="fit"><select data-i="${i}" data-k="newType">${[...new Set([c.type, ...TYPES])].map(t => `<option ${t === c.newType ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></td>
+      <td class="fit"><select data-i="${i}" data-k="newType">${[...new Set([c.type, ...TYPES])].map(t => `<option value="${esc(t)}" ${t === c.newType ? 'selected' : ''}>${esc(typeLabel(t))}</option>`).join('')}</select></td>
       <td class="nn"><input type="text" data-i="${i}" data-k="newName" value="${esc(c.newName)}" title="${esc(c.newName)}"></td></tr>`).join('') + '</tbody>';
+  // Every Change Type box as wide as the widest one.
+  const sels = [...document.querySelectorAll('#schema select[data-k="newType"]')];
+  sels.forEach(el => el.style.width = '');
+  const w = Math.max(0, ...sels.map(el => el.offsetWidth));
+  if (w) sels.forEach(el => el.style.width = w + 'px');
+  showValidate();
 }
+// Check Type Changes only shows when a kept column's type differs from the detected one.
+const showValidate = () => { const h = !cur.cols.some(c => c.newType !== c.type); $('validate').hidden = h || !cur.cols.some(c => c.keep && c.newType !== c.type); $('resetTypes').hidden = h; };
+$('resetTypes').onclick = () => { cur.cols.forEach(c => c.newType = c.type); renderSchema(); ctx.log('Change types reset to the detected types.'); };
+// Dataset and new field names are upper case as typed (Caps Lock on or not).
+const upper = el => { const p = el.selectionStart, u = el.value.toUpperCase(); if (u !== el.value) { el.value = u; el.setSelectionRange(p, p); } };
+$('dsName').addEventListener('input', ev => upper(ev.target));
+$('schema').addEventListener('input', ev => { if (ev.target.dataset.k === 'newName') upper(ev.target); });
 $('schema').onchange = ev => {
   const el = ev.target, c = cur.cols[+el.dataset.i]; if (!c) return;
+  if (el.dataset.k === 'newType') el.classList.remove('bad');
   c[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim();
+  showValidate();
 };
 
 // SELECT list with renames and conversions. TRY_CAST so one bad value does not stop the import; checkTypes() counts them first.
@@ -225,13 +282,29 @@ const selectList = () => cur.cols.filter(c => c.keep).map(c =>
 // Values that are not empty in the source but would become empty after the type change.
 async function checkTypes() {
   const changed = cur.cols.filter(c => c.keep && c.newType !== c.type);
-  if (!changed.length) { $('warnings').innerHTML = '<span class="ok">No type changes.</span>'; return 0; }
-  const r = await Engine.query(`SELECT ${changed.map((c, i) => `count(*) FILTER (WHERE ${Engine.q(c.name)} IS NOT NULL AND TRY_CAST(${Engine.q(c.name)} AS ${c.newType}) IS NULL) AS c${i}`).join(', ')} FROM ${cur.src}`);
+  if (!changed.length) { ctx.log('No type changes to check.'); return 0; }
+  // Busy bar + live log line with timer while the engine scans the source.
+  const st = ctx.step(`Checking ${changed.length} type change${changed.length > 1 ? 's' : ''}…`), pb = $('bar').parentElement;
+  pb.classList.add('busy');
+  let r;
+  try { r = await Engine.query(`SELECT ${changed.map((c, i) => `count(*) FILTER (WHERE ${Engine.q(c.name)} IS NOT NULL AND TRY_CAST(${Engine.q(c.name)} AS ${c.newType}) IS NULL) AS c${i}`).join(', ')} FROM ${cur.src}`); }
+  catch (e) { st.fail(`Type check failed: ${e.message}`); throw e; }
+  finally { pb.classList.remove('busy'); }
   const bad = changed.map((c, i) => [c, Number(r.rows[0][i])]).filter(([, n]) => n > 0);
-  $('warnings').innerHTML = bad.length
-    ? bad.map(([c, n]) => `⚠ ${esc(c.name)} → ${esc(c.newType)}: ${UI.num(n)} value(s) cannot be converted and would become null.`).join('<br>')
-    : '<span class="ok">All type changes convert cleanly.</span>';
-  return bad.reduce((s, [, n]) => s + n, 0);
+  // Orange border on each Change Type box that cannot convert cleanly.
+  const badSet = new Set(bad.map(([c]) => c));
+  document.querySelectorAll('#schema select[data-k="newType"]').forEach(el => el.classList.toggle('bad', badSet.has(cur.cols[+el.dataset.i])));
+  const total = bad.reduce((s, [, n]) => s + n, 0);
+  if (!bad.length) st.done('Type check: all changes convert cleanly');
+  // One line per failing column: count, example values, what the type needs. The last one closes the timed step.
+  for (let k = 0; k < bad.length; k++) {
+    const [c, n] = bad[k];
+    let ex = [];
+    try { ex = (await Engine.query(`SELECT DISTINCT CAST(${Engine.q(c.name)} AS VARCHAR) FROM ${cur.src} WHERE ${Engine.q(c.name)} IS NOT NULL AND TRY_CAST(${Engine.q(c.name)} AS ${c.newType}) IS NULL LIMIT 3`)).rows.map(r => `"${r[0]}"`); } catch {}
+    const msg = `Type check: ${c.name} → ${c.newType}: ${UI.num(n)} value(s) cannot convert${ex.length ? `, e.g. ${ex.join(', ')}` : ''}. ${TYPE_NEED[c.newType] || ''} They would become null.`;
+    if (k === bad.length - 1) st.done(msg, 'warn'); else ctx.log(msg, 'warn');
+  }
+  return total;
 }
 $('validate').onclick = UI.guard(checkTypes);
 
@@ -240,10 +313,17 @@ $('validate').onclick = UI.guard(checkTypes);
 //   Stage:           column choices applied (keep, rename, retype) -> data/staged/  (Pipeline works on it)
 // The engine streams the source into a partitioned Parquet dataset folder (part-NNNNNN.parquet + dataset.json),
 // written to a temp folder and swapped in only when complete, so a failed import keeps the previous version.
+// One live line at the top of the activity log for work in progress (null removes it).
+function live(msg) {
+  let el = document.getElementById('liveLine');
+  if (msg == null) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'liveLine'; $('log').prepend(el); }
+  el.innerHTML = `<span class="t">${UI.stamp()}</span>  ${esc(msg)}`;
+}
 const changedCols = () => cur.cols.some(c => !c.keep || c.newType !== c.type || c.newName !== c.defName);   // user edits only
 async function runImport(direct) {
   const name = $('dsName').value.trim();
-  if (!/^[a-z0-9_]+$/.test(name)) throw new Error('Dataset name: use lower-case letters, digits and _ only.');
+  if (!/^[A-Za-z0-9_]+$/.test(name)) throw new Error('Dataset name: use letters, digits and _ only.');
   if (cur.rows == null) throw new Error('Still counting rows; try again in a moment.');
   let select, want;
   if (direct) {
@@ -264,12 +344,12 @@ async function runImport(direct) {
   const t0 = performance.now(), bar = p => $('bar').style.width = `${Math.round(p)}%`;
   $('import').disabled = true; bar(5);
   try {
-    $('status').textContent = 'Writing Parquet…';
+    const wst = ctx.step('Writing Parquet…');
     const w = await Engine.write({ sql: `SELECT ${select} FROM ${cur.src}`, dest, meta: { source: cur.ext?.src || cur.path } }, j => {
       if (j.progress != null) bar(5 + 85 * j.progress);
-      $('status').textContent = `${j.stage || 'Working'}… ${UI.num(j.rowsProcessed)} rows`;
-    });
-    bar(90); $('status').textContent = 'Checking…';
+      wst.set(`${j.stage || 'Working'}… ${UI.num(j.rowsProcessed)} of ${UI.num(cur.rows)} rows${j.progress != null ? ` (${Math.round(100 * j.progress)}%)` : ''}`);
+    }).catch(e => { wst.fail(`Write failed: ${e.message}`); throw e; });
+    bar(90); wst.done('Written'); ctx.log('Checking columns and row count…');
     // Check what was written (from the dataset's own manifest): header count, order and names, every source row.
     const rows = w.rowCount, columns = Engine.columnsOf(w), parts = w.files;
     const got = columns.map(c => c.name), diff = want.findIndex((n, i) => n !== got[i]);
@@ -292,9 +372,9 @@ async function runImport(direct) {
     await Projects.touchModule(ctx.folder, 'import');
     ctx.log(`${direct ? 'Imported' : 'Staged'} ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
     UI.toast(`${direct ? 'Imported' : 'Staged'} ${name}`, 'ok');
-    bar(100); $('status').textContent = '';
+    bar(100);
     await listDatasets();
-  } finally { $('import').disabled = false; setTimeout(() => bar(0), 1200); }
+  } finally { live(null); $('import').disabled = false; setTimeout(() => bar(0), 1200); }
 }
 $('import').onclick = UI.guard(() => runImport(false));
 

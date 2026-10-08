@@ -1,8 +1,11 @@
-// Client for the native C# data engine (runs inside the local server; see ARCHITECTURE.md). Global: Engine.
+// Client for the native C# data engine (runs inside the local server; see .claude/docs/ARCHITECTURE.md). Global: Engine.
 // The browser never crunches data: it sends SQL (or a declarative query) and gets compact results back.
 //   await Engine.query(sql, { views, limit, workers })   -> { cols, types, rows, rowCount, truncated, ms }
 //   await Engine.describe(sql, views)                    -> [{ name, type }]
 //   await Engine.count(fromSql, views)                   -> number of rows
+//   await Engine.check(sql, views)                       -> [{ pos, end, line, message, code }] syntax / name errors (editor)
+//   await Engine.preview(sql, { views, limit, workers }) -> query result + { count }: first rows and the total of a query or
+//                                                           script (statements ending in a SELECT), rows and count in parallel
 //   await Engine.open(src, table)                        -> { kind, tables, columns, rows, size, modified }  (project path or X:\... / \\server\...)
 //   await Engine.write({ sql, views, dest, meta }, onProgress)    -> dataset manifest { path, files, rowCount, bytes, columns, version, ... }
 //   await Engine.exportTo({ sql, views, to, format, table }, onProgress) -> { path, rows, bytes, format }
@@ -41,6 +44,8 @@ const Engine = (() => {
   const query = (sql, { views, limit, workers } = {}) => call('query', { sql, views, limit, workers });
   const describe = async (sql, views) => (await call('describe', { sql, views })).columns;
   const count = async (from, views) => Number((await query(`SELECT count(*) FROM ${from}`, { views })).rows[0][0]);
+  const preview = (sql, { views, limit = 100, workers } = {}) => call('preview', { sql, views, limit, workers });
+  const check = async (sql, views) => (await call('check', { sql, views })).errors;
   const open = (src, table) => call('open', { src, table });
 
   // Start a job and poll it until it ends. onProgress(job) gets { state, stage, progress, rowsProcessed, ... }.
@@ -65,5 +70,5 @@ const Engine = (() => {
   // Columns of a written dataset manifest, in the { name, type } form dataset records use.
   const columnsOf = m => (m.columns || []).map(c => ({ name: c.name, type: c.type }));
 
-  return { kind, q, lit, src, dataset, views, query, describe, count, open, job, write, exportTo, pipeline, cancel, status, cache, columnsOf, call };
+  return { kind, q, lit, src, dataset, views, query, describe, count, preview, check, open, job, write, exportTo, pipeline, cancel, status, cache, columnsOf, call };
 })();

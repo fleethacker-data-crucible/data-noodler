@@ -23,14 +23,14 @@
         <h3>Dashboard as a web page</h3>
         <div class="muted">One self-contained HTML file with the current results built in: it opens anywhere, without the server or the data.</div>
         <label class="field">Name<input id="dName" type="text" value="dashboard"></label>
-        <button id="pubDash" class="go">Publish dashboard</button>
+        <button id="pubDash">Publish dashboard</button>
       </section>
       <section class="box stack">
         <h3>Datasets</h3>
         <div class="muted">Copies of staged datasets for other tools.</div>
         <div class="opts" id="dsOpts"></div>
         <label class="field">Format<select id="fmt"><option value="csv">CSV (with header)</option><option value="parquet">Parquet (Snappy)</option><option value="sqlite">SQLite</option></select></label>
-        <button id="pubData" class="go">Export selected</button>
+        <button id="pubData">Export selected</button>
       </section>
     </div>
     <h2>Published</h2>
@@ -46,7 +46,11 @@
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/dashboard/widgets.js"></script>
+<script src="../js/vendor/apexcharts.min.js"></script>
+<script src="../js/vendor/apextree.min.js"></script>
+<script type="module" src="../js/widgets/apex-grid-loader.js"></script>
+<script src="../js/widgets/apex-render.js"></script>
+<script src="../js/widgets/apex-widget.js"></script>
 <script>
 const { $, esc } = UI;
 let ctx;
@@ -72,27 +76,42 @@ $('pubDash').onclick = UI.guard(async () => {
   if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
   $('pubDash').disabled = true;
   try {
-    const results = [];
-    for (const w of dash.widgets.filter(w => w.type !== 'widget' && Widgets.ready(w))) {   // not set up yet, or Vega packages (not in published pages yet): left out
-      const d = ctx.cfg.datasets.find(x => x.name === w.dataset);
-      if (!d) { results.push({ w, error: `Dataset ${w.dataset} not found` }); continue; }
-      const r = await Engine.call('query', { query: Widgets.query(w), views: Engine.views([d]) });
-      results.push({ w, cols: r.cols, rows: r.rows });
-    }
-    const [css, ui, widgets] = await Promise.all(['/css/theme.css', '/js/core/ui.js', '/js/dashboard/widgets.js'].map(async u => (await fetch(u)).text()));
-    const data = JSON.stringify({ project: ctx.cfg.name, at: new Date().toISOString(), results }).replace(/</g, '\\u003c');
+    // Each widget is drawn here (Apex) at its dashboard size and embedded as static SVG: the page needs no JavaScript.
+    const pkgs = new Map((await WidgetRegistry.list(true)).map(m => [m.id, m]));
+    const COLS = dash.cols || 48, ROWS = dash.rows || 27, CELL = 30, cards = [];
+    const host = Object.assign(document.createElement('div'), { style: 'position:fixed;left:-99999px;top:0' }); document.body.append(host);
+    try {
+      for (const w of dash.widgets) {
+        const m = pkgs.get(w.pkg), d = ctx.cfg.datasets.find(x => x.name === w.dataset);
+        let body;
+        if (!m) body = `<div class="note err">Widget package ${esc(w.pkg)} not found</div>`;
+        else if (!ApexWidget.ready(m, w)) continue;   // not set up yet: left out
+        else if (!d) body = `<div class="note err">Dataset ${esc(w.dataset)} not found</div>`;
+        else {
+          const r = await Engine.call('query', { query: ApexWidget.query(m, w), views: Engine.views([d]) });
+          const el = Object.assign(document.createElement('div'), { style: `width:${w.w * CELL - 16}px;height:${w.h * CELL - 44}px` }); host.append(el);
+          try { await ApexWidget.render(el, m, m.specJson, w, ApexWidget.objects(r), { columns: d.columns || [] }); body = el.innerHTML; }
+          catch (e) { body = `<div class="note err">${esc(String(e.message || e).split('\n')[0])}</div>`; }
+        }
+        cards.push(`<div class="card" style="left:${w.x / COLS * 100}%;top:${w.y / ROWS * 100}%;width:${w.w / COLS * 100}%;height:${w.h / ROWS * 100}%"><h3>${esc(w.title || m?.name || '')}</h3><div class="body">${body}</div></div>`);
+      }
+    } finally { host.remove(); }
+    if (!cards.length) throw new Error('No widget is set up yet (dataset + data inputs).');
+    const css = await (await fetch('/css/theme.css')).text();
     const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(ctx.cfg.name)} · Dashboard</title>
 <style>${css.replace(/@font-face[^}]+}/g, '')}
-.board{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:12px 14px}.card.wide{grid-column:1/-1}.card .body{overflow:auto;max-height:420px}</style></head>
-<body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>${esc(ctx.cfg.name)}</h1><div class="sub" id="sub"></div></div></div></header>
-<div class="main"><div class="board" id="board"></div></div></div>
-<script>${ui}<\/script><script>${widgets}<\/script>
-<script>const D = ${data};
-document.getElementById('sub').textContent = 'Dashboard published ' + new Date(D.at).toLocaleString() + ' (classification: ${esc(ctx.cfg.classification || '')})';
-const b = document.getElementById('board');
-D.results.forEach((r, i) => { const c = document.createElement('div'); c.className = 'card' + (Widgets.spec(r.w).type !== 'bar' ? ' wide' : '');
-  c.innerHTML = '<h3>' + UI.esc(r.w.title) + '</h3><div class="body"></div>'; b.append(c);
-  r.error ? c.lastChild.textContent = r.error : Widgets.render(c.lastChild, r.w, r); });<\/script></body></html>`;
+.board{position:relative;width:min(100%,calc((100vh - 120px) * 16 / 9));aspect-ratio:16/9;margin:0 auto}
+.card{position:absolute;box-sizing:border-box;padding:4px;display:flex}
+.card>*{min-width:0}
+.card{flex-direction:column}
+.card h3{margin:0;padding:6px 10px;font-size:13px;font-weight:600;background:var(--panel);border:1px solid var(--border);border-bottom:0;border-radius:4px 4px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .body{flex:1;min-height:0;background:var(--panel);border:1px solid var(--border);border-radius:0 0 4px 4px;padding:6px 8px;overflow:hidden}
+.card .body>svg,.card .body>figure>svg:last-child{width:100%;height:100%}
+.card .body>figure{margin:0;height:100%;display:flex;flex-direction:column}
+.card .body>figure>svg:last-child{flex:1;min-height:0}
+.note{height:100%;display:grid;place-items:center;color:var(--muted)}</style></head>
+<body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>${esc(ctx.cfg.name)}</h1><div class="sub">Dashboard published ${esc(new Date().toLocaleString())}${ctx.cfg.classification ? ` (classification: ${esc(ctx.cfg.classification)})` : ''}</div></div></div></header>
+<div class="main"><div class="board">${cards.join('\n')}</div></div></div></body></html>`;
     const name = slug($('dName').value), path = `${ctx.dir}/publish/${name}-${stamp()}.html`;
     await DNFS.writeText(path, html);
     await Projects.touchModule(ctx.folder, 'publish');
@@ -109,10 +128,10 @@ $('pubData').onclick = UI.guard(async () => {
   $('pubData').disabled = true;
   try {
     for (const n of names) {
-      const d = ctx.cfg.datasets.find(x => x.name === n), t0 = performance.now();
+      const d = ctx.cfg.datasets.find(x => x.name === n), st = ctx.step(`Exporting ${n} as ${fmt.toUpperCase()}…`);
       // One file per dataset; the engine streams it, so a big dataset never has to fit in memory.
-      const r = await Engine.exportTo({ sql: `SELECT * FROM ${Engine.dataset(d)}`, to: `${dir}/${n}.${fmt}`, format: fmt, table: n });
-      ctx.log(`Exported ${n} as ${fmt.toUpperCase()}: ${UI.num(r.rows)} rows, ${UI.bytes(r.bytes)} (${UI.ms(performance.now() - t0)})`, 'ok');
+      const r = await Engine.exportTo({ sql: `SELECT * FROM ${Engine.dataset(d)}`, to: `${dir}/${n}.${fmt}`, format: fmt, table: n }).catch(e => { st.fail(`Export ${n} failed: ${e.message}`); throw e; });
+      st.done(`Exported ${n} as ${fmt.toUpperCase()}: ${UI.num(r.rows)} rows, ${UI.bytes(r.bytes)}`);
     }
     await Projects.touchModule(ctx.folder, 'publish');
     UI.toast('Export finished', 'ok'); await listPubs();

@@ -43,11 +43,34 @@ namespace NativeDataEngine
         static DateTime Dt(Column c, int i) { return c.Type.Kind == Kind.Date ? Values.DateOf(c.I[i]) : Values.TimeOf(c.I[i]); }
         static BExpr AsTime(BExpr e) { return e.Type.Kind == Kind.Date || e.Type.Kind == Kind.Timestamp ? e : BCast.To(e, DataType.Timestamp); }
 
+        // Error text for ERROR_MESSAGE() while a script runs a CATCH block (Script.cs), per thread.
+        [ThreadStatic] public static string CatchError;
+
         public static BExpr Bind(string name, List<BExpr> a)
         {
             string fn = name.ToLowerInvariant();
             switch (fn)
             {
+                case "__one_row":   // scalar subquery value: (row count, value); more than one row is an error
+                    {
+                        Need(fn, a, 2, 2);
+                        DataType t = a[1].Type;
+                        List<BExpr> xa = new List<BExpr> { BCast.To(a[0], DataType.BigInt), a[1] };
+                        return new BFunc(fn, t, xa, (c, n) =>
+                        {
+                            Column o = new Column(t.Kind == Kind.Null ? DataType.Null : t, n);
+                            for (int i = 0; i < n; i++)
+                            {
+                                if (!c[0].IsNull(i) && c[0].I[i] > 1) throw new EngineException("SUBQUERY_MULTIPLE_ROWS", "A subquery used as a single value returned more than one row.");
+                                BCase.Copy(c[1], i, o, i);
+                            }
+                            return o;
+                        }, true);
+                    }
+                case "error_message": Need(fn, a, 0, 0); return CatchError == null ? new BLit(null, DataType.Varchar) : new BLit(CatchError, DataType.Varchar);
+                case "error_number": Need(fn, a, 0, 0); return CatchError == null ? new BLit(null, DataType.BigInt) : new BLit(50000L, DataType.BigInt);
+                case "error_severity": Need(fn, a, 0, 0); return CatchError == null ? new BLit(null, DataType.BigInt) : new BLit(16L, DataType.BigInt);
+                case "error_state": Need(fn, a, 0, 0); return CatchError == null ? new BLit(null, DataType.BigInt) : new BLit(1L, DataType.BigInt);
                 // ---- numbers ----
                 case "abs":
                     {

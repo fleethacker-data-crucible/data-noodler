@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Transform</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  /* No visible scrollbars; scrolling is by mouse wheel (global rules in embed.js: Ctrl = 4x, Shift = sideways in tables). */
+  * { scrollbar-width: none; }
+  *::-webkit-scrollbar { display: none; }
+  .lst, .log { overscroll-behavior: contain; }
+  /* Column separator: full height of .main (header line to page bottom), 20px either side of it, matching the page padding. */
+  .split { column-gap: 40px; }
+  .main { background: linear-gradient(var(--border), var(--border)) no-repeat 340px 0 / 1px 100%; }
+  @media (max-width: 800px) { .main { background-image: none; } }
+  /* Section headings: 25px above each, none above the first one in each column. */
+  .split h2 { margin: 25px 0 10px; }
+  aside > section:first-child > h2, #editor > section:first-child > h2 { margin-top: 0; }
+  #editor { margin-top: 0; }
+  aside { display: flex; flex-direction: column; }
+  .lst { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 300px; overflow: auto; }
+  .lst > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 25px; box-sizing: border-box; padding: 0 8px; cursor: pointer; }   /* rows as tall as a text box */
+  .lst > div + div { border-top: 1px solid var(--border); }
+  .lst > div:hover { background: var(--panel); }
+  .lst > div.sel { background: var(--sel); font-weight: 600; }
+  .lst small { color: var(--muted); white-space: nowrap; }
+  /* Expand arrow: the same ▾ glyph, size and weight as the Preview Source Datasets button; turned when shut. */
+  .lst .tw { color: var(--muted); display: inline-block; width: 16px; font-size: 17px; font-weight: 600; line-height: 1; text-align: center; margin-right: 4px; }
+  .lst .tw.shut { transform: rotate(-90deg); }
+  .lst > div.fsrch { padding: 0 8px 0 30px; cursor: default; }
+  .lst > div.fsrch:hover { background: none; }
+  .fsrch input { width: 100%; height: 19px; box-sizing: border-box; font-size: 12.5px; }
+  .lst > div.fld { padding-left: 30px; font-family: var(--mono); font-size: 12.5px; }
+  .lst .n { color: var(--muted); font-family: var(--mono); margin-right: 6px; }
+  /* Preview grid (same as Import's) ends 20px above the page bottom; fit() sets its max-height. */
+  .progress.busy > i { width: 30% !important; animation: busy 1.2s linear infinite; }
+  @keyframes busy { from { margin-left: -30%; } to { margin-left: 100%; } }
+  #result .table-wrap { max-height: 480px; }
+  #outName { width: 100%; box-sizing: border-box; font-family: var(--mono); }
+  #qName.bad, #qName.bad:focus { border-color: var(--err); outline: 1px solid var(--err); }
+  #qName::placeholder { color: var(--muted); }
+  #qName { min-width: 260px; font-family: var(--mono); }
+  .lst .act { color: var(--ok); font-weight: 600; letter-spacing: .04em; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">DN</span><div><h1 id="title">Transform</h1><div class="sub" id="sub"></div></div></div>
+    <div class="spacer"></div>
+  </header>
+  <div class="main">
+    <div class="split">
+      <aside>
+        <section>
+          <h2 title="Click a dataset: show its fields
+Shift+click a dataset: insert its name in the SQL
+Click a field: insert it in the SQL">Input datasets</h2>
+          <div class="lst" id="dsList"></div>
+        </section>
+        <section id="outSec"><h2 title="The active query's result is saved under this name (Parquet parts in data/source)">Output dataset name</h2><input id="outName" type="text" placeholder="CLEAN_NAME" spellcheck="false"><div class="row" style="margin-top:10px"><button id="run" title="Run the active query over all of the input data and save the result as the output dataset">Build Output Dataset</button></div></section>
+        <section>
+          <h2 title="Write and try out as many queries as you like; the active one builds the output dataset">Queries</h2>
+          <div class="row" style="margin-bottom:8px"><button id="add">Add</button><button id="setActive" class="ghost" title="Make the selected query the one Build Output Dataset runs">Set Active</button><button id="del" class="danger">Delete</button></div>
+          <div class="lst" id="qList"></div>
+        </section>
+      </aside>
+      <section class="stack">
+        <div id="none" class="muted">Click Add to write a query. A query is one SELECT, or a script (CREATE TABLE, INSERT, UPDATE, ... ) that ends with a SELECT. The active query builds the output dataset (Parquet in data/source). The simplest one is <span class="mono">SELECT * FROM &lt;input dataset&gt;</span>.</div>
+        <div id="editor" hidden class="stack">
+          <section><h2>Query name</h2><input id="qName" type="text" placeholder="Required: name this query" spellcheck="false"></section>
+          <h2 title="One SELECT, or several statements separated by ; that end with a SELECT (its result is the output)">SQL <small class="muted" style="text-transform:none;letter-spacing:0">Tab / Shift+Tab indent · Ctrl+Space suggestions · Ctrl+Enter preview</small></h2>
+          <div id="sql"></div>
+          <div id="sqlErr" class="err" hidden style="font-size:12.5px;margin-top:4px"></div>
+          <section class="stack"><h2>Activity</h2><div class="progress"><i id="bar"></i></div><div class="log" id="log"></div></section>
+          <div class="row">
+            <span style="position:relative"><button id="srcPrev" class="ghost">Preview Source Datasets ▾</button><div id="srcMenu" class="sqled-pop" hidden style="top:100%;left:0;margin-top:4px"></div></span><button id="preview" class="ghost" title="Run this query (top 100 rows and the total row count)">Preview Output</button><button id="popout" class="ghost" title="Show the preview table in its own window; it comes back here when that window closes">Pop-out Preview</button><span id="pinfo" class="muted" style="margin-left:15px"></span>
+          </div>
+          <div id="result"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/module-page.js"></script>
+<script src="../js/pipeline/steps.js"></script>
+<script src="../js/pipeline/runner.js"></script>
+<script src="../js/pipeline/sql-editor.js"></script>
+<script>
+// Transform = a list of SQL queries (each one SELECT or a script ending in a SELECT; engine/Core/Script.cs). The
+// active query builds the output dataset data/source/<CLEAN_name>/ (Parquet parts). Saved in pipeline/pipeline.json as
+// { version: 2, queries: [{ id, name, sql }], active, output } (see js/pipeline/runner.js).
+const { $, esc } = UI;
+// Input datasets: click expands the field list, Shift+click inserts the dataset name; click a field to insert it.
+const open = new Set(), fq = new Map();   // fq: field search text per dataset
+const fhit = (ds, col) => col.toLowerCase().includes((fq.get(ds) || '').trim().toLowerCase());
+let ctx, pipe = { version: 2, queries: [], active: null, output: '' }, sel = -1, dirty = false, saveT;
+// Auto-save: every edit schedules a write of pipeline.json shortly after typing stops.
+const touch = () => { dirty = true; clearTimeout(saveT); saveT = setTimeout(() => save().catch(e => UI.toast('Auto-save failed: ' + e.message, 'err')), 600); };
+const FILE = () => PipelineRunner.file(ctx);
+const OUT = /^CLEAN_[A-Z0-9_]+$/;
+// Dataset and field lists are alphabetical (queries keep their own order).
+const abc = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
+const staged = () => (ctx?.cfg.datasets || []).filter(d => Projects.stageOf(d) === 'staged').sort((a, b) => abc(a.name, b.name));
+const cur = () => pipe.queries[sel];
+const named = q => !!(q && (q.name || '').trim());
+const locked = () => !named(cur()) || $('sql').querySelector('textarea').readOnly;
+
+const ed = SqlEditor.mount($('sql'), {
+  onChange: v => { const q = cur(); if (q) { q.sql = v; touch(); } },
+  // Live syntax / name check by the engine; the first error is shown under the editor.
+  check: text => ctx ? Engine.check(text, Engine.views(ctx.cfg.datasets || [])) : [],
+  onCheck: errs => { const e = errs[0], el = $('sqlErr'); el.hidden = !e; el.textContent = e ? (e.line ? `Line ${e.line}: ` : '') + e.message : ''; },
+  words: () => ({ tables: (ctx?.cfg.datasets || []).map(d => d.name),
+                  columns: [...new Set((ctx?.cfg.datasets || []).flatMap(d => (d.columns || []).map(c => c.name)))] }),
+});
+
+function render() {
+  $('dsList').innerHTML = staged().map(d => `<div data-ds="${esc(d.name)}" title="Click: show fields · Shift+click: insert name"><span><span class="tw${open.has(d.name) ? '' : ' shut'}">▾</span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows · ${d.columns.length} cols</small></div>`
+    + (open.has(d.name) ? `<div class="fsrch"><input type="search" data-fs="${esc(d.name)}" placeholder="Search fields…" value="${esc(fq.get(d.name) || '')}" spellcheck="false"></div>` + [...d.columns].sort((a, b) => abc(a.name, b.name)).map(c => `<div class="fld" data-col="${esc(c.name)}" title="Click to insert"${fhit(d.name, c.name) ? '' : ' hidden'}><span>${esc(c.name)}</span><small>${esc(c.type)}</small></div>`).join('') : '')).join('') || '<div class="muted">Nothing staged. Import data first.</div>';
+  $('qList').innerHTML = pipe.queries.map((q, i) => `<div data-i="${i}" draggable="true" title="Drag to reorder" class="${i === sel ? 'sel' : ''}"><span><span class="n">${i + 1}</span>${named(q) ? esc(q.name) : '<span class="muted" style="font-weight:400">blank</span>'}</span>${q.id === pipe.active ? '<small class="act" title="Build Output Dataset runs this query">ACTIVE</small>' : ''}</div>`).join('') || '<div class="muted">No queries yet.</div>';
+  $('none').hidden = sel >= 0; $('editor').hidden = sel < 0;
+  $('del').disabled = sel < 0;
+  $('setActive').disabled = sel < 0 || cur().id === pipe.active;
+  $('run').disabled = !PipelineRunner.active(pipe);
+  $('run').title = PipelineRunner.active(pipe) ? `Run "${PipelineRunner.active(pipe).name || 'blank'}" over all of the input data and save the result as ${pipe.output || 'the output dataset'}` : 'Set an active query first';
+  // A query needs a name before its SQL can be edited or previewed: the empty box is outlined red.
+  const q = cur(), need = !!q && !named(q), ta = $('sql').querySelector('textarea');
+  $('qName').classList.toggle('bad', need); $('preview').disabled = need;
+  if (ta) { ta.readOnly = need; ta.title = need ? 'Enter a query name first' : ''; }
+  $('sql').style.opacity = need ? '.5' : '';
+}
+function select(i) {
+  sel = i; const q = cur();
+  ed.value = q ? q.sql : ''; $('qName').value = q ? q.name || '' : '';
+  last = null; showTable(); info(''); render();
+}
+
+$('dsList').onclick = ev => {
+  const f = ev.target.closest('[data-col]'); if (f) { if (sel >= 0 && !locked()) ed.insert(f.dataset.col); return; }
+  const el = ev.target.closest('[data-ds]'); if (!el) return;
+  if (ev.shiftKey) { if (sel >= 0 && !locked()) ed.insert(el.dataset.ds); return; }
+  const n = el.dataset.ds; open.has(n) ? open.delete(n) : open.add(n); render();
+};
+// Field search: filters that dataset's fields in place (no re-render, so the box keeps focus).
+$('dsList').oninput = ev => {
+  const i = ev.target.closest('[data-fs]'); if (!i) return; const ds = i.dataset.fs; fq.set(ds, i.value);
+  for (let el = i.parentElement.nextElementSibling; el?.classList.contains('fld'); el = el.nextElementSibling) el.hidden = !fhit(ds, el.dataset.col);
+};
+$('dsList').onmousedown = ev => { if (ev.shiftKey) ev.preventDefault(); };   // no text selection on Shift+click
+$('qList').onclick = ev => { const el = ev.target.closest('[data-i]'); if (el) select(+el.dataset.i); };
+// The output name is upper case, spaces become _, and always starts with CLEAN_ (a partly deleted prefix is restored).
+const PRE = 'CLEAN_';
+$('outName').oninput = () => { const o = $('outName'); let p = o.selectionStart, u = o.value.toUpperCase().replace(/\s/g, '_'), k = 0; while (k < PRE.length && u[k] === PRE[k]) k++; if (k < PRE.length) { u = PRE + u.slice(k); p = Math.max(PRE.length, p + PRE.length - k); } if (u !== o.value) { o.value = u; o.setSelectionRange(p, p); } pipe.output = o.value.trim(); touch(); render(); };
+// Query names are upper case with _ for spaces, as you type.
+$('qName').oninput = () => { const o = $('qName'), p = o.selectionStart, u = o.value.toUpperCase().replace(/\s/g, '_'); if (u !== o.value) { o.value = u; o.setSelectionRange(p, p); } const q = cur(); if (!q) return; q.name = o.value; touch(); render(); };
+$('add').onclick = () => {
+  const first = staged()[0]?.name || 'my_dataset';
+  pipe.queries.push({ id: crypto.randomUUID(), name: '', sql: `SELECT *\nFROM ${first}` });
+  if (!PipelineRunner.active(pipe)) pipe.active = pipe.queries[pipe.queries.length - 1].id;   // there is always an active query
+  touch(); select(pipe.queries.length - 1); $('qName').focus();
+};
+$('setActive').onclick = () => {
+  const q = cur(); if (!q) return;
+  pipe.active = q.id; touch(); render();
+  ctx.log(`Active query: ${named(q) ? q.name : 'blank'}`);
+};
+// Drag a query up or down the list to reorder it; the selection follows the selected query.
+let dragFrom = -1;
+const qMark = el => { [...$('qList').children].forEach(c => c.style.boxShadow = ''); if (el) el.style.boxShadow = el._after ? 'inset 0 -2px 0 var(--accent, #4a8cff)' : 'inset 0 2px 0 var(--accent, #4a8cff)'; };
+$('qList').addEventListener('dragstart', ev => { const el = ev.target.closest('[data-i]'); if (!el) return; dragFrom = +el.dataset.i; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', ''); el.style.opacity = '.4'; });
+$('qList').addEventListener('dragover', ev => { const el = ev.target.closest('[data-i]'); if (dragFrom < 0 || !el) return; ev.preventDefault(); const r = el.getBoundingClientRect(); el._after = ev.clientY > r.top + r.height / 2; qMark(el); });
+$('qList').addEventListener('dragleave', ev => { if (!$('qList').contains(ev.relatedTarget)) qMark(null); });
+$('qList').addEventListener('dragend', () => { dragFrom = -1; render(); });
+$('qList').addEventListener('drop', ev => {
+  const el = ev.target.closest('[data-i]'); if (dragFrom < 0 || !el) return; ev.preventDefault();
+  let to = +el.dataset.i + (el._after ? 1 : 0); if (to > dragFrom) to--;
+  const from = dragFrom; dragFrom = -1; if (to === from) return render();
+  const c = cur(), [q] = pipe.queries.splice(from, 1); pipe.queries.splice(to, 0, q);
+  touch(); sel = pipe.queries.indexOf(c); render();
+});
+$('del').onclick = UI.guard(async () => {
+  const q = cur();
+  if (!await UI.confirm(`Are you sure you want to delete the query "${named(q) ? q.name.trim() : 'blank'}"?`, { danger: true, ok: 'Delete' })) return;
+  pipe.queries.splice(sel, 1);
+  if (pipe.active === q.id) {
+    // The active query is gone: the first remaining one takes over, so there is always an active query.
+    pipe.active = pipe.queries[0]?.id || null;
+    if (pipe.active) ctx.log(`Active query is now: ${named(pipe.queries[0]) ? pipe.queries[0].name : 'blank'}`, 'warn');
+  }
+  touch(); select(Math.min(sel, pipe.queries.length - 1));
+});
+
+// Building needs an active, named query with SQL and a valid CLEAN_ output name that is not an input dataset.
+function validate() {
+  const q = PipelineRunner.active(pipe);
+  if (!q) throw new Error('Set an active query first (Add a query, then Set Active).');
+  if (!named(q)) throw new Error('Give the active query a name.');
+  if (!q.sql.trim()) throw new Error(`The active query "${q.name}" is empty.`);
+  if (!OUT.test(pipe.output || '')) throw new Error('Enter an output dataset name: CLEAN_ followed by letters, digits or _.');
+  if (staged().some(d => d.name === pipe.output)) throw new Error(`"${pipe.output}" is an input dataset; pick another output name.`);
+}
+
+// Preview: the selected query's output, or a source dataset. Top 100 rows plus the total row count; for a script
+// the engine runs its statements once, then the rows and the count of the final SELECT in parallel on all workers.
+async function preview(label, sql) {
+  const st = ctx.step(`Previewing ${label}…`), pb = $('bar').parentElement, t0 = performance.now();
+  pb.classList.add('busy');
+  let dots = 0; const calc = () => info(`Running${'.'.repeat(dots++ % 4 + 1)}`);
+  calc(); const tick = setInterval(calc, 500);
+  try {
+    const r = await Engine.preview(sql, { views: Engine.views(ctx.cfg.datasets || []), limit: 100 });
+    last = { cols: r.cols, rows: r.rows, title: label }; showTable();
+    info(`${UI.num(r.count)} rows · ${r.cols.length} columns · ${UI.ms(performance.now() - t0)}`);
+    st.done(`Previewed ${label}: ${UI.num(r.count)} rows`);
+  }
+  catch (e) { st.fail(`Preview of ${label} failed: ${e.message}`); info('Preview failed'); throw e; }
+  finally { clearInterval(tick); pb.classList.remove('busy'); }
+}
+$('preview').onclick = UI.guard(async () => {
+  const q = cur(); if (!q || !named(q)) return;
+  if (!q.sql.trim()) throw new Error('Write a query first.');
+  await ctx.reload();
+  await preview(q.name.trim(), q.sql);
+});
+$('srcPrev').onclick = ev => {
+  ev.stopPropagation(); const m = $('srcMenu');
+  if (!m.hidden) return m.hidden = true;
+  m.innerHTML = staged().map(d => `<div data-ds="${esc(d.name)}"><span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows</small></div>`).join('') || '<div class="muted">Nothing staged.</div>';
+  m.hidden = false;
+};
+$('srcMenu').onclick = UI.guard(async ev => {
+  const el = ev.target.closest('[data-ds]'); if (!el) return;
+  $('srcMenu').hidden = true;
+  await preview(el.dataset.ds, `SELECT * FROM ${Engine.q(el.dataset.ds)}`);
+});
+addEventListener('click', ev => { if (!ev.target.closest('#srcMenu')) $('srcMenu').hidden = true; });
+function fit(win = window) { const w = win.document.getElementById('result')?.querySelector('.table-wrap'); if (w) w.style.maxHeight = Math.max(120, win.innerHeight - w.getBoundingClientRect().top - 20) + 'px'; }
+addEventListener('resize', () => fit());
+
+// Pop-out preview: the table (and its row/column info) moves to its own window; every preview updates it there.
+// When that window closes the table comes back here.
+let last = null, pop = null, popWatch;
+const popped = () => pop && !pop.closed;
+function info(t) { $('pinfo').textContent = t; if (popped()) pop.document.getElementById('info').textContent = t; }
+function showTable() {
+  const el = popped() ? pop.document.getElementById('result') : $('result');
+  if (last) UI.dataTable(el, last.cols, last.rows); else el.innerHTML = '';
+  if (popped()) { pop.document.title = last ? last.title : 'Preview'; fit(pop); } else fit();
+}
+$('popout').onclick = () => {
+  if (popped()) return pop.focus();
+  pop = window.open('', 'dn-preview', 'width=1100,height=700');
+  if (!pop) return UI.toast('The browser blocked the pop-out window. Allow pop-ups for this site.', 'err');
+  const u = f => new URL(f, location.href).href;
+  pop.document.open();
+  pop.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Preview · Data Noodler</title>
+<link rel="stylesheet" href="${u('../css/theme.css')}">
+<style>body { padding: 20px; } #info { margin-bottom: 10px; } * { scrollbar-width: none; } *::-webkit-scrollbar { display: none; }</style>
+</head><body><div id="info" class="muted"></div><div id="result"></div></body></html>`);
+  pop.document.close();
+  // No scripts in the pop-out (a script tag would delay parsing past this point); copy the theme instead.
+  pop.document.documentElement.dataset.theme = document.documentElement.dataset.theme || 'dark';
+  pop.document.getElementById('info').textContent = $('pinfo').textContent;
+  pop.addEventListener('resize', () => fit(pop));
+  $('result').hidden = true; $('popout').disabled = true;
+  showTable();
+  clearInterval(popWatch);
+  popWatch = setInterval(() => { if (popped()) return; clearInterval(popWatch); pop = null; $('result').hidden = false; $('popout').disabled = false; showTable(); }, 500);
+};
+addEventListener('pagehide', () => { if (popped()) pop.close(); });
+$('sql').addEventListener('keydown', ev => { if (ev.key === 'Enter' && ev.ctrlKey) { ev.preventDefault(); $('preview').click(); } });
+
+async function save() { clearTimeout(saveT); pipe.version = 2; pipe.updated = new Date().toISOString(); pipe.rev = (pipe.rev || 0) + 1; await DNFS.writeJSON(FILE(), pipe); dirty = false; }
+$('run').onclick = UI.guard(async () => {
+  try { validate(); } catch (e) { ctx.log(e.message, 'err'); throw e; }
+  await save();
+  $('run').disabled = true;
+  try {
+    // Progress bar: the engine's job % when it reports one, otherwise the busy animation.
+    const pb = $('bar').parentElement, bar = p => $('bar').style.width = `${Math.round(p)}%`;
+    pb.classList.add('busy'); bar(0);
+    const st = ctx.step(`Building ${pipe.output}…`);
+    const rec = await PipelineRunner.run(ctx, pipe, (m, l) => ctx.log(m, l), null, j => { if (j.progress != null) { pb.classList.remove('busy'); bar(100 * j.progress); } })
+      .catch(e => { st.fail(`Build failed: ${e.message}`); throw e; }).finally(() => pb.classList.remove('busy'));
+    if (!rec.ok) { st.fail(`Build failed: ${rec.error}`); throw new Error(`Build failed: ${rec.error}`); }
+    bar(100); st.done(`Built ${pipe.output}`); UI.toast(`${pipe.output} built`, 'ok');
+    setTimeout(() => bar(0), 1200);
+  } finally { $('run').disabled = false; await ctx.reload(); render(); }
+});
+window.addEventListener('beforeunload', ev => { if (dirty) { ev.preventDefault(); ev.returnValue = ''; } });
+
+(async () => {
+  try {
+    ctx = await ModulePage.init('pipeline', 'Transform');
+    pipe = await PipelineRunner.load(ctx);
+    if (!pipe.output) pipe.output = 'CLEAN_OUTPUT';
+    if (pipe.queries.length && !PipelineRunner.active(pipe)) pipe.active = pipe.queries[0].id;
+    $('outName').value = pipe.output;
+    const ai = pipe.queries.findIndex(q => q.id === pipe.active);
+    select(pipe.queries.length ? Math.max(0, ai) : -1);
+  } catch (e) { UI.toast(e.message, 'err'); $('none').textContent = e.message; }
+})();
+</script>
+</body>
+</html>

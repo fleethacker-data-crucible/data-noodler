@@ -15,5 +15,11 @@ const Theme = (() => {
   }
   apply(read() || 'dark');
   addEventListener('storage', e => { if (e.key === KEY && e.newValue) apply(e.newValue); });
+  // The server panel runs on its own origin (no shared localStorage): ask the site for the mode every second, so a
+  // change in Settings > Appearance reaches every open window right away.
+  async function poll() {
+    try { const r = await fetch('/api/theme', { cache: 'no-store' }); if (r.ok) { const s = await r.json(); if (s.theme && s.theme !== (document.documentElement.dataset.theme || 'dark')) apply(s.theme); } } catch {}
+  }
+  if (/^https?:$/.test(location.protocol)) { poll(); setInterval(poll, 1000); }
   return { apply, get current() { return document.documentElement.dataset.theme || 'dark'; } };
 })();

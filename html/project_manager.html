@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project Manager</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  .trash-list { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; }
+  .trash-list label { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; }
+  .trash-list label + label { border-top: 1px solid var(--border); }
+  .trash-list small { margin-left: auto; color: var(--muted); }
+  dialog.flash { animation: flash .18s ease-in-out 8 alternate; }
+  @keyframes flash { from { box-shadow: 0 12px 40px #0009; border-color: var(--border); } to { box-shadow: 0 0 0 4px var(--err), 0 0 40px var(--err); border-color: var(--err); } }
+  .detail td { background: var(--panel) !important; white-space: normal; padding: 12px 16px 14px; }
+  .detail .desc { color: var(--text-2); margin-bottom: 10px; }
+  .detail .meta { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .detail .actions { display: flex; gap: 5px; margin-top: 12px; }
+  .detail .log { margin-top: 10px; }
+  /* Status %: light red (0) to green (100). */
+  #tbl tbody tr:not(.detail) td:not(:first-child) { font-weight: 400; }
+  .pct.p0 { color: #ff8a8a; } .pct.p25 { color: #f5a35c; } .pct.p50 { color: #e8c547; } .pct.p75 { color: #a6cf3f; } .pct.p100 { color: #4cc27f; }
+  th .arrow { color: var(--blue); }
+  th .arrow.off { color: var(--muted); }
+  .empty { text-align: center; padding: 40px; color: var(--muted); }
+  /* No page scroll: only the projects table scrolls (its header row is sticky). */
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .app { flex: 1; min-height: 0; height: auto; }
+  .main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .main > .table-wrap { flex: 1; min-height: 0; overflow-x: hidden; }   /* never scrolls sideways */
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">DN</span>
+      <div><h1>Data Noodler</h1><div class="sub">Project Management</div></div>
+    </div>
+  </header>
+  <div class="main">
+    <h2>Projects</h2>
+    <div class="row" style="margin-bottom:12px">
+      <input id="q" class="search" type="search" placeholder="Search name, owner, description, tags">
+      <select id="fPhase"><option value="">All Phases</option></select>
+      <select id="fStatus"><option value="">All Statuses</option></select>
+      <select id="fClass"><option value="">All Classifications</option></select>
+      <div class="spacer" style="flex:1"></div>
+      <button id="new">New project</button>
+      <button id="refresh" class="ghost">Refresh</button>
+      <button id="trash" class="ghost" title="Recover or permanently delete projects in projects/.trash">Trash</button>
+      <button id="srvctl" class="danger" title="Open the server control panel">Server Control</button>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="tbl">
+        <thead><tr>
+          <th class="sort" data-k="name">Project Name</th><th class="sort" data-k="owner">Owner</th>
+          <th class="sort" data-k="phase">Phase</th><th class="sort" data-k="status">Status</th><th class="sort" data-k="classification">Classification</th>
+          <th class="sort num" data-k="datasets">Datasets</th>
+          <th class="sort" data-k="created">Created</th><th class="sort" data-k="modified">Modified</th><th class="sort" data-k="updated">Last Updated</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/user-picker.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/windows.js"></script>
+<script>
+const { $, esc } = UI, P = Projects;
+// open = expanded project; Back from a module returns here with ?project=<folder> so it stays expanded.
+let projects = [], sortKey = 'modified', sortDir = -1, open = UI.params().project || null;
+// Filters: [value, label] lists from Projects.
+const fill = (id, list) => list.forEach(([v, l]) => $(id).insertAdjacentHTML('beforeend', `<option value="${esc(v === '' ? '-' : v)}">${esc(l)}</option>`));
+fill('fPhase', P.PHASE); fill('fStatus', P.STATUS); fill('fClass', P.CLASSIFICATION);
+const badge = (list, v) => v === '' || v == null ? '-' : `<span class="badge ${esc(v)}">${esc(P.label(list, v))}</span>`;
+const updated = p => p.modules?.update?.lastRun || '';
+const COLS = 9;
+const DATES = ['created', 'modified', 'updated']; // date columns always show their sort arrow, newest first on click
+
+const load = UI.guard(async () => { projects = await P.list(); render(); });
+const val = (p, k) => k === 'datasets' ? (p.datasets?.length || 0) : k === 'status' ? (+p.status || 0) : k === 'phase' ? P.PHASE.findIndex(([v]) => v === p.phase) : k === 'updated' ? updated(p) : String(p[k] ?? '').toLowerCase();
+
+function render() {
+  const q = $('q').value.trim().toLowerCase(), fs = $('fStatus').value, fc = $('fClass').value, fp = $('fPhase').value;
+  const list = projects
+    .filter(p => (!fp || p.phase === fp) && (!fs || String(p.status) === fs) && (!fc || p.classification === fc))
+    .filter(p => !q || [p.name, p.owner, p.description, ...(p.tags || [])].join(' ').toLowerCase().includes(q))
+    .sort((a, b) => { const x = val(a, sortKey), y = val(b, sortKey); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
+  document.querySelectorAll('th.sort').forEach(th => th.innerHTML = th.textContent.replace(/[▲▼]/g, '').trim() + (th.dataset.k === sortKey ? ` <span class="arrow">${sortDir > 0 ? '▲' : '▼'}</span>` : DATES.includes(th.dataset.k) ? ' <span class="arrow off">▼</span>' : ''));
+  const body = $('tbl').querySelector('tbody');
+  if (!list.length) { body.innerHTML = `<tr><td colspan="${COLS}" class="empty">${projects.length ? 'No projects match the filters.' : 'No projects yet. Click <b>New project</b> to create one.'}</td></tr>`; return; }
+  body.innerHTML = list.map(p => `
+    <tr class="click ${open === p.folder ? 'open' : ''}" data-f="${esc(p.folder)}">
+      <td><b>${esc(p.name)}</b>${p.broken ? ' <span class="err">(config missing)</span>' : ''}<div class="sub">${esc(p.folder)}</div></td>
+      <td>${esc(p.owner)}</td><td>${badge(P.PHASE, p.phase)}</td><td class="pct p${+p.status || 0}">${+p.status || 0}%</td>
+      <td>${badge(P.CLASSIFICATION, p.classification)}</td>
+      <td class="num">${p.datasets?.length || 0}</td><td>${UI.date(p.created)}</td><td>${UI.date(p.modified)}</td><td>${updated(p) ? UI.date(updated(p)) : '-'}</td>
+    </tr>${open === p.folder ? detail(p) : ''}`).join('');
+  if (open) loadLog(open);
+}
+
+function detail(p) {
+  const mods = Windows.MODULES.filter(m => !m.global).map(m => `<button data-mod="${m.id}" ${m.enabled && !p.broken ? '' : 'disabled'} title="${m.enabled ? `Open ${m.label}` : 'Not built yet'}">${m.label}</button>`).join('');
+  const last = Object.entries(p.modules || {}).filter(([, v]) => v?.lastRun).map(([k, v]) => `${k}: ${UI.date(v.lastRun)}`).join(' · ');
+  return `<tr class="detail"><td colspan="${COLS}">
+    <div class="desc">${p.description ? esc(p.description) : '<span class="muted">No description.</span>'}</div>
+    <div class="modules">${mods}</div>
+    <div class="meta"><span>Developers: ${(p.developers || []).map(esc).join(', ') || '-'}</span><span>Updaters: ${(p.updaters || []).map(esc).join(', ') || '-'}</span><span>Tags: ${(p.tags || []).map(esc).join(', ') || '-'}</span><span>Last runs: ${last || '-'}</span><span>Datasets: ${(p.datasets || []).map(d => `${esc(d.name)} (${UI.rows(d.rows)} rows)`).join(', ') || '-'}</span></div>
+    <div class="actions"><button class="ghost" data-act="edit">Edit details</button><button class="ghost" data-act="rename">Rename</button><button class="danger" data-act="delete">Delete</button></div>
+    <div class="log" id="plog"></div>
+  </td></tr>`;
+}
+async function loadLog(folder) {
+  const lines = await ProjectLog.read(folder).catch(() => []);
+  const el = $('plog'); if (!el) return;
+  // Same look as the module logs: local "yyyy-mm-dd hh:mm:ss", then module and message; warnings orange, errors red.
+  el.innerHTML = lines.slice(0, ProjectLog.MAX).map(l => {
+    const m = l.match(/^(\S+)\s+(\S+)\s+(\S+)\s+(.*)$/); if (!m) return `<div>${esc(l)}</div>`;
+    const [, at, lvl, mod, msg] = m, cls = lvl === 'ERROR' ? 'err' : lvl === 'WARN' ? 'warn' : '';
+    return `<div class="${cls}"><span class="t">${UI.stamp(new Date(at))}</span>  ${esc(mod)}: ${esc(msg)}</div>`;
+  }).join('') || '<span class="muted">No activity yet.</span>';
+  window.LogMore?.(el);
+}
+
+// ---- events ----
+$('q').oninput = render;   // instant: filtering is in memory
+$('fPhase').onchange = $('fStatus').onchange = $('fClass').onchange = render;
+$('refresh').onclick = load;
+
+// ---- trash: recover selected projects, or empty it (typed acknowledgement) ----
+$('trash').onclick = UI.guard(async () => {
+  for (;;) {
+    const items = (await P.trashList()).sort((a, b) => b.trashed.localeCompare(a.trashed));
+    const body = items.length
+      ? `<div class="trash-list">${items.map(t => `<label><input type="checkbox" name="pick" value="${esc(t.id)}"> ${esc(t.name)}<small>trashed ${UI.date(t.trashed)}</small></label>`).join('')}</div>`
+      : '<div class="muted">The trash is empty.</div>';
+    const picked = f => [...f.querySelectorAll('input[name=pick]:checked')].map(c => c.value);
+    const act = await UI.dialog('Trash', body, items.length
+      ? [{ label: 'Close', value: null, kind: 'ghost' }, { label: 'Empty Trash', value: 'empty', kind: 'danger' }, { label: 'Recover Selected', value: f => ({ recover: picked(f) }) }]
+      : [{ label: 'Close', value: null }]);
+    if (!act) return;
+    if (act === 'empty') {
+      if (!await confirmEmpty(items.length)) continue;
+      const r = await P.emptyTrash();
+      UI.toast(`Trash emptied: ${r.deleted} project(s) permanently deleted`, 'ok');
+      return;
+    }
+    if (!act.recover.length) { UI.toast('Tick at least one project to recover.', 'err'); continue; }
+    for (const id of act.recover) { const r = await P.restore(id); UI.toast(`Recovered to projects/${r.folder}`, 'ok'); }
+    await load();
+  }
+});
+// Second confirmation: flashes red 4 times, Empty stays disabled until "I Acknowledge" is typed (any case).
+async function confirmEmpty(n) {
+  const p = UI.dialog('Empty trash', `<div>Are you sure you want to empty the trash?</div>
+    <div class="err"><b>WARNING:</b> This will permanently delete all ${n} project(s) in the trash. This cannot be undone.</div>
+    <label class="field">Type I Acknowledge to continue<input type="text" class="ack" autocomplete="off" spellcheck="false"></label>`,
+    [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: 'Empty', value: true, kind: 'danger' }]);
+  const d = [...document.querySelectorAll('dialog')].pop(), ok = d.querySelector('footer button.danger'), ack = d.querySelector('.ack');
+  ok.disabled = true;
+  ack.oninput = () => { ok.disabled = ack.value.trim().toLowerCase() !== 'i acknowledge'; };
+  ack.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); if (!ok.disabled) ok.click(); } };
+  d.classList.add('flash');
+  return p;
+}
+document.querySelectorAll('th.sort').forEach(th => th.onclick = () => { sortDir = sortKey === th.dataset.k ? -sortDir : DATES.includes(th.dataset.k) ? -1 : 1; sortKey = th.dataset.k; render(); });
+$('tbl').onclick = UI.guard(async ev => {
+  const mod = ev.target.closest('[data-mod]'), act = ev.target.closest('[data-act]');
+  if (mod) { Windows.open(mod.dataset.mod, open); return; }
+  if (act) return actions[act.dataset.act](projects.find(p => p.folder === open));
+  const tr = ev.target.closest('tr.click'); if (!tr) return;
+  open = open === tr.dataset.f ? null : tr.dataset.f; render();
+});
+
+const fields = p => [
+  { name: 'name', label: 'Name', value: p?.name, required: true, placeholder: 'e.g. Sales Q3' },
+  { name: 'owner', label: 'Owner', type: 'user', value: p?.owner },
+  { name: 'developers', label: 'Developer(s)', type: 'users', value: p?.developers || [] },
+  { name: 'updaters', label: 'Updater(s)', type: 'users', value: p?.updaters || [] },
+  { name: 'description', label: 'Description', type: 'textarea', value: p?.description },
+  { name: 'phase', label: 'Phase', type: 'select', options: P.PHASE, value: p?.phase || 'not-started' },
+  { name: 'status', label: 'Status', type: 'select', options: P.STATUS, value: p?.status ?? 0 },
+  { name: 'classification', label: 'Classification', type: 'select', options: P.CLASSIFICATION, value: p?.classification || 'unclassified' },
+  { name: 'tags', label: 'Tags (comma separated)', value: (p?.tags || []).join(', ') },
+];
+const clean = async v => ({ ...v, status: +v.status || 0, developers: UserPicker.parse(v.developers), updaters: UserPicker.parse(v.updaters), tags: tagsOf(v.tags) });
+const tagsOf = s => (s || '').split(',').map(t => t.trim()).filter(Boolean);
+
+// This window owns the server: closing it stops the server (a reload says hello within 4 s and cancels that).
+const srv = op => fetch(`/api/${op}`, { method: 'POST', keepalive: true, headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});
+srv('hello'); addEventListener('pagehide', () => srv('bye'));
+$('srvctl').onclick = () => fetch('/api/panel', { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});
+$('new').onclick = UI.guard(async () => {
+  await UserPicker.load();
+  const v = await UI.form('New project', fields(), { ok: 'Create' }); if (!v) return;
+  const cfg = await P.create(await clean(v));
+  UI.toast(`Created ${cfg.name} (projects/${cfg.folder})`, 'ok');
+  open = cfg.folder; await load();
+});
+const actions = {
+  async edit(p) {
+    await UserPicker.load();
+    const v = await UI.form(`Edit ${p.name}`, fields(p).filter(f => f.name !== 'name')); if (!v) return;
+    await P.update(p.folder, await clean(v));
+    await ProjectLog.write(p.folder, 'project', 'Details edited');
+    UI.toast('Saved', 'ok'); await load();
+  },
+  async rename(p) {
+    const v = await UI.form(`Rename ${p.name}`, [{ name: 'name', label: 'New name', value: p.name, required: true }], { ok: 'Rename' }); if (!v) return;
+    const cfg = await P.rename(p.folder, v.name);
+    UI.toast(`Renamed to ${cfg.name}`, 'ok'); open = cfg.folder; await load();
+  },
+  async delete(p) {
+    if (!await UI.dialog('Delete project', `<div>Are you sure you want to delete <b>${esc(p.name)}</b>?</div>
+      <div class="muted"><b>NOTE:</b> This only removes the project from the list and moves it to the trash (projects/.trash). If the trash is emptied, the project is permanently deleted.</div>`,
+      [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: 'Delete', value: true, kind: 'danger' }])) return;
+    const r = await P.trash(p.folder);
+    UI.toast(`Moved to ${r.trashed}`, 'ok'); open = null; await load();
+  },
+};
+load();
+</script>
+</body>
+</html>

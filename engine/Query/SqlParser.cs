@@ -1,6 +1,8 @@
-// SQL subset used by the app (DuckDB-style): SELECT/WITH/UNION, joins, GROUP BY [ALL], HAVING, ORDER BY [ALL],
-// LIMIT/OFFSET, window functions, CAST/TRY_CAST/::, CASE, IN, BETWEEN, LIKE/ILIKE, FILTER (WHERE ...),
-// * EXCLUDE (...), table functions read_parquet / read_csv / read_sqlite / range, DESCRIBE.
+// SQL subset used by the app (DuckDB-style): SELECT/WITH [RECURSIVE]/UNION, VALUES, joins, GROUP BY
+// [ALL | ROLLUP | CUBE | GROUPING SETS], HAVING, ORDER BY [ALL], LIMIT/OFFSET, window functions, CAST/TRY_CAST/::, CASE,
+// IN, BETWEEN, LIKE/ILIKE, FILTER (WHERE ...), * EXCLUDE (...), subqueries (scalar, EXISTS, IN, ANY/ALL; correlated
+// on equality), PIVOT, [bracket] names, table functions read_parquet / read_csv / read_sqlite / range, DESCRIBE.
+// Statements (INSERT, UPDATE, CREATE, ...) are parsed in Script.cs.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -115,6 +117,22 @@ namespace NativeDataEngine
         public string Table; public List<string> Exclude = new List<string>();
         public override string Key() { return (Table != null ? Table + "." : "") + "*"; }
     }
+    // Subqueries in expressions (planned by Planner.Unnest as joins).
+    public abstract class SubE : Expr
+    {
+        static int seq; public readonly int Id = System.Threading.Interlocked.Increment(ref seq);
+        public QueryStmt Q;
+    }
+    public sealed class SubqueryE : SubE { public override string Key() { return "subq#" + Id; } }
+    public sealed class ExistsE : SubE { public override string Key() { return "exists#" + Id; } }
+    public sealed class InSubE : SubE { public Expr X; public bool Not; public override string Key() { return "insub#" + Id; } }
+    public sealed class QuantE : SubE { public Expr X; public string Op; public bool All; public override string Key() { return "quant#" + Id; } }
+    // GROUP BY GROUPING SETS ((a, b), (a), ())
+    public sealed class GroupingSetsE : Expr
+    {
+        public List<List<Expr>> Sets = new List<List<Expr>>();
+        public override string Key() { StringBuilder sb = new StringBuilder("sets("); foreach (List<Expr> l in Sets) { sb.Append('('); foreach (Expr e in l) sb.Append(e.Key()).Append(','); sb.Append(')'); } return sb.Append(')').ToString(); }
+    }
     public sealed class OrderItem
     {
         public Expr E; public bool Desc; public int Nulls; // 0 default (NULLS LAST), 1 first, 2 last
@@ -122,13 +140,18 @@ namespace NativeDataEngine
     }
     public sealed class SelectItem { public Expr E; public string Alias; }
 
-    public abstract class TableRef { public string Alias; public List<string> ColAliases; }
+    public abstract class TableRef { public string Alias; public List<string> ColAliases; public bool Hidden; }   // Hidden: columns left out of *
     public sealed class NamedTable : TableRef { public string Name; }
     public sealed class SubqueryTable : TableRef { public QueryStmt Query; }
     public sealed class FuncTable : TableRef
     {
         public string Name; public List<Expr> Args = new List<Expr>();
         public Dictionary<string, Expr> Named = new Dictionary<string, Expr>(StringComparer.OrdinalIgnoreCase);
+    }
+    // src PIVOT (agg(x) FOR col IN (v1 [AS a1], ...))
+    public sealed class PivotRef : TableRef
+    {
+        public TableRef Source; public Call Agg; public Expr For; public List<Expr> Values = new List<Expr>(); public List<string> ValueAliases = new List<string>();
     }
     public sealed class JoinRef : TableRef
     {
@@ -139,15 +162,26 @@ namespace NativeDataEngine
     {
         public bool Distinct; public List<SelectItem> Items = new List<SelectItem>();
         public TableRef From; public Expr Where; public List<Expr> GroupBy = new List<Expr>(); public bool GroupAll; public Expr Having;
+        public string Into;   // SELECT ... INTO table (scripts)
+        public SelectStmt Clone()
+        {
+            SelectStmt c = new SelectStmt(); c.Distinct = Distinct; c.From = From; c.Where = Where; c.GroupBy = new List<Expr>(GroupBy); c.GroupAll = GroupAll; c.Having = Having; c.Into = Into;
+            foreach (SelectItem it in Items) { SelectItem n = new SelectItem(); n.E = it.E; n.Alias = it.Alias; c.Items.Add(n); }
+            return c;
+        }
     }
+    // VALUES (a, b), (c, d): constant rows.
+    public sealed class ValuesBody { public List<List<Expr>> Rows = new List<List<Expr>>(); }
     public sealed class SetOp { public object Left, Right; public string Op; public bool All; }   // Left/Right: SelectStmt, SetOp or QueryStmt
     public sealed class QueryStmt
     {
         public List<KeyValuePair<string, QueryStmt>> With = new List<KeyValuePair<string, QueryStmt>>();
-        public object Body;   // SelectStmt or SetOp
+        public object Body;   // SelectStmt, SetOp, QueryStmt or ValuesBody
         public List<OrderItem> Order = new List<OrderItem>(); public bool OrderAll; public bool OrderAllDesc;
         public long Limit = -1; public long Offset = 0;
         public bool Describe;
+        public List<string> Cols;   // WITH name(a, b) AS (...): column names of a CTE
+        public QueryStmt Copy() { QueryStmt c = new QueryStmt(); c.With = With; c.Body = Body; c.Order = Order; c.OrderAll = OrderAll; c.OrderAllDesc = OrderAllDesc; c.Limit = Limit; c.Offset = Offset; c.Describe = Describe; c.Cols = Cols; return c; }
     }
 
     // ---------- lexer ----------
@@ -171,9 +205,9 @@ namespace NativeDataEngine
                 if (c == '-' && i + 1 < n && s[i + 1] == '-') { while (i < n && s[i] != '\n') i++; continue; }
                 if (c == '/' && i + 1 < n && s[i + 1] == '*') { int e = s.IndexOf("*/", i + 2, StringComparison.Ordinal); i = e < 0 ? n : e + 2; continue; }
                 Token t = new Token(); t.Pos = i;
-                if (char.IsLetter(c) || c == '_')
+                if (char.IsLetter(c) || c == '_' || (c == '#' && i + 1 < n && (char.IsLetter(s[i + 1]) || s[i + 1] == '_' || s[i + 1] == '#')))
                 {
-                    int st = i; while (i < n && (char.IsLetterOrDigit(s[i]) || s[i] == '_' || s[i] == '$')) i++;
+                    int st = i; i++; while (i < n && (char.IsLetterOrDigit(s[i]) || s[i] == '_' || s[i] == '$' || s[i] == '#')) i++;
                     t.T = Tk.Ident; t.V = s.Substring(st, i - st);
                 }
                 else if (c == '"' || c == '`')
@@ -186,6 +220,11 @@ namespace NativeDataEngine
                         sb.Append(s[i++]);
                     }
                     t.T = Tk.QIdent; t.V = sb.ToString();
+                }
+                else if (c == '[' && BracketName(s, i) != null)
+                {
+                    // [name] (SQL Server quoting): a bracket with no comma or quote inside; [1, 2] / ['a'] stay lists.
+                    string nm = BracketName(s, i); i += nm.Length + 2; t.T = Tk.QIdent; t.V = nm;
                 }
                 else if (c == '\'')
                 {
@@ -221,19 +260,30 @@ namespace NativeDataEngine
             return r;
         }
         public static EngineException Err(string m, int pos) { return new EngineException("SQL_SYNTAX", m + " at position " + (pos + 1) + "."); }
+        static string BracketName(string s, int i)
+        {
+            int e = s.IndexOf(']', i + 1);
+            if (e <= i + 1) return null;
+            string inner = s.Substring(i + 1, e - i - 1);
+            if (inner.Trim().Length == 0 || inner.IndexOfAny(new[] { ',', '\'', '"', '[', '\n', '\r' }) >= 0) return null;
+            return inner;
+        }
     }
 
     // ---------- parser ----------
-    public sealed class Parser
+    public sealed partial class Parser
     {
         private readonly List<Token> t;
+        private readonly string src;
         private int p;
         private static readonly HashSet<string> Reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
             "SELECT","FROM","WHERE","GROUP","BY","HAVING","ORDER","LIMIT","OFFSET","UNION","EXCEPT","INTERSECT","JOIN","INNER","LEFT","RIGHT",
             "FULL","OUTER","CROSS","ON","USING","AS","AND","OR","NOT","IN","IS","NULL","BETWEEN","LIKE","ILIKE","CASE","WHEN","THEN","ELSE",
-            "END","ASC","DESC","WITH","DISTINCT","ALL","FILTER","OVER","PARTITION","NULLS","WINDOW","QUALIFY","NATURAL","EXCLUDE","LATERAL" };
+            "END","ASC","DESC","WITH","DISTINCT","ALL","FILTER","OVER","PARTITION","NULLS","WINDOW","QUALIFY","NATURAL","EXCLUDE","LATERAL",
+            "PIVOT","UNPIVOT","INTO","VALUES","SET","INSERT","UPDATE","DELETE","CREATE","DROP","ALTER","TRUNCATE","MERGE","COMMIT","ROLLBACK",
+            "THROW","RAISERROR","GO","PRINT","WHEN","MATCHED","RETURNING" };
 
-        public Parser(string sql) { t = Lexer.Run(sql); p = 0; }
+        public Parser(string sql) { src = sql ?? ""; t = Lexer.Run(src); p = 0; }
 
         public static QueryStmt ParseQuery(string sql)
         {
@@ -287,9 +337,12 @@ namespace NativeDataEngine
                 do
                 {
                     string name = Name();
+                    List<string> cols = null;
+                    if (IsOp("(")) { p++; cols = new List<string>(); do { cols.Add(Name()); } while (AcceptOp(",")); ExpectOp(")"); }   // name(a, b) AS (...)
                     Expect("AS");
-                    Accept("MATERIALIZED");
+                    if (!Accept("MATERIALIZED") && IsKw("NOT") && IsKwAt(1, "MATERIALIZED")) p += 2;
                     ExpectOp("("); QueryStmt sub = Query(); ExpectOp(")");
+                    sub.Cols = cols;
                     q.With.Add(new KeyValuePair<string, QueryStmt>(name, sub));
                 } while (AcceptOp(","));
             }
@@ -328,21 +381,60 @@ namespace NativeDataEngine
         private object SelectTerm()
         {
             if (IsOp("(")) { p++; QueryStmt q = Query(); ExpectOp(")"); return q; }
+            if (IsKw("VALUES")) return ValuesP();
             if (IsKw("FROM")) { p++; SelectStmt fs = new SelectStmt(); fs.From = FromList(); SelectItem si = new SelectItem(); si.E = new StarE(); fs.Items.Add(si); if (Accept("WHERE")) fs.Where = Expression(); return fs; }
             Expect("SELECT");
             SelectStmt s = new SelectStmt();
             if (Accept("DISTINCT")) s.Distinct = true; else Accept("ALL");
             do { s.Items.Add(SelectItemP()); } while (AcceptOp(",") && !IsKw("FROM"));
+            if (Accept("INTO")) s.Into = TableName();
             if (Accept("FROM")) s.From = FromList();
             if (Accept("WHERE")) s.Where = Expression();
             if (Accept("GROUP"))
             {
                 Expect("BY");
                 if (IsKw("ALL")) { p++; s.GroupAll = true; }
-                else do { s.GroupBy.Add(Expression()); } while (AcceptOp(","));
+                else do { s.GroupBy.Add(IsKw("GROUPING") && IsKwAt(1, "SETS") ? GroupingSets() : Expression()); } while (AcceptOp(","));
             }
             if (Accept("HAVING")) s.Having = Expression();
             return s;
+        }
+        private ValuesBody ValuesP()
+        {
+            Expect("VALUES");
+            ValuesBody v = new ValuesBody();
+            do
+            {
+                ExpectOp("(");
+                List<Expr> row = new List<Expr>();
+                do { row.Add(Expression()); } while (AcceptOp(","));
+                ExpectOp(")");
+                if (v.Rows.Count > 0 && row.Count != v.Rows[0].Count) throw Err("VALUES rows have different numbers of values (" + v.Rows[0].Count + " and " + row.Count + ")");
+                v.Rows.Add(row);
+            } while (AcceptOp(","));
+            return v;
+        }
+        // GROUPING SETS ((a, b), (a), ()) / (a, b) / a
+        private GroupingSetsE GroupingSets()
+        {
+            p += 2; GroupingSetsE g = new GroupingSetsE();
+            ExpectOp("(");
+            do
+            {
+                List<Expr> set = new List<Expr>();
+                if (AcceptOp("(")) { if (!IsOp(")")) do { set.Add(Expression()); } while (AcceptOp(",")); ExpectOp(")"); }
+                else set.Add(Expression());
+                g.Sets.Add(set);
+            } while (AcceptOp(","));
+            ExpectOp(")");
+            return g;
+        }
+        // name or schema.name (schema dropped)
+        public string TableName()
+        {
+            string name = Name();
+            while (IsOp(".") && (Peek(1).T == Tk.Ident || Peek(1).T == Tk.QIdent)) { p++; name = Name(); }
+            return name;
         }
         private SelectItem SelectItemP()
         {
@@ -419,7 +511,7 @@ namespace NativeDataEngine
             if (IsOp("("))
             {
                 p++;
-                if (IsKw("SELECT") || IsKw("WITH") || IsKw("FROM") || IsOp("("))
+                if (IsKw("SELECT") || IsKw("WITH") || IsKw("FROM") || IsKw("VALUES") || IsOp("("))
                 {
                     SubqueryTable sq = new SubqueryTable(); sq.Query = Query(); ExpectOp(")"); r = sq;
                 }
@@ -450,6 +542,23 @@ namespace NativeDataEngine
             if (Accept("AS")) r.Alias = Name();
             else if (Cur.T == Tk.QIdent || (Cur.T == Tk.Ident && !Reserved.Contains(Cur.V))) r.Alias = Name();
             if (r.Alias != null && IsOp("(")) { p++; r.ColAliases = new List<string>(); do { r.ColAliases.Add(Name()); } while (AcceptOp(",")); ExpectOp(")"); }   // t(a, b): rename columns
+            while (IsKw("PIVOT"))
+            {
+                p++; PivotRef pv = new PivotRef(); pv.Source = r;
+                ExpectOp("(");
+                Expr agg = Expression(); pv.Agg = agg as Call;
+                if (pv.Agg == null || !Functions.Aggregates.Contains(pv.Agg.Name)) throw Err("PIVOT needs an aggregate, e.g. PIVOT (SUM(x) FOR col IN (...))");
+                Expect("FOR"); pv.For = Postfix(); Expect("IN"); ExpectOp("(");
+                do
+                {
+                    pv.Values.Add(Expression());
+                    pv.ValueAliases.Add(Accept("AS") ? Name() : null);
+                } while (AcceptOp(","));
+                ExpectOp(")"); ExpectOp(")");
+                if (Accept("AS")) pv.Alias = Name();
+                else if (Cur.T == Tk.QIdent || (Cur.T == Tk.Ident && !Reserved.Contains(Cur.V))) pv.Alias = Name();
+                r = pv;
+            }
             return r;
         }
 
@@ -480,6 +589,10 @@ namespace NativeDataEngine
                 if (Cur.T == Tk.Op && (Cur.V == "=" || Cur.V == "==" || Cur.V == "<>" || Cur.V == "!=" || Cur.V == "<" || Cur.V == ">" || Cur.V == "<=" || Cur.V == ">="))
                 {
                     string op = t[p++].V; if (op == "==") op = "="; if (op == "!=") op = "<>";
+                    if ((IsKw("ANY") || IsKw("SOME") || IsKw("ALL")) && Peek(1).T == Tk.Op && Peek(1).V == "(" && (IsKwAt(2, "SELECT") || IsKwAt(2, "WITH")))
+                    {
+                        QuantE qe = new QuantE(); qe.All = IsKw("ALL"); qe.Op = op; qe.X = l; p += 2; qe.Q = Query(); ExpectOp(")"); l = qe; continue;
+                    }
                     BinOp b = new BinOp(); b.Op = op; b.L = l; b.R = Concat(); l = b; continue;
                 }
                 if (IsKw("IS"))
@@ -496,7 +609,7 @@ namespace NativeDataEngine
                 if (Accept("IN"))
                 {
                     InE e = new InE(); e.X = l; e.Not = neg; ExpectOp("(");
-                    if (IsKw("SELECT")) throw Err("IN (SELECT ...) is not supported; use a JOIN");
+                    if (IsKw("SELECT") || IsKw("WITH")) { InSubE se = new InSubE(); se.X = l; se.Not = neg; se.Q = Query(); ExpectOp(")"); l = se; continue; }
                     if (!IsOp(")")) do { e.List.Add(Expression()); } while (AcceptOp(","));
                     ExpectOp(")"); l = e; continue;
                 }
@@ -580,7 +693,7 @@ namespace NativeDataEngine
             if (c.T == Tk.Op && c.V == "(")
             {
                 p++;
-                if (IsKw("SELECT") || IsKw("WITH")) throw Err("Subqueries in expressions are not supported; use a JOIN");
+                if (IsKw("SELECT") || IsKw("WITH")) { SubqueryE sq = new SubqueryE(); sq.Q = Query(); ExpectOp(")"); return sq; }
                 Expr e = Expression();
                 if (IsOp(","))
                 {
@@ -628,7 +741,9 @@ namespace NativeDataEngine
                 case "INTERVAL":
                     if (Peek(1).T == Tk.Str || Peek(1).T == Tk.Num) throw Err("INTERVAL is not supported; use date_add / date_diff");
                     break;
-                case "EXISTS": throw Err("EXISTS is not supported; use a JOIN");
+                case "EXISTS":
+                    if (Peek(1).V == "(") { p += 2; ExistsE ex = new ExistsE(); ex.Q = Query(); ExpectOp(")"); return ex; }
+                    break;
                 case "EXTRACT":
                     if (Peek(1).V == "(")
                     {

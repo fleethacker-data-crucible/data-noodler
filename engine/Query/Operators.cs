@@ -347,6 +347,94 @@ namespace NativeDataEngine
         }
     }
 
+    // Working table of a recursive CTE: the rows of the previous round.
+    public sealed class WorkSource : Source
+    {
+        List<Batch> cur = new List<Batch>();
+        public WorkSource(Schema s) { Schema = s; }
+        public void Set(List<Batch> b) { cur = b; }
+        public override int Units(ExecCtx ctx) { return cur.Count; }
+        public override IEnumerable<Batch> RunUnit(ExecCtx ctx, int unit) { yield return cur[unit]; }
+        public override long KnownRows(ExecCtx ctx) { long n = 0; foreach (Batch b in cur) n += b.Rows; return n; }
+    }
+
+    // WITH RECURSIVE: anchor rows, then the recursive part over the previous round's rows until a round adds none.
+    // UNION (not ALL) drops rows already produced.
+    public sealed class RecursiveOp : Op
+    {
+        readonly Op anchor, rec; readonly WorkSource work; readonly bool distinct;
+        public Op Anchor { get { return anchor; } }
+        public Op Rec { get { return rec; } }
+        public const int MaxRounds = 100000;
+        public RecursiveOp(Op anchor, Op rec, WorkSource work, bool distinct, Schema s) { this.anchor = anchor; this.rec = rec; this.work = work; this.distinct = distinct; Schema = s; }
+        public override IEnumerable<Batch> Run(ExecCtx ctx)
+        {
+            using (MemoryLease lease = new MemoryLease(ctx.Mem, "Recursive query"))
+            {
+                HashSet<string> seen = distinct ? new HashSet<string>(StringComparer.Ordinal) : null;
+                List<Batch> cur = Keep(anchor.Run(ctx), seen, lease);
+                for (int round = 0; ; round++)
+                {
+                    long n = 0;
+                    foreach (Batch b in cur) { n += b.Rows; yield return b; }
+                    if (n == 0) yield break;
+                    if (round >= MaxRounds) throw new EngineException("SQL_RECURSION_LIMIT", "A recursive query ran " + MaxRounds + " rounds without finishing; check its stop condition.");
+                    work.Set(cur);
+                    OpTree.ResetJoins(rec);
+                    cur = Keep(rec.Run(ctx), seen, lease);
+                }
+            }
+        }
+        List<Batch> Keep(IEnumerable<Batch> src, HashSet<string> seen, MemoryLease lease)
+        {
+            List<Batch> r = new List<Batch>();
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            foreach (Batch b0 in src)
+            {
+                Column[] cs = new Column[Schema.Count];
+                for (int k = 0; k < cs.Length; k++) cs[k] = b0.Cols[k].Type.SameAs(Schema[k].Type) ? b0.Cols[k] : Cast.To(b0.Cols[k], Schema[k].Type, false);
+                Batch b = new Batch(Schema, cs, b0.Rows);
+                if (seen != null)
+                {
+                    int[] idx = new int[b.Rows]; int n = 0;
+                    for (int i = 0; i < b.Rows; i++)
+                    {
+                        sb.Length = 0;
+                        foreach (Column c in cs) { string v = Values.Text(c, i); sb.Append(v == null ? "\u0002" : v).Append('\u0001'); }
+                        if (seen.Add(sb.ToString())) idx[n++] = i;
+                    }
+                    if (n < b.Rows) b = b.Take(idx, n);
+                }
+                if (b.Rows > 0) { lease.Add(b.Bytes); r.Add(b); }
+            }
+            return r;
+        }
+    }
+
+    public static class OpTree
+    {
+        // Hash join build sides are cached per run; a recursive round must rebuild them (they may read the working table).
+        public static void ResetJoins(Op op)
+        {
+            if (op == null) return;
+            ChainOp ch = op as ChainOp;
+            if (ch != null)
+            {
+                OpSource os = ch.Src as OpSource; if (os != null) ResetJoins(os.Inner);
+                foreach (ITransform t in ch.Steps) { JoinProbe j = t as JoinProbe; if (j != null) { j.Hash.Reset(); ResetJoins(j.Hash.RightOp); } }
+                return;
+            }
+            AggOp ag = op as AggOp; if (ag != null) { ResetJoins(ag.Child); return; }
+            SortOp so = op as SortOp; if (so != null) { ResetJoins(so.Child); return; }
+            LimitOp li = op as LimitOp; if (li != null) { ResetJoins(li.Child); return; }
+            WindowOp wo = op as WindowOp; if (wo != null) { ResetJoins(wo.Child); return; }
+            RenameOp rn = op as RenameOp; if (rn != null) { ResetJoins(rn.Child); return; }
+            OuterJoinOp oj = op as OuterJoinOp; if (oj != null) { ResetJoins(oj.Probe); return; }
+            UnionOp un = op as UnionOp; if (un != null) { foreach (Op p in un.Parts) ResetJoins(p); return; }
+            RecursiveOp ro = op as RecursiveOp; if (ro != null) { ResetJoins(ro.Anchor); ResetJoins(ro.Rec); }
+        }
+    }
+
     // Renames/retypes the schema without touching data (subquery aliases).
     public sealed class RenameOp : Op
     {

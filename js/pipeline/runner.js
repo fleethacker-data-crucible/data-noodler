@@ -1,51 +1,59 @@
-// Runs a project's pipeline on the native engine. Global: PipelineRunner. Needs steps.js, projects.js, engine-client.js.
-//   await PipelineRunner.views(ctx, pipe, upto)          datasets + steps (0..upto) as engine views { name: sql }
-//   await PipelineRunner.run(ctx, pipe, log, changed)    the engine runs the step DAG and writes every output step to
-//                                                        data/source/<name>/ (atomic, with lineage); records the run.
-//                                                        changed = dataset names re-imported by Update: only outputs
-//                                                        downstream of them run (null = all outputs).
+// Runs a project's transform on the native engine. Global: PipelineRunner. Needs projects.js, engine-client.js.
+// pipeline/pipeline.json = { version: 2, queries: [{ id, name, sql }], active: id, output: 'CLEAN_...', rev, updated }.
+// Each query is a SQL script (one SELECT, or statements ending in a SELECT; see engine/Core/Script.cs). The active query
+// builds the output dataset.
+//   await PipelineRunner.load(ctx)                   pipeline.json (older step lists are converted)
+//   await PipelineRunner.views(ctx)                  the project's datasets as engine views { name: sql }
+//   PipelineRunner.active(pipe)                      the active query, or undefined
+//   await PipelineRunner.run(ctx, pipe, log, changed, onJob)   writes the active query's result to data/source/<output>/
+//                                                    (Parquet parts, atomic) and records the run. changed: unused (the
+//                                                    output always rebuilds), kept for Update.
 const PipelineRunner = (() => {
-  const S = PipelineSteps;
   const file = ctx => `${ctx.dir}/pipeline/pipeline.json`, runsFile = ctx => `${ctx.dir}/pipeline/runs.json`;
-  const load = async ctx => { try { return await DNFS.readJSONOr(file(ctx), { version: 1, steps: [] }); } catch { return { version: 1, steps: [] }; } };
+  const blank = () => ({ version: 2, queries: [], active: null, output: '' });
   const runs = async ctx => { try { return await DNFS.readJSONOr(runsFile(ctx), []); } catch { return []; } };
 
-  async function views(ctx, pipe, upto = pipe.steps.length - 1) {
-    await ctx.reload();
-    const v = Engine.views(ctx.cfg.datasets || []);
-    for (const s of pipe.steps.slice(0, upto + 1)) {
-      try { v[s.name] = S.sqlOf(s); } catch (e) { throw new Error(`Step "${s.name}": ${e.message}`); }
-    }
-    return v;
+  // Version 1 (ordered steps, each writing a dataset) -> version 2 (queries; the last step becomes the active one).
+  function migrate(p) {
+    if (!p || typeof p !== 'object') return blank();
+    if (p.version === 2 && Array.isArray(p.queries)) return p;
+    const steps = Array.isArray(p.steps) ? p.steps : [];
+    const sqlOf = s => s.config?.query ?? (typeof PipelineSteps !== 'undefined' ? (() => { try { return PipelineSteps.sqlOf(s); } catch { return ''; } })() : '');
+    const queries = steps.map(s => ({ id: s.id || crypto.randomUUID(), name: s.title || s.name || '', sql: sqlOf(s) }));
+    const last = steps[steps.length - 1];
+    let output = last?.name ? String(last.name).toUpperCase().replace(/\s/g, '_') : '';
+    if (output && !output.startsWith('CLEAN_')) output = 'CLEAN_' + output;
+    return { version: 2, queries, active: queries.length ? queries[queries.length - 1].id : null, output, rev: p.rev || 0, updated: p.updated };
   }
+  const load = async ctx => { try { return migrate(await DNFS.readJSONOr(file(ctx), blank())); } catch { return blank(); } };
 
-  // Returns the run record { at, ms, ok, outputs: [{ name, rows, before }], skipped, error }.
-  async function run(ctx, pipe, log = () => {}, changed = null) {
+  async function views(ctx) { await ctx.reload(); return Engine.views(ctx.cfg.datasets || []); }
+  const active = pipe => (pipe.queries || []).find(q => q.id === pipe.active);
+
+  // Returns the run record { at, ms, ok, outputs: [{ name, rows, before }], error }.
+  async function run(ctx, pipe, log = () => {}, changed = null, onJob = () => {}) {
     const t0 = performance.now(), rec = { at: new Date().toISOString(), outputs: [], ok: true };
     try {
+      const q = active(pipe);
+      if (!q) throw new Error('Set an active query first.');
+      if (!q.sql.trim()) throw new Error(`Query "${q.name}" is empty.`);
+      const name = pipe.output;
+      if (!/^CLEAN_[A-Z0-9_]+$/.test(name || '')) throw new Error('The output dataset name must be CLEAN_ followed by letters, digits or _.');
       const cfg = await ctx.reload(), ds = cfg.datasets || [];
-      for (const s of pipe.steps.filter(x => x.output)) {
-        const existing = ds.find(d => d.name === s.name);
-        if (existing && existing.source?.kind !== 'pipeline') throw new Error(`"${s.name}" is an imported dataset; rename the step.`);
-      }
-      const nodes = pipe.steps.map(s => {
-        let sql; try { sql = S.sqlOf(s); } catch (e) { throw new Error(`Step "${s.name}": ${e.message}`); }
-        return { id: s.id, name: s.name, sql, output: !!s.output, dest: `${ctx.dir}/data/source/${s.name}` };
-      });
-      const spec = { name: ctx.folder, version: pipe.rev || 0, datasets: Object.fromEntries(ds.map(d => [d.name, d.path])), nodes };
-      if (changed) spec.changed = changed;
+      const before = ds.find(d => d.name === name);
+      if (before && before.source?.kind !== 'pipeline') throw new Error(`"${name}" is an imported dataset; pick another output name.`);
       let lastStage = '';
-      const r = await Engine.pipeline(spec, j => { if (j.stage && j.stage !== lastStage) { lastStage = j.stage; log(`${j.stage}…`); } });
-      for (const o of r.outputs) {
-        const before = ds.find(d => d.name === o.step), step = pipe.steps.find(s => s.name === o.step);
-        if (before && before.path !== o.path) await DNFS.remove(before.path, { recursive: !/\.parquet$/.test(before.path) }).catch(() => {});   // older runs wrote elsewhere
-        await Projects.upsertDataset(ctx.folder, { name: o.step, path: o.path, parts: o.files, stage: 'source', rows: o.rowCount, bytes: o.bytes, columns: Engine.columnsOf(o),
-          version: o.version, imported: new Date().toISOString(), source: { kind: 'pipeline', step: step?.id } });
-        rec.outputs.push({ name: o.step, rows: o.rowCount, before: before?.rows ?? null });
-        log(`${o.step}: ${UI.num(o.rowCount)} rows, ${UI.bytes(o.bytes)}`, 'ok');
-      }
-      rec.skipped = r.skipped || [];
-      if (rec.skipped.length) log(`Unchanged, not re-run: ${rec.skipped.join(', ')}`);
+      log(`Building ${name} from query "${q.name}"…`);
+      const meta = { lineage: { transformQuery: q.id, transformName: q.name, pipelineVersion: pipe.rev || 0 } };
+      const w = await Engine.write({ sql: q.sql, views: Engine.views(ds), dest: `${ctx.dir}/data/source/${name}`, meta }, j => {
+        onJob(j);
+        if (j.stage && j.stage !== lastStage) { lastStage = j.stage; log(`${j.stage}…`); }
+      });
+      if (before && before.path !== w.path) await DNFS.remove(before.path, { recursive: !/\.parquet$/.test(before.path) }).catch(() => {});
+      await Projects.upsertDataset(ctx.folder, { name, path: w.path, parts: w.files, stage: 'source', rows: w.rowCount, bytes: w.bytes, columns: Engine.columnsOf(w),
+        version: w.version, imported: new Date().toISOString(), source: { kind: 'pipeline', query: q.id } });
+      rec.outputs.push({ name, rows: w.rowCount, before: before?.rows ?? null });
+      log(`${name}: ${UI.num(w.rowCount)} rows, ${(w.columns || []).length} columns, ${(w.files || []).length} part(s), ${UI.bytes(w.bytes)}`, 'ok');
     } catch (e) { rec.ok = false; rec.error = e.message; }
     rec.ms = Math.round(performance.now() - t0);
     const all = await runs(ctx); all.push(rec); await DNFS.writeJSON(runsFile(ctx), all.slice(-100));
@@ -53,5 +61,5 @@ const PipelineRunner = (() => {
     await ctx.reload();
     return rec;
   }
-  return { load, runs, views, run, file };
+  return { load, runs, views, run, file, active, migrate };
 })();

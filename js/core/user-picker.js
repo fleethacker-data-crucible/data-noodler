@@ -18,17 +18,13 @@ const UserPicker = (() => {
   }
   const parse = v => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 
+  // A + before the label that drops the searchable list; picked names show as removable chips below.
   function html(f) {
-    if (f.multi) {
-      const list = Array.isArray(f.value) ? f.value : parse(f.value);
-      return `<div class="field upick multi" data-name="${f.name}">${esc(f.label)}
-        <input type="hidden" name="${f.name}" value="${esc(JSON.stringify(list))}">
-        <div class="ubox"><button type="button" class="uopen">Add</button>${menu()}</div>
-        <div class="chips"></div></div>`;
-    }
-    return `<div class="field upick" data-name="${f.name}">${esc(f.label)}
-      <input type="hidden" name="${f.name}" value="${esc(f.value || '')}">
-      <div class="ubox"><button type="button" class="usel uopen"><span></span><i>▾</i></button>${menu()}</div></div>`;
+    const v = f.multi ? JSON.stringify(Array.isArray(f.value) ? f.value : parse(f.value)) : (f.value || '');
+    return `<div class="field upick${f.multi ? ' multi' : ''}" data-name="${f.name}">
+      <div class="uhead"><div class="ubox"><button type="button" class="uopen uplus" title="${f.multi ? `Add to ${esc(f.label)}` : `Choose the ${esc(f.label).toLowerCase()}`}"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>${menu()}</div>${esc(f.label)}</div>
+      <input type="hidden" name="${f.name}" value="${esc(v)}">
+      <div class="chips"></div></div>`;
   }
   const menu = () => `<div class="umenu" hidden><input type="search" class="uq" placeholder="Search users"><div class="uitems"></div></div>`;
 
@@ -38,8 +34,7 @@ const UserPicker = (() => {
       const m = el.querySelector('.umenu'), q = el.querySelector('.uq'), items = el.querySelector('.uitems');
       const chosen = () => multi ? parse(hidden.value) : [hidden.value].filter(Boolean);
       const show = () => {
-        if (multi) el.querySelector('.chips').innerHTML = [...chosen()].sort((a, b) => a.localeCompare(b)).map(n => `<span class="chip">${esc(n)}<button type="button" data-rm="${esc(n)}" title="Remove">✕</button></span>`).join('');
-        else el.querySelector('.usel span').innerHTML = hidden.value ? esc(hidden.value) : '<span class="muted">Select owner</span>';
+        el.querySelector('.chips').innerHTML = [...chosen()].sort((a, b) => a.localeCompare(b)).map(n => `<span class="chip">${esc(n)}<button type="button" data-rm="${esc(n)}" title="Remove">✕</button></span>`).join('');
       };
       const fill = () => {
         const s = q.value.trim().toLowerCase(), have = chosen();
@@ -61,9 +56,9 @@ const UserPicker = (() => {
         hidden.value = multi ? JSON.stringify([...chosen(), n].sort((a, b) => a.localeCompare(b))) : n;
         close(); show();
       };
-      if (multi) el.querySelector('.chips').onclick = ev => {
+      el.querySelector('.chips').onclick = ev => {
         const n = ev.target.closest('[data-rm]')?.dataset.rm; if (n == null) return;
-        hidden.value = JSON.stringify(chosen().filter(x => x !== n)); show();
+        hidden.value = multi ? JSON.stringify(chosen().filter(x => x !== n)) : ''; show();
       };
       // Clicks anywhere outside close it (backdrop too); focus moving to another field closes it,
       // but focus landing on the dialog itself (a click on plain space) is handled by the click.

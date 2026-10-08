@@ -3,6 +3,8 @@
 //   GET  status                       engine, workers, memory
 //   POST query    {sql | query, views, limit, workers}  -> {cols, types, rows, rowCount, truncated, ms}  (query = QuerySpec)
 //   POST describe {sql, views}                          -> {columns}
+//   POST check    {sql, views}                          -> {errors: [{pos, end, line, message, code}]}  (editor)
+//   POST preview  {sql, views, limit, workers}          -> query result + {count}  (sql may be a script)
 //   POST open     {src, table}                          -> {kind, tables, columns, rows, size, modified}
 //   POST write    {sql, views, dest, meta, codec}       -> {jobId}   (partitioned Parquet dataset)
 //   POST export   {sql, views, to, format, table}       -> {jobId}   (csv / parquet / sqlite file)
@@ -94,6 +96,14 @@ namespace NativeDataEngine
                         QueryResult r = e.Query(sql, Views(req), (int)Json.Long(req, "limit", 0), (int)Json.Long(req, "workers", 0), CancellationToken.None);
                         return ResultJson(r);
                     }
+                case "preview":
+                    {
+                        long n;
+                        QueryResult r = e.Preview(Need(req, "sql"), Views(req), (int)Json.Long(req, "limit", 100), (int)Json.Long(req, "workers", 0), CancellationToken.None, out n);
+                        string j = ResultJson(r);
+                        return j.Substring(0, j.Length - 1) + ",\"count\":" + n + "}";
+                    }
+                case "check": return Ok(e.Check(Json.Str(req, "sql") ?? "", Views(req)));
                 case "describe":
                     {
                         Dictionary<string, object> d = new Dictionary<string, object>();

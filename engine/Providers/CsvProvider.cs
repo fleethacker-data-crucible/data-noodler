@@ -2,6 +2,8 @@
 // UTF-8 BOM), delimiter + header detection, type inference on a sample, explicit types, empty = NULL.
 // Never loads the file: reads a buffer at a time and emits batches of BatchRowCount rows.
 // A value that does not fit the inferred type widens that column (TypeWidenException) and the query restarts.
+// Parallel: a big file is cut into byte ranges that start on record boundaries (one quote-aware byte scan, cached per
+// file version); each range is one unit, parsed on its own worker, results kept in file order.
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -83,6 +85,28 @@ namespace NativeDataEngine
         public void Dispose() { r.Dispose(); }
     }
 
+    // Read-only view of the next `length` bytes of a stream (one CSV range).
+    sealed class RangeStream : Stream
+    {
+        readonly Stream s; readonly long length; long done;
+        public RangeStream(Stream s, long length) { this.s = s; this.length = length; }
+        public override int Read(byte[] b, int o, int n)
+        {
+            long left = length - done; if (left <= 0) return 0;
+            int r = s.Read(b, o, (int)Math.Min(n, left)); done += r; return r;
+        }
+        public override bool CanRead { get { return true; } }
+        public override bool CanSeek { get { return false; } }
+        public override bool CanWrite { get { return false; } }
+        public override long Length { get { return length; } }
+        public override long Position { get { return done; } set { throw new NotSupportedException(); } }
+        public override void Flush() { }
+        public override long Seek(long o, SeekOrigin k) { throw new NotSupportedException(); }
+        public override void SetLength(long v) { throw new NotSupportedException(); }
+        public override void Write(byte[] b, int o, int n) { throw new NotSupportedException(); }
+        protected override void Dispose(bool d) { if (d) s.Dispose(); base.Dispose(d); }
+    }
+
     public sealed class CsvShape
     {
         public char Delimiter; public bool Header; public Schema Schema; public long Size; public DateTime Modified;
@@ -101,7 +125,63 @@ namespace NativeDataEngine
             shape = Detect(path, opt);
             Schema = shape.Schema;
         }
-        public override int Units(ExecCtx ctx) { return 1; }
+        HashSet<int> needed;   // null = all; columns the query never reads are not converted
+        public void SetNeeded(HashSet<int> cols) { needed = cols; }
+
+        const long MinSplit = 16L << 20;   // files under 16 MB stay one unit
+        static readonly ConcurrentDictionary<string, long[]> splits = new ConcurrentDictionary<string, long[]>(StringComparer.OrdinalIgnoreCase);
+        long[] starts;   // record-boundary byte offsets; unit u = [starts[u], starts[u + 1])
+
+        public override int Units(ExecCtx ctx)
+        {
+            if (starts == null)
+            {
+                int workers = ctx != null && ctx.Parallel > 0 ? ctx.Parallel : 1;
+                string key = path + "|" + shape.Size + "|" + shape.Modified.Ticks + "|" + shape.Delimiter + opt.Quote + "|" + workers;
+                long[] s;
+                if (!splits.TryGetValue(key, out s)) { s = Split(path, shape.Size, shape.Delimiter, opt.Quote, workers); splits[key] = s; }
+                starts = s;
+            }
+            return starts.Length - 1;
+        }
+
+        // Cut points: about 4 ranges per worker (min 8 MB each), each moved forward to the next record start.
+        // The scan follows the parser's quote rules on raw bytes (quote, delimiter and newline are ASCII, so UTF-8 is safe).
+        static long[] Split(string path, long size, char delimCh, char quoteCh, int workers)
+        {
+            if (size < MinSplit || workers <= 1 || delimCh > 127 || quoteCh > 127) return new long[] { 0, size };
+            long target = Math.Max(8L << 20, size / (workers * 4));
+            List<long> at = new List<long>(); at.Add(0);
+            byte quote = (byte)quoteCh, delim = (byte)delimCh;
+            byte[] buf = new byte[1 << 20];
+            bool inQ = false, maybeClose = false, fieldStart = true;
+            long next = target, pos = 0;
+            using (Stream st = OpenRead(path))
+            {
+                int n;
+                while ((n = st.Read(buf, 0, buf.Length)) > 0)
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        byte c = buf[i];
+                        if (maybeClose) { maybeClose = false; if (c == quote) continue; inQ = false; }
+                        if (inQ) { if (c == quote) maybeClose = true; continue; }
+                        if (c == (byte)'\n')
+                        {
+                            fieldStart = true;
+                            long p = pos + i + 1;
+                            if (p >= next && p < size) { at.Add(p); next = p + target; }
+                            continue;
+                        }
+                        if (c == quote && fieldStart) { inQ = true; fieldStart = false; continue; }
+                        fieldStart = c == (byte)'\r' || c == delim;
+                    }
+                    pos += n;
+                }
+            }
+            at.Add(size);
+            return at.ToArray();
+        }
 
         static Stream OpenRead(string path)
         {
@@ -244,11 +324,14 @@ namespace NativeDataEngine
         public override IEnumerable<Batch> RunUnit(ExecCtx ctx, int unit)
         {
             Schema s = Schema; int w = s.Count;
-            using (Stream st = OpenRead(path))
+            Units(ctx);
+            long from = starts[unit], to = starts[unit + 1], reported = 0;
+            Stream raw = OpenRead(path); raw.Seek(from, SeekOrigin.Begin);
+            using (Stream st = new RangeStream(raw, to - from))
             using (CsvParser p = new CsvParser(st, shape.Delimiter, opt.Quote))
             {
                 List<string> f = new List<string>();
-                if (shape.Header) p.Next(f);
+                if (shape.Header && unit == 0) p.Next(f);
                 ColumnBuilder[] cb = NewBuilders(s, per);
                 int rows = 0;
                 while (p.Next(f))
@@ -256,6 +339,7 @@ namespace NativeDataEngine
                     if (f.Count == 1 && w > 1 && f[0].Length == 0) continue;
                     for (int c = 0; c < w; c++)
                     {
+                        if (needed != null && !needed.Contains(c)) continue;
                         if (c >= f.Count) { cb[c].AddNull(); continue; }
                         bool q; string v = CsvParser.Clean(f[c], out q);
                         Add(cb[c], s[c].Type, v, q, c, ctx);
@@ -264,15 +348,24 @@ namespace NativeDataEngine
                     {
                         yield return Build(s, cb, rows);
                         cb = NewBuilders(s, per); rows = 0;
-                        if (ctx.Job != null) ctx.Job.SetBytes(st.Position);
+                        if (ctx.Job != null) { long now = st.Position; ctx.Job.AddBytes(now - reported); reported = now; }
                     }
                 }
                 if (rows > 0) yield return Build(s, cb, rows);
-                if (ctx.Job != null) ctx.Job.SetBytes(st.Length);
+                if (ctx.Job != null) ctx.Job.AddBytes(st.Length - reported);
             }
         }
         static ColumnBuilder[] NewBuilders(Schema s, int per) { ColumnBuilder[] cb = new ColumnBuilder[s.Count]; for (int c = 0; c < cb.Length; c++) cb[c] = new ColumnBuilder(s[c].Type, Math.Min(per, 4096)); return cb; }
-        static Batch Build(Schema s, ColumnBuilder[] cb, int rows) { Column[] cs = new Column[cb.Length]; for (int c = 0; c < cs.Length; c++) cs[c] = cb[c].ToColumn(); return new Batch(s, cs, rows); }
+        Batch Build(Schema s, ColumnBuilder[] cb, int rows)
+        {
+            Column[] cs = new Column[cb.Length];
+            for (int c = 0; c < cs.Length; c++)
+            {
+                if (needed != null && !needed.Contains(c)) { Column ph = new Column(DataType.Null, 0); ph.Type = s[c].Type; ph.Length = rows; ph.Nulls = null; cs[c] = ph; }   // never read: length only
+                else cs[c] = cb[c].ToColumn();
+            }
+            return new Batch(s, cs, rows);
+        }
 
         void Add(ColumnBuilder b, DataType t, string v, bool quoted, int c, ExecCtx ctx)
         {

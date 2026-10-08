@@ -66,6 +66,15 @@ namespace NativeDataEngine
         }
         public int Next(int j) { return rkeys.Count == 0 ? (j + 1 < rb.Rows ? j + 1 : -1) : next[j]; }
         public void Release() { if (lease != null) lease.Dispose(); }
+        // Forget the build side so the next run collects it again (recursive CTE rounds).
+        public void Reset()
+        {
+            lock (gate)
+            {
+                if (lease != null) { lease.Dispose(); lease = null; }
+                rb = null; lmap = null; smap = null; gmap = null; next = null; Matched = null; built = false;
+            }
+        }
     }
 
     public sealed class JoinProbe : ITransform
@@ -74,6 +83,7 @@ namespace NativeDataEngine
         public JoinProbe(HashJoin h, List<BExpr> lkeys, BExpr residual, string kind, Schema outS)
         { this.h = h; this.lkeys = lkeys; this.residual = residual != null ? BCast.To(residual, DataType.Bool) : null; this.kind = kind; this.outS = outS; }
         public Schema Out { get { return outS; } }
+        public HashJoin Hash { get { return h; } }
         public void Build(ExecCtx ctx) { h.Build(ctx); }
 
         // Column pruning: returns the left columns needed, and prunes the right input.

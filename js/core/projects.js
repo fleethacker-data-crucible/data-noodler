@@ -50,14 +50,14 @@ const Projects = (() => {
   const get = async folder => migrate(await DNFS.readJSON(cfgPath(folder)));
   async function save(cfg) { cfg.modified = new Date().toISOString(); await DNFS.writeJSON(cfgPath(cfg.folder), cfg); return cfg; }
 
-  async function create({ name, owner = '', developers = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified', tags = [] }) {
+  async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified', tags = [] }) {
     const err = validName(name); if (err) throw new Error(err);
     const folder = slug(name);
     if (await DNFS.exists(`${ROOT}/${folder}`)) throw new Error(`A project folder "${folder}" already exists.`);
     for (const d of LAYOUT) await DNFS.mkdir(`${ROOT}/${folder}/${d}`);
     const now = new Date().toISOString();
     const cfg = {
-      schemaVersion: 1, id: id(), name: name.trim(), folder, description, owner, developers, phase, status: +status || 0, classification, tags,
+      schemaVersion: 1, id: id(), name: name.trim(), folder, description, owner, developers, updaters, phase, status: +status || 0, classification, tags,
       created: now, modified: now,
       modules: Object.fromEntries(MODULES.map(m => [m, { lastRun: null }])),
       datasets: [], settings: {},
@@ -69,7 +69,7 @@ const Projects = (() => {
 
   async function update(folder, patch) {
     const cfg = await get(folder);
-    for (const k of ['name', 'owner', 'developers', 'description', 'phase', 'status', 'classification', 'tags', 'settings', 'datasets', 'modules']) if (k in patch) cfg[k] = patch[k];
+    for (const k of ['name', 'owner', 'developers', 'updaters', 'description', 'phase', 'status', 'classification', 'tags', 'settings', 'datasets', 'modules']) if (k in patch) cfg[k] = patch[k];
     return save(cfg);
   }
 
@@ -96,7 +96,18 @@ const Projects = (() => {
     return j;
   }
 
-  // Record that a module ran (shown on the home page).
+  // Trash (projects/.trash, closed to the file API): list, restore one, empty all.
+  async function trashApi(op, q = '') {
+    const r = await fetch(`/api/project/trash/${op}${q}`, { method: op === 'list' ? 'GET' : 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || `Trash ${op} failed (${r.status})`);
+    return j;
+  }
+  const trashList = async () => (await trashApi('list')).items || [];
+  const restore = id => trashApi('restore', `?id=${encodeURIComponent(id)}`);
+  const emptyTrash = () => trashApi('empty');
+
+  // Record that a module ran (shown on the Project Manager page).
   async function touchModule(folder, module, info = {}) {
     const cfg = await get(folder);
     cfg.modules ||= {};
@@ -120,5 +131,5 @@ const Projects = (() => {
   // 'staged' | 'source' (older records have no stage: taken from the path; pipeline outputs are 'source').
   const stageOf = d => d.stage || (d.source?.kind !== 'pipeline' && d.path.includes('/data/staged/') ? 'staged' : 'source');
 
-  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, touchModule, upsertDataset, dir, stageOf };
+  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, trashList, restore, emptyTrash, touchModule, upsertDataset, dir, stageOf };
 })();

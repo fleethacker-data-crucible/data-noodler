@@ -1,0 +1,10 @@
+{
+  "id": "filter",
+  "name": "Filter",
+  "description": "Dropdowns that filter every widget on the same dataset",
+  "version": 1,
+  "kind": "filter",
+  "spec": "spec.json",
+  "inputs": [],
+  "options": []
+}

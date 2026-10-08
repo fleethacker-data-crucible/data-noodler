@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <link rel="icon" href="favicon.ico?v=server">
   <title>Data Noodler Server</title>
   <style>
 @font-face { font-family: 'Exo 2'; font-weight: 400; src: url(fonts/exo2-400.ttf) format('truetype'); }
@@ -13,7 +14,7 @@
   color-scheme: dark;
   --bg: #1a1a19; --panel: #242422; --border: #3a3936; --sel: #44433f;
   --text: #ffffff; --text-2: #c3c2b7; --muted: #8d8b82;
-  --blue: #3987e5; --blue-h: #5a9cec; --ok: #4cc27f; --warn: #d9b343; --err: #e24c4c;
+  --blue: #3987e5; --blue-h: #5a9cec; --ok: #4cc27f; --save: #3aa86a; --warn: #d9b343; --err: #e24c4c;
   --pink: #f27ab8; --engine: #3cc8c8; --lerr: #ff9090; --time: #aeaca4;
   --thumb: #3a3936; --thumb-h: #55534e;
 }
@@ -21,7 +22,7 @@
   color-scheme: light;
   --bg: #fcfcfb; --panel: #f4f4f2; --border: #dddcd6; --sel: #dcdbd5;
   --text: #0b0b0b; --text-2: #52514e; --muted: #85837c;
-  --blue: #2a78d6; --blue-h: #1f66bd; --ok: #0a7a3d; --warn: #a8850f; --err: #c42b2b;
+  --blue: #2a78d6; --blue-h: #1f66bd; --ok: #0a7a3d; --save: #086832; --warn: #a8850f; --err: #c42b2b;
   --pink: #d63a8a; --engine: #0e8a8a; --lerr: #c42b2b; --time: #85837c;
   --thumb: #c9c8c2; --thumb-h: #a9a8a1;
 }
@@ -39,7 +40,7 @@ body {
   background: var(--bg); color: var(--text);
   display: flex; flex-direction: column; padding: 0; gap: 0;
 }
-.mono { font-family: 'Syne Mono', ui-monospace, Consolas, monospace; font-size: 14px; }
+.mono { font-family: 'Syne Mono', ui-monospace, Consolas, monospace; font-size: 12px; }
 h1 { font-size: 20px; font-weight: 600; margin: 0; }
 h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
 a { color: var(--blue); }
@@ -74,6 +75,9 @@ input[type=text] {
   border: 1px solid var(--border); border-radius: 4px;
 }
 input:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
+input[type=radio], input[type=checkbox] { outline: none !important; }
+*:focus, *:focus-visible { outline: none; }   /* no browser focus box anywhere */
+input:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
 
 .pages { margin: 0 0 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 320px; overflow: auto; }
 .pages div { display: flex; justify-content: space-between; padding: 5px 8px; cursor: pointer; color: var(--text); }
@@ -85,22 +89,25 @@ input:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
 
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 8px; }
 #toggle { grid-column: 1 / -1; height: 55px; font-size: 16px; }   /* two button rows tall */
-.actions-title { margin: 24px 0 10px; }
+.actions-title { margin: 24px 0 10px; color: var(--blue); }
 .dev-title { color: #d9822b; }
 /* Fixed 40px gaps: last button row -> Port, Randomize -> Module, however many action buttons show. */
 .panel > .row:last-child { margin-bottom: 0; }
 #actions:not(:has(> :not([hidden]))) { display: none; }
 .panel > .row:has(+ #actions:not(:has(> :not([hidden])))) { margin-bottom: 0; }
 button.dev { background: #d9822b; }
+.portrow { display: flex; align-items: center; gap: 10px; }
+.portrow[hidden] { display: none; }
+#port { width: 9ch; flex: none; }
+#port.bad, #port.bad:focus { outline: 2px solid var(--err); outline-offset: -1px; }
+.portnote { color: var(--err); font-size: 12px; }
 .dialog.wide { width: min(460px, calc(100vw - 40px)); }
 .dlg-btns:not(:has(> :not([hidden]))) { display: none; }
 .sgroup { margin-bottom: 18px; }
 .slabel { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin-bottom: 6px; }
 .opt { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; }
 .opt .rec { color: var(--ok); font-size: 12px; }
-#port { margin: 2px 0 6px 24px; width: calc(100% - 24px); }
-.prand { display: flex; align-items: center; gap: 10px; margin: 2px 0 0 24px; }
-.prand b { display: inline; margin: 0; font-size: 16px; }
+#port { margin: 2px 0 6px 24px; }
 .sgroup .off { opacity: .45; pointer-events: none; }
 button {
   text-transform: capitalize;
@@ -109,13 +116,14 @@ button {
 }
 /* Hover, every button: the same colour, a little brighter. */
 button:not(:disabled):hover { filter: brightness(1.15); }
+:root[data-theme="light"] button:not(:disabled):hover { filter: brightness(0.9); }   /* light mode: hover darkens the button's own colour */
 button.danger { background: var(--err); }
-button.go { background: var(--ok); }
+button.go { background: var(--save); }   /* green = Save buttons only */
 button:disabled, button:disabled:hover { background: var(--sel); color: var(--muted); cursor: default; filter: none; }
 button[hidden] { display: none; }
 
 .logpanel { position: relative; display: flex; flex-direction: column; overflow: hidden; padding: 20px 20px 20px 25px; }
-.loghead, .log .r { display: grid; grid-template-columns: 20ch 70px 50px 90px 60px minmax(0, 1fr); gap: 10px; }
+.loghead, .log .r { display: grid; grid-template-columns: var(--logcols, 19ch 6ch 4ch 9ch 7ch) minmax(0, 1fr); gap: 10px; }   /* --logcols: set from the longest values (addLines) */
 .loghead { color: var(--muted); padding: 0 0 6px; }
 .log { flex: 1; overflow-y: auto; overflow-x: hidden; }
 .log .r { line-height: 1.6; }
@@ -183,7 +191,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
 <body>
   <header>
     <div class="brand">
-      <span class="logo">DN</span>
+      <span class="logo" style="background: var(--err)">DN</span>
       <div>
         <h1>Data Noodler Server</h1>
         <div class="sub" id="root"></div>
@@ -195,17 +203,17 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
     <aside>
       <section class="panel">
         <div class="stats">
-        <div class="stat"><label>Port</label><b id="s-port">-</b></div>
-        <div class="stat"><label>Requests</label><b id="s-hits">0</b></div>
+        <div class="stat wide"><label>Current User</label><b id="s-user">-</b></div>
         <div class="stat"><label>Uptime</label><b id="s-uptime">0:00:00</b></div>
-        <div class="stat wide"><label>PowerShell Server</label><b id="s-status">CONNECTING</b></div>
-        <div class="stat wide"><label>Engine</label><b id="s-engine" title="Click to re-run the test">TESTING</b></div>
+        <div class="stat"><label>Port</label><b id="s-port">-</b></div>
+        <div class="stat"><label>Web Server (PowerShell)</label><b id="s-status">CONNECTING</b></div>
+        <div class="stat"><label>Data Engine (C#)</label><b id="s-engine" title="Click to re-run the test">TESTING</b></div>
       </div>
       </section>
 
       <section class="panel">
         <div class="row"><button id="toggle" class="danger">Stop server</button></div>
-        <h2 class="actions-title">Server Actions</h2>
+        <h2 class="actions-title" style="margin-top: 37px">Server Actions</h2>
         <div id="actions" class="row sorted">
           <button id="clear" hidden>Clear log</button>
           <button id="users">Manage Users</button>
@@ -233,7 +241,6 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
       <div id="pages" class="pages"></div>
       <div class="row sorted dlg-btns">
         <button id="open" hidden>Open Module</button>
-        <button id="apply" hidden>Set Default</button>
       </div>
       <button id="m-close" class="cancel">Close</button>
     </div>
@@ -245,9 +252,8 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
       <div class="sgroup">
         <div class="slabel">Port</div>
         <label class="opt"><input type="radio" name="pmode" value="manual"> Manual</label>
-        <input id="port" type="text" inputmode="numeric" maxlength="5" autocomplete="off" spellcheck="false" placeholder="1024-65535, or 80">
-        <label class="opt"><input type="radio" name="pmode" value="random"> Random (new 5-digit port each launch)</label>
-        <div class="prand"><b id="rport" class="mono">-</b><button id="random">Randomize</button></div>
+        <div id="portrow" class="portrow"><input id="port" type="text" inputmode="numeric" maxlength="5" autocomplete="off" spellcheck="false" placeholder="5 digits"><span id="portnote" class="portnote" hidden>Must be a 5-digit port, 10000-65535</span></div>
+        <label class="opt"><input type="radio" name="pmode" value="random"> Random (new 5-digit port each time the server starts)</label>
       </div>
       <div class="sgroup">
         <div class="slabel">Default browser</div>
@@ -274,7 +280,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
         <input id="u-first" type="text" placeholder="First name" autocomplete="off">
         <input id="u-mid" class="mi" type="text" placeholder="MI" maxlength="1" autocomplete="off">
         <select id="u-type"><option>CIV</option><option>CTR</option><option>MIL</option><option>N/A</option></select>
-        <button id="u-add" class="go">Add</button>
+        <button id="u-add">Add</button>
       </div>
       <div class="uhint">Enter Last, First, MI. Shown as: Last, First M. Type &mdash; saved to config/users.json</div>
       <div id="ulist" class="ulist"></div>
@@ -285,7 +291,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
   <script>
 // Control panel for .server/server.ps1. The server writes every log entry to
 // .server/logs/ as it happens; this panel mirrors the same entries.
-const W = Math.round(screen.availWidth * 0.85), H = Math.round(screen.availHeight * 0.85);   // 85% of the screen, like every app window
+const W = 1200, H = 800;   // control panel window size (capped to the screen below)
 const $ = id => document.getElementById(id);
 let state = null, selPage = null, since = 0, live = false;
 
@@ -319,7 +325,7 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '
 function renderPages() {
   const f = ($('msearch').value || '').trim().toLowerCase();
   $('pages').innerHTML = state.pages.filter(p => !f || p.name.toLowerCase().includes(f)).map(p =>
-    `<div data-p="${esc(p.name)}" class="${p.name === selPage ? 'sel' : ''}"><span>${esc(p.name)}${p.name === state.page ? ' <small class="def">(default)</small>' : ''}</span><small>${fmtSize(p.size)}</small></div>`
+    `<div data-p="${esc(p.name)}" class="${p.name === selPage ? 'sel' : ''}"><span>${esc(p.name)}</span><small>${fmtSize(p.size)}</small></div>`
   ).join('') || `<div>${f ? 'No matching modules' : 'No .html files found'}</div>`;
 }
 
@@ -332,25 +338,26 @@ function applyTheme(t) {
 }
 
 async function loadState(resetForm) {
+  const wasUp = state?.up;
   state = await api('state');
+  if (wasUp !== undefined && wasUp !== state.up) engineTest();   // the engine stops and starts with the server
   if (state.theme && state.theme !== document.documentElement.dataset.theme) applyTheme(state.theme);
   $('root').textContent = state.root;
-  $('s-status').textContent = state.up ? `READY v${state.ps} (${state.loadMs} ms)` : `OFFLINE v${state.ps}`;
-  $('s-status').className = state.up ? 'on' : 'off';
+  // ONLINE only when the site is up and the engine is loaded and passed its start-up test.
+  const ready = state.up && state.engine;
+  $('s-status').textContent = ready ? 'ONLINE' : 'OFFLINE';
+  $('s-status').className = ready ? 'on' : 'off';
   $('toggle').textContent = state.up ? 'Stop server' : 'Start server';
-  $('toggle').className = state.up ? 'danger' : 'go';
+  $('toggle').className = state.up ? 'danger' : '';
+  $('s-user').textContent = state.user || '-';
   $('s-port').textContent = state.port;
-  $('s-hits').textContent = state.hits;
   $('s-uptime').textContent = fmtTime(state.uptime);
   $('open').hidden = !state.up;
-  if (resetForm) { selPage = state.page; renderPages(); }
-  syncApply();
+  if (resetForm) { selPage = null; renderPages(); }
 }
 // Button groups (.sorted): visible buttons stack in alphabetical order; hidden ones take no space.
 document.querySelectorAll('.sorted').forEach(g => [...g.children].sort((a, b) => a.textContent.localeCompare(b.textContent)).forEach(b => g.append(b)));
 const syncClear = () => { $('clear').hidden = !$('log').children.length; };
-// Set Default shows only when the picked module is not already the default (served at start).
-function syncApply() { $('apply').hidden = !state || selPage === state.page; }
 
 // What usually causes each failing status code (shown in its notification).
 const WHY = {
@@ -364,6 +371,13 @@ const WHY = {
   416: 'Range not satisfiable: requested byte range is outside the file',
   500: 'Server error: the server failed while handling this request',
 };
+// Column widths (mono font, so characters = ch): each fixed column as wide as its longest value; PATH gets the rest.
+const colMax = ['TIMESTAMP', 'METHOD', 'CODE', 'SIZE', 'MS'].map(h => h.length);
+function fitCols(vals) {
+  let grew = false;
+  vals.forEach((v, i) => { const n = String(v).length; if (n > colMax[i]) { colMax[i] = n; grew = true; } });
+  if (grew) document.querySelector('.logpanel').style.setProperty('--logcols', colMax.map(n => n + 'ch').join(' '));
+}
 function addLines(lines) {
   const log = $('log');
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
@@ -371,6 +385,7 @@ function addLines(lines) {
     const r = document.createElement('div');
     r.className = 'r' + (l.k === 'start' || l.k === 'stop' ? ' ' + l.k : '');
     if (l.k === 'req' && l.c >= 400 && l.c < 500) r.classList.add('c4xx');
+    fitCols(l.k === 'req' ? [l.t, l.m, l.c, fmtSize(l.s), `${l.ms} ms`] : [l.t]);
     if (l.k === 'req') {
       r.innerHTML = `<span class="t">${l.t}</span><span class="m">${esc(l.m)}</span><span class="c${String(l.c)[0]}">${l.c}</span>` +
         `<span class="s">${fmtSize(l.s)}</span><span class="ms">${l.ms} ms</span><span>${esc(l.p)}</span>`;
@@ -440,15 +455,11 @@ $('msearch').oninput = renderPages;
 $('m-close').onclick = () => { $('mdlg').hidden = true; };
 $('pages').addEventListener('click', e => {
   const d = e.target.closest('[data-p]');
-  if (d) { selPage = d.dataset.p; renderPages(); syncApply(); }
+  if (d) { selPage = d.dataset.p; renderPages(); }
 });
-$('apply').onclick = async () => {
-  const r = await api('settings', { page: selPage });
-  r.ok ? msg(`Default module: ${selPage}. It loads when the server starts.`, true) : msg(r.error, false);
-  await loadState(r.ok);
-};
 // Opens the picked module in its own window for testing (default browser); the default is unchanged.
 $('open').onclick = async () => {
+  if (!selPage) return msg('Pick a module first.', false);
   const r = await api('open', { page: selPage });
   if (!r.ok) msg(r.error, false);
 };
@@ -457,34 +468,27 @@ $('open').onclick = async () => {
 const radio = (name, v) => { if (v === undefined) return document.querySelector(`input[name=${name}]:checked`)?.value; document.querySelector(`input[name=${name}][value=${v}]`).checked = true; };
 function syncPortMode() {
   const manual = radio('pmode') === 'manual';
-  $('port').classList.toggle('off', !manual);
-  $('random').closest('.prand').classList.toggle('off', manual);
+  $('port').disabled = !manual; $('port').classList.toggle('off', !manual);
+  if (!manual) { $('port').classList.remove('bad'); $('portnote').hidden = true; }
 }
-// Valid: 1024-65535, or 80. Not the control panel's port.
+// Valid: a 5-digit port, 10000-65535 (65535 is the highest port).
 function portError(p) {
-  if (!/^\d+$/.test(p)) return 'Enter a port number.';
-  p = +p;
-  if (p === 8079) return 'Port 8079 is used by the control panel.';
-  if (p !== 80 && (p < 1024 || p > 65535)) return 'Port must be 1024-65535 (or 80). Ports below 1024 are reserved for the system.';
+  if (!/^\d{5}$/.test(p) || +p < 10000 || +p > 65535) return 'Must be a 5-digit port, 10000-65535.';
   return '';
 }
 $('settings').onclick = async () => {
   await loadState(false);
   radio('pmode', state.portMode || 'manual'); radio('browser', state.browser || 'edge'); radio('theme', state.theme || 'dark');
-  $('port').value = state.port; $('rport').textContent = state.port;
+  $('port').value = state.portMode === 'manual' ? state.port : ''; $('port').classList.remove('bad'); $('portnote').hidden = true;
   syncPortMode(); $('sdlg').hidden = false;
 };
 document.querySelectorAll('input[name=pmode]').forEach(r => r.onchange = syncPortMode);
-$('port').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, ''); });
+$('port').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '');
+  const bad = e.target.value !== '' && !!portError(e.target.value);   // red until it is a valid 5-digit port
+  e.target.classList.toggle('bad', bad); $('portnote').hidden = !bad;
+});
 $('port').addEventListener('keydown', e => { if (e.key === 'Enter') $('s-save').click(); });
-// Randomize applies a new free port right away.
-$('random').onclick = async () => {
-  const r = await api('random', {});
-  if (!r.ok) return msg(r.error, false);
-  $('rport').textContent = $('port').value = r.port;
-  msg(`Now on port ${r.port}.`, true);
-  await loadState(false);
-};
 $('s-cancel').onclick = () => { $('sdlg').hidden = true; };
 $('s-save').onclick = async () => {
   const body = { portMode: radio('pmode'), browser: radio('browser'), theme: radio('theme') };
@@ -508,7 +512,6 @@ $('toggle').onclick = async () => {
 };
 
 // Window closing: tell the server to shut down (a reload cancels it by polling again).
-addEventListener('pagehide', () => navigator.sendBeacon('/api/bye'));
 
 // ---- Manage Users: the shared user list (config/users.json) ----
 const TYPES = ['CIV', 'CTR', 'MIL', 'N/A'];
@@ -540,7 +543,7 @@ function renderUsers() {
       <input type="text" data-f="first" value="${esc(u.first)}" placeholder="First name">
       <input type="text" class="mi" data-f="middle" value="${esc(u.middle)}" placeholder="MI" maxlength="1">
       <select data-f="type">${typeOpts(u.type)}</select>
-      <button data-a="assign" class="go">Assign</button></div>` : ''}
+      <button data-a="assign">Assign</button></div>` : ''}
   </div>`).join('') || '<div class="uempty">No users yet.</div>';
 }
 $('users').onclick = async () => {
@@ -592,11 +595,11 @@ async function engineTest() {
   try {
     const r = await api('engine');
     if (!r.ok) throw new Error(r.error || 'not loaded');
-    el.textContent = `READY ${r.version} (${r.workers} workers, ${r.ms} ms)`; el.className = 'on';
+    el.textContent = 'ONLINE'; el.className = 'on';
     el.title = `Native engine ${r.version}: ${r.workers} workers on ${r.cores} cores, memory budget ${(r.memory.budget / 1073741824).toFixed(1)} GB. Click to re-run.`;
   } catch (e) {
-    el.textContent = 'FAILED'; el.className = 'off'; el.title = e.message;
-    clientLog('err', `Engine check failed: ${e.message}`);
+    el.textContent = 'OFFLINE'; el.className = 'off'; el.title = e.message;
+    if (state?.up) clientLog('err', `Engine check failed: ${e.message}`);   // stopped on purpose: not an error
   }
 }
 $('s-engine').onclick = engineTest;

@@ -71,6 +71,8 @@ namespace NativeDataEngine
         readonly ICatalog cat; readonly int batchRows;
         readonly List<Dictionary<string, QueryStmt>> ctes = new List<Dictionary<string, QueryStmt>>();
         readonly HashSet<string> expanding = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, WorkSource> recWork = new Dictionary<string, WorkSource>(StringComparer.OrdinalIgnoreCase);   // recursive CTE -> its working table
+        static int sqSeq;
         int depth;
 
         public Planner(ICatalog cat, int batchRows) { this.cat = cat; this.batchRows = batchRows; }
@@ -101,6 +103,8 @@ namespace NativeDataEngine
             if (s != null) { QueryStmt q = new QueryStmt(); q.Body = s; return PlanSelect(s, q); }
             QueryStmt qs = body as QueryStmt;
             if (qs != null) return Plan(qs);
+            ValuesBody vb = body as ValuesBody;
+            if (vb != null) return PlanValues(vb);
             SetOp so = (SetOp)body;
             if (so.Op != "UNION") throw new EngineException("SQL_UNSUPPORTED", so.Op + " is not supported; use UNION or a JOIN.");
             Planned l = PlanSet(so.Left), r = PlanSet(so.Right);
@@ -114,6 +118,41 @@ namespace NativeDataEngine
             return p;
         }
 
+        // VALUES rows: each value is evaluated once (constants / functions), columns column1..columnN.
+        Planned PlanValues(ValuesBody v)
+        {
+            int nc = v.Rows[0].Count, n = v.Rows.Count;
+            Phase ph = Ph(new Scope());
+            Schema empty = new Schema(new List<Field>());
+            Batch one = new Batch(empty, new Column[0], 1);
+            Column[][] cells = new Column[n][];
+            DataType[] types = new DataType[nc];
+            for (int k = 0; k < nc; k++) types[k] = DataType.Null;
+            for (int i = 0; i < n; i++)
+            {
+                cells[i] = new Column[nc];
+                for (int k = 0; k < nc; k++)
+                {
+                    if (HasSub(v.Rows[i][k])) throw new EngineException("SQL_UNSUPPORTED", "Subqueries are not supported inside VALUES; use INSERT ... SELECT.");
+                    BExpr b = Bind(v.Rows[i][k], ph);
+                    cells[i][k] = b.Eval(one);
+                    types[k] = Cast.Common(types[k], b.Type);
+                }
+            }
+            List<Field> fs = new List<Field>(); Column[] cols = new Column[nc];
+            for (int k = 0; k < nc; k++)
+            {
+                DataType t = types[k].Kind == Kind.Null ? DataType.Varchar : types[k];
+                fs.Add(new Field("column" + (k + 1), t));
+                Column c = new Column(t, n);
+                for (int i = 0; i < n; i++) BCase.Copy(cells[i][k].Type.SameAs(t) ? cells[i][k] : Cast.To(cells[i][k], t, false), 0, c, i);
+                cols[k] = c;
+            }
+            Schema s = new Schema(fs);
+            Planned p = new Planned(); p.Op = new ChainOp(new MemSource(s, new List<Batch> { new Batch(s, cols, n) })); p.Scope = Scope.Of(s, null);
+            return p;
+        }
+
         Op Distinct(Op child)
         {
             List<BExpr> keys = new List<BExpr>();
@@ -123,6 +162,12 @@ namespace NativeDataEngine
 
         // ---------- FROM ----------
         public Planned PlanFrom(TableRef t)
+        {
+            Planned r = PlanFrom1(t);
+            if (t.Hidden) foreach (ScopeCol c in r.Scope.Cols) c.NoStar = true;   // helper join (subqueries): not part of *
+            return r;
+        }
+        Planned PlanFrom1(TableRef t)
         {
             Planned r = PlanFrom0(t);
             if (t.ColAliases == null || t.ColAliases.Count == 0) return r;
@@ -142,14 +187,17 @@ namespace NativeDataEngine
             if (nt != null)
             {
                 string alias = t.Alias ?? nt.Name;
+                WorkSource ws;
+                if (recWork.TryGetValue(nt.Name, out ws)) { p = new Planned(); p.Op = new ChainOp(ws); p.Scope = Scope.Of(ws.Schema, alias); return p; }
                 for (int i = ctes.Count - 1; i >= 0; i--)
                 {
                     QueryStmt cq;
                     if (ctes[i].TryGetValue(nt.Name, out cq))
                     {
-                        if (!expanding.Add("cte:" + nt.Name)) throw new EngineException("SQL_RECURSIVE", "Recursive CTE \"" + nt.Name + "\" is not supported.");
+                        if (IsRecursive(nt.Name, cq)) return Rescope(PlanRecursive(nt.Name, cq), alias);
+                        if (!expanding.Add("cte:" + nt.Name)) throw new EngineException("SQL_RECURSIVE", "CTE \"" + nt.Name + "\" refers to itself; a recursive CTE must be anchor UNION [ALL] recursive part.");
                         try { p = Plan(cq); } finally { expanding.Remove("cte:" + nt.Name); }
-                        return Rescope(p, alias);
+                        return Rescope(Renamed(p, cq.Cols, nt.Name), alias);
                     }
                 }
                 string sql = cat.ViewSql(nt.Name);
@@ -172,6 +220,8 @@ namespace NativeDataEngine
             }
             SubqueryTable sq = t as SubqueryTable;
             if (sq != null) return Rescope(Plan(sq.Query), sq.Alias);
+            PivotRef pv = t as PivotRef;
+            if (pv != null) return PlanPivot(pv);
             FuncTable ft = t as FuncTable;
             if (ft != null)
             {
@@ -180,6 +230,94 @@ namespace NativeDataEngine
                 return p;
             }
             return PlanJoin((JoinRef)t);
+        }
+
+        // ---------- recursive CTE: anchor UNION [ALL] part that reads the CTE itself ----------
+        static bool IsRecursive(string name, QueryStmt cq)
+        {
+            SetOp so = cq.Body as SetOp;
+            if (so == null || so.Op != "UNION") return false;
+            QueryStmt right = new QueryStmt(); right.Body = so.Right;
+            HashSet<string> refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Refs.Collect(right, refs);
+            return refs.Contains(name);
+        }
+        Planned PlanRecursive(string name, QueryStmt cq)
+        {
+            SetOp so = (SetOp)cq.Body;
+            if (!expanding.Add("cte:" + name)) throw new EngineException("SQL_RECURSIVE", "Recursive CTE \"" + name + "\" is used inside itself in an unsupported way.");
+            try
+            {
+                Planned anchor = PlanSet(so.Left);
+                List<Field> fs = new List<Field>();
+                if (cq.Cols != null && cq.Cols.Count != anchor.Op.Schema.Count) throw new EngineException("SQL_CTE", "CTE \"" + name + "\" names " + cq.Cols.Count + " column(s) but returns " + anchor.Op.Schema.Count + ".");
+                for (int i = 0; i < anchor.Op.Schema.Count; i++)
+                {
+                    Field f = anchor.Op.Schema[i];
+                    DataType t = f.Type.Kind == Kind.Null ? DataType.Varchar : f.Type.Kind == Kind.Int ? DataType.BigInt : f.Type;
+                    fs.Add(new Field(cq.Cols != null ? cq.Cols[i] : f.Name, t));
+                }
+                Schema sch = new Schema(fs);
+                WorkSource ws = new WorkSource(sch);
+                recWork[name] = ws;
+                Planned rec;
+                try { rec = PlanSet(so.Right); } finally { recWork.Remove(name); }
+                if (rec.Op.Schema.Count != sch.Count) throw new EngineException("SQL_UNION", "The two parts of recursive CTE \"" + name + "\" have different column counts (" + sch.Count + " vs " + rec.Op.Schema.Count + ").");
+                Planned p = new Planned(); p.Op = new RecursiveOp(anchor.Op, rec.Op, ws, !so.All, sch); p.Scope = Scope.Of(sch, null);
+                return OrderLimit(p, cq, null);
+            }
+            finally { expanding.Remove("cte:" + name); }
+        }
+
+        // ---------- PIVOT (agg(x) FOR col IN (v1, v2, ...)): group by the other columns, one aggregate per value ----------
+        Planned PlanPivot(PivotRef pr)
+        {
+            Planned src = PlanFrom(pr.Source);
+            ColName forC = pr.For as ColName;
+            if (forC == null) throw new EngineException("SQL_SYNTAX", "PIVOT ... FOR needs a column name.");
+            HashSet<string> used = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { forC.Name };
+            foreach (Expr a in pr.Agg.Args) Walk(a, x => { ColName cn = x as ColName; if (cn != null) used.Add(cn.Name); }, false);
+            SelectStmt sel = new SelectStmt(); sel.From = pr.Source;
+            foreach (ScopeCol c in src.Scope.Cols)
+            {
+                if (c.NoStar || used.Contains(c.Name)) continue;
+                ColName cn = Col(c.Table, c.Name);
+                sel.Items.Add(Item(cn, c.Name)); sel.GroupBy.Add(cn);
+            }
+            for (int i = 0; i < pr.Values.Count; i++)
+            {
+                Expr v = pr.Values[i], cond; string name = pr.ValueAliases[i];
+                ColName vc = v as ColName;
+                if (vc != null && vc.Table == null)
+                {
+                    // [2023] / "2023": a name standing for that value
+                    CastE ce = new CastE(); ce.X = forC; ce.T = DataType.Varchar;
+                    cond = Bin("=", ce, LitOf(vc.Name, DataType.Varchar)); if (name == null) name = vc.Name;
+                }
+                else
+                {
+                    cond = Bin("=", forC, v);
+                    if (name == null) { Lit lv = v as Lit; name = lv != null ? (lv.Value == null ? "NULL" : Values.ToText(lv.Value, lv.Type)) : NameOf(v); }
+                }
+                Call a = new Call(); a.Name = pr.Agg.Name; a.Distinct = pr.Agg.Distinct;
+                Expr arg = pr.Agg.Star || pr.Agg.Args.Count == 0 ? (Expr)LitOf(1L, DataType.BigInt) : pr.Agg.Args[0];
+                a.Args.Add(CaseOf(new List<Expr> { cond }, new List<Expr> { arg }, null));
+                for (int k = 1; k < pr.Agg.Args.Count; k++) a.Args.Add(pr.Agg.Args[k]);
+                sel.Items.Add(Item(a, name));
+            }
+            QueryStmt q = new QueryStmt(); q.Body = sel;
+            return Rescope(Plan(q), pr.Alias);
+        }
+
+        // WITH name(a, b): the CTE's columns renamed.
+        static Planned Renamed(Planned p, List<string> cols, string name)
+        {
+            if (cols == null) return p;
+            if (cols.Count != p.Op.Schema.Count) throw new EngineException("SQL_CTE", "CTE \"" + name + "\" names " + cols.Count + " column(s) but returns " + p.Op.Schema.Count + ".");
+            List<Field> fs = new List<Field>();
+            for (int i = 0; i < cols.Count; i++) fs.Add(new Field(cols[i], p.Op.Schema[i].Type));
+            Planned r = new Planned(); r.Op = new RenameOp(p.Op, new Schema(fs)); r.Scope = Scope.Of(r.Op.Schema, null);
+            return r;
         }
 
         static Planned Rescope(Planned p, string alias)
@@ -294,6 +432,8 @@ namespace NativeDataEngine
             if (ce != null) { Walk(ce.Operand, f, stopAtAgg); foreach (Expr x in ce.Whens) Walk(x, f, stopAtAgg); foreach (Expr x in ce.Thens) Walk(x, f, stopAtAgg); Walk(ce.Else, f, stopAtAgg); return; }
             CastE ca = e as CastE; if (ca != null) { Walk(ca.X, f, stopAtAgg); return; }
             RowE r = e as RowE; if (r != null) { foreach (Expr x in r.Items) Walk(x, f, stopAtAgg); return; }
+            InSubE ins = e as InSubE; if (ins != null) { Walk(ins.X, f, stopAtAgg); return; }
+            QuantE qe = e as QuantE; if (qe != null) { Walk(qe.X, f, stopAtAgg); return; }
         }
         static void CollectCalls(Expr e, List<Call> aggs, List<Call> wins)
         {
@@ -320,6 +460,7 @@ namespace NativeDataEngine
                 if (f.Star && f.Name == "count") return "count_star()";
                 return f.Name + "(" + (f.Distinct ? "DISTINCT " : "") + string.Join(", ", f.Args.Select(NameOf)) + ")";
             }
+            if (e is SubE) return "subquery";
             Lit l = e as Lit; if (l != null) return l.Value == null ? "NULL" : l.Type.Kind == Kind.String ? "'" + l.Value + "'" : Values.ToText(l.Value, l.Type);
             CastE ca = e as CastE; if (ca != null) return (ca.Try ? "TRY_CAST(" : "CAST(") + NameOf(ca.X) + " AS " + ca.T.Name + ")";
             BinOp b = e as BinOp; if (b != null) return "(" + NameOf(b.L) + " " + b.Op + " " + NameOf(b.R) + ")";
@@ -328,6 +469,8 @@ namespace NativeDataEngine
 
         Planned PlanSelect(SelectStmt s, QueryStmt q)
         {
+            if (s.GroupBy.Any(IsGroupingElem)) return PlanGroupingSets(s, q);
+            if (HasSub(s.Where) || HasSub(s.Having) || s.Items.Any(i => HasSub(i.E)) || s.GroupBy.Any(HasSub)) return PlanSelect(Unnest(s), q);
             Planned src;
             if (s.From != null) src = PlanFrom(s.From);
             else
@@ -517,6 +660,8 @@ namespace NativeDataEngine
             }
             CastE ca = e as CastE; if (ca != null) { CastE n = new CastE(); n.T = ca.T; n.Try = ca.Try; n.X = Rewrite(ca.X, f); return n; }
             RowE r = e as RowE; if (r != null) { RowE n = new RowE(); foreach (Expr x in r.Items) n.Items.Add(Rewrite(x, f)); return n; }
+            InSubE ins = e as InSubE; if (ins != null) { InSubE n = new InSubE(); n.Q = ins.Q; n.Not = ins.Not; n.X = Rewrite(ins.X, f); return n; }
+            QuantE qe = e as QuantE; if (qe != null) { QuantE n = new QuantE(); n.Q = qe.Q; n.Op = qe.Op; n.All = qe.All; n.X = Rewrite(qe.X, f); return n; }
             return e;
         }
         static bool HasWin(Expr e) { bool f = false; Walk(e, x => { Call c = x as Call; if (c != null && c.Over != null) f = true; }, false); return f; }
@@ -649,7 +794,308 @@ namespace NativeDataEngine
             RowE row = e as RowE;
             if (row != null) { List<BExpr> list = new List<BExpr>(); foreach (Expr x in row.Items) list.Add(Bind(x, ph)); return new BRow(list); }
             if (e is StarE) throw new EngineException("SQL_SYNTAX", "* is only allowed in the select list or count(*).");
+            if (e is SubE) throw new EngineException("SQL_UNSUPPORTED", "Subqueries are supported in WHERE, HAVING and the select list.");
+            if (e is GroupingSetsE) throw new EngineException("SQL_SYNTAX", "GROUPING SETS is only allowed in GROUP BY.");
             throw new EngineException("SQL_UNSUPPORTED", "Unsupported expression: " + e.Key());
+        }
+
+        // ---------- AST helpers ----------
+        static ColName Col(string table, string name) { ColName c = new ColName(); c.Table = table; c.Name = name; return c; }
+        static Lit LitOf(object v, DataType t) { Lit l = new Lit(); l.Value = v; l.Type = t; return l; }
+        static Lit NullLit() { return LitOf(null, DataType.Null); }
+        static Lit True() { return LitOf(true, DataType.Bool); }
+        static Lit False() { return LitOf(false, DataType.Bool); }
+        static Lit Zero() { return LitOf(0L, DataType.BigInt); }
+        static BinOp Bin(string op, Expr l, Expr r) { BinOp b = new BinOp(); b.Op = op; b.L = l; b.R = r; return b; }
+        static Expr AndOf(Expr a, Expr b) { return a == null ? b : b == null ? a : Bin("AND", a, b); }
+        static UnOp NotOf(Expr x) { UnOp u = new UnOp(); u.Op = "NOT"; u.X = x; return u; }
+        static IsNullE IsNullOf(Expr x, bool not) { IsNullE n = new IsNullE(); n.X = x; n.Not = not; return n; }
+        static Call Fn(string name, params Expr[] args) { Call c = new Call(); c.Name = name; c.Args.AddRange(args); return c; }
+        static Call CountStar() { Call c = new Call(); c.Name = "count"; c.Star = true; return c; }
+        static SelectItem Item(Expr e, string alias) { SelectItem it = new SelectItem(); it.E = e; it.Alias = alias; return it; }
+        static CaseE CaseOf(List<Expr> whens, List<Expr> thens, Expr els) { CaseE c = new CaseE(); c.Whens.AddRange(whens); c.Thens.AddRange(thens); c.Else = els; return c; }
+        static bool HasSub(Expr e) { bool f = false; Walk(e, x => { if (x is SubE) f = true; }, false); return f; }
+
+        // Copy of e with each direct child replaced by m(child); leaves and subquery queries are kept.
+        static Expr MapChildren(Expr e, Func<Expr, Expr> m)
+        {
+            Call c = e as Call;
+            if (c != null)
+            {
+                Call n = new Call(); n.Name = c.Name; n.Distinct = c.Distinct; n.Star = c.Star; n.Over = c.Over; n.Filter = c.Filter != null ? m(c.Filter) : null;
+                foreach (Expr a in c.Args) n.Args.Add(m(a));
+                return n;
+            }
+            BinOp b = e as BinOp; if (b != null) return Bin(b.Op, m(b.L), m(b.R));
+            UnOp u = e as UnOp; if (u != null) { UnOp n = new UnOp(); n.Op = u.Op; n.X = m(u.X); return n; }
+            IsNullE isn = e as IsNullE; if (isn != null) return IsNullOf(m(isn.X), isn.Not);
+            InE ine = e as InE; if (ine != null) { InE n = new InE(); n.Not = ine.Not; n.X = m(ine.X); foreach (Expr x in ine.List) n.List.Add(m(x)); return n; }
+            BetweenE bt = e as BetweenE; if (bt != null) { BetweenE n = new BetweenE(); n.Not = bt.Not; n.X = m(bt.X); n.Lo = m(bt.Lo); n.Hi = m(bt.Hi); return n; }
+            LikeE lk = e as LikeE; if (lk != null) { LikeE n = new LikeE(); n.Not = lk.Not; n.Insensitive = lk.Insensitive; n.X = m(lk.X); n.Pat = m(lk.Pat); return n; }
+            CaseE ce = e as CaseE;
+            if (ce != null)
+            {
+                CaseE n = new CaseE(); n.Operand = ce.Operand != null ? m(ce.Operand) : null; n.Else = ce.Else != null ? m(ce.Else) : null;
+                foreach (Expr x in ce.Whens) n.Whens.Add(m(x)); foreach (Expr x in ce.Thens) n.Thens.Add(m(x));
+                return n;
+            }
+            CastE ca = e as CastE; if (ca != null) { CastE n = new CastE(); n.T = ca.T; n.Try = ca.Try; n.X = m(ca.X); return n; }
+            RowE r = e as RowE; if (r != null) { RowE n = new RowE(); foreach (Expr x in r.Items) n.Items.Add(m(x)); return n; }
+            InSubE ins = e as InSubE; if (ins != null) { InSubE n = new InSubE(); n.Q = ins.Q; n.Not = ins.Not; n.X = m(ins.X); return n; }
+            QuantE qe = e as QuantE; if (qe != null) { QuantE n = new QuantE(); n.Q = qe.Q; n.Op = qe.Op; n.All = qe.All; n.X = m(qe.X); return n; }
+            return e;
+        }
+
+        // ---------- GROUP BY ROLLUP / CUBE / GROUPING SETS: one grouped query per set, UNION ALL ----------
+        static bool IsGroupingElem(Expr g)
+        {
+            Call c = g as Call;
+            return g is GroupingSetsE || (c != null && c.Over == null && (c.Name == "rollup" || c.Name == "cube"));
+        }
+        Planned PlanGroupingSets(SelectStmt s, QueryStmt q)
+        {
+            List<List<Expr>> sets = new List<List<Expr>> { new List<Expr>() };
+            foreach (Expr g in s.GroupBy)
+            {
+                List<List<Expr>> opts = new List<List<Expr>>();
+                GroupingSetsE gs = g as GroupingSetsE; Call c = g as Call;
+                if (gs != null) opts.AddRange(gs.Sets);
+                else if (IsGroupingElem(g))
+                {
+                    List<List<Expr>> units = new List<List<Expr>>();
+                    foreach (Expr a in c.Args) { RowE re = a as RowE; units.Add(re != null ? re.Items : new List<Expr> { a }); }
+                    if (c.Name == "rollup")
+                        for (int k = units.Count; k >= 0; k--) { List<Expr> set = new List<Expr>(); for (int i = 0; i < k; i++) set.AddRange(units[i]); opts.Add(set); }
+                    else
+                    {
+                        if (units.Count > 12) throw new EngineException("SQL_GROUP", "CUBE supports up to 12 columns.");
+                        List<int> masks = Enumerable.Range(0, 1 << units.Count).OrderByDescending(m => Bits(m)).ThenByDescending(m => m).ToList();
+                        foreach (int m in masks) { List<Expr> set = new List<Expr>(); for (int i = 0; i < units.Count; i++) if ((m & (1 << (units.Count - 1 - i))) != 0) set.AddRange(units[i]); opts.Add(set); }
+                    }
+                }
+                else opts.Add(new List<Expr> { g });
+                List<List<Expr>> next = new List<List<Expr>>();
+                foreach (List<Expr> a in sets) foreach (List<Expr> b in opts) { List<Expr> n = new List<Expr>(a); n.AddRange(b); next.Add(n); }
+                sets = next;
+            }
+            Dictionary<string, Expr> all = new Dictionary<string, Expr>();
+            foreach (List<Expr> set in sets) foreach (Expr e in set) all[e.Key()] = e;
+            object body = null;
+            foreach (List<Expr> set in sets)
+            {
+                HashSet<string> inSet = new HashSet<string>(set.Select(e => e.Key()));
+                SelectStmt c = s.Clone(); c.GroupAll = false; c.GroupBy = new List<Expr>();
+                foreach (Expr e in set) if (!c.GroupBy.Any(x => x.Key() == e.Key())) c.GroupBy.Add(e);
+                Func<Expr, Expr> f = null;
+                f = e =>
+                {
+                    if (e == null) return null;
+                    Call cl = e as Call;
+                    if (cl != null && cl.Over == null && (cl.Name == "grouping" || cl.Name == "grouping_id"))
+                    {
+                        long v = 0; foreach (Expr a in cl.Args) v = v * 2 + (inSet.Contains(a.Key()) ? 0 : 1);
+                        return LitOf(v, DataType.BigInt);
+                    }
+                    if (all.ContainsKey(e.Key()) && !inSet.Contains(e.Key())) return NullLit();
+                    if (cl != null && cl.Over == null && Functions.Aggregates.Contains(cl.Name)) return e;   // aggregate arguments keep their columns
+                    return MapChildren(e, f);
+                };
+                foreach (SelectItem it in c.Items) { if (it.E is StarE) continue; if (it.Alias == null) it.Alias = NameOf(it.E); it.E = f(it.E); }
+                c.Having = f(c.Having);
+                if (body == null) body = c;
+                else { SetOp u = new SetOp(); u.Left = body; u.Right = c; u.Op = "UNION"; u.All = true; body = u; }
+            }
+            QueryStmt qq = q.Copy(); qq.Body = body; qq.With = new List<KeyValuePair<string, QueryStmt>>();
+            return OrderLimit(PlanSet(body), qq, null);
+        }
+        static int Bits(int m) { int n = 0; while (m != 0) { n += m & 1; m >>= 1; } return n; }
+
+        // ---------- subqueries in expressions -> helper joins ----------
+        // Each subquery becomes a derived table joined to FROM (CROSS JOIN when uncorrelated, LEFT JOIN on the
+        // correlation keys otherwise); the expression then reads that table's columns. Correlation must be equality
+        // conditions between the subquery and the outer query (inner.col = outer.col).
+        sealed class UnCtx { public TableRef From; public Scope Outer; }
+        SelectStmt Unnest(SelectStmt s)
+        {
+            UnCtx cx = new UnCtx();
+            cx.Outer = s.From != null ? PlanFrom(s.From).Scope : new Scope();
+            cx.From = s.From;
+            if (cx.From == null)
+            {
+                SelectStmt one = new SelectStmt(); one.Items.Add(Item(LitOf(1L, DataType.BigInt), "__one"));
+                QueryStmt oq = new QueryStmt(); oq.Body = one;
+                SubqueryTable st = new SubqueryTable(); st.Query = oq; st.Alias = "__one"; st.Hidden = true; cx.From = st;
+            }
+            bool aggregating = s.GroupAll || s.GroupBy.Count > 0 || s.Having != null || s.Items.Any(i => HasAgg(i.E));
+            SelectStmt n = s.Clone();
+            n.Where = Sub(n.Where, cx, false);
+            for (int i = 0; i < n.Items.Count; i++)
+            {
+                SelectItem it = n.Items[i];
+                if (it.E is StarE || !HasSub(it.E)) continue;
+                if (it.Alias == null) it.Alias = NameOf(it.E);
+                // A grouped item (GROUP BY 2 / its alias / GROUP BY ALL) is a group key, not wrapped in any_value.
+                string alias = it.Alias; int pos = i + 1;
+                bool grouped = s.GroupAll ? !HasAgg(it.E) : s.GroupBy.Any(g =>
+                {
+                    Lit l = g as Lit; ColName c = g as ColName;
+                    return (l != null && l.Value is long && (long)l.Value == pos) || (c != null && c.Table == null && string.Equals(c.Name, alias, StringComparison.OrdinalIgnoreCase));
+                });
+                it.E = Sub(it.E, cx, aggregating && !grouped);
+            }
+            n.GroupBy = n.GroupBy.Select(g => Sub(g, cx, false)).ToList();
+            n.Having = Sub(n.Having, cx, aggregating);
+            n.From = cx.From;
+            return n;
+        }
+        // wrap: the query aggregates and e is outside any aggregate, so a value read from a helper join is any_value(...).
+        Expr Sub(Expr e, UnCtx cx, bool wrap)
+        {
+            if (e == null || !HasSub(e)) return e;
+            SubE se = e as SubE;
+            if (se != null) { Expr r = UnnestOne(se, cx); return wrap ? Fn("any_value", r) : r; }
+            Call c = e as Call;
+            bool agg = c != null && c.Over == null && Functions.Aggregates.Contains(c.Name);
+            return MapChildren(e, x => Sub(x, cx, wrap && !agg));
+        }
+        Expr UnnestOne(SubE se, UnCtx cx)
+        {
+            InSubE ins = se as InSubE; QuantE qe = se as QuantE;
+            Expr x = ins != null ? Sub(ins.X, cx, false) : qe != null ? Sub(qe.X, cx, false) : null;
+            string A = "__sq" + System.Threading.Interlocked.Increment(ref sqSeq);
+            bool needVal = !(se is ExistsE);
+            Planned whole = null; EngineException firstErr = null;
+            try { whole = Plan(se.Q); }
+            catch (EngineException ex) { if (ex.Code != "COLUMN_NOT_FOUND") throw; firstErr = ex; }
+
+            TableRef baseRef; Expr rest = null, val = null;
+            List<Expr> innerKeys = new List<Expr>(), outerKeys = new List<Expr>();
+            if (firstErr == null)
+            {
+                // Uncorrelated: the whole subquery is the base table.
+                SubqueryTable b = new SubqueryTable(); b.Query = se.Q; b.Alias = A + "b";
+                if (needVal)
+                {
+                    if (whole.Op.Schema.Count != 1) throw new EngineException("SQL_SUBQUERY", "A subquery used as a value must return exactly one column (this one returns " + whole.Op.Schema.Count + ").");
+                    b.ColAliases = new List<string> { "__x" }; val = Col(A + "b", "__x");
+                }
+                else if (se.Q.Limit < 0) { QueryStmt lq = se.Q.Copy(); lq.Limit = 1; b.Query = lq; }   // EXISTS: one row is enough
+                baseRef = b;
+            }
+            else
+            {
+                SelectStmt isel = se.Q.Body as SelectStmt;
+                if (isel == null || se.Q.With.Count > 0 || isel.From == null) throw firstErr;
+                if (isel.GroupBy.Count > 0 || isel.GroupAll || isel.Having != null || se.Q.Limit >= 0 || (isel.Distinct && needVal && !(se is InSubE) && !(se is QuantE)))
+                    throw new EngineException("SQL_UNSUPPORTED", "A correlated subquery (one that uses columns of the outer query) can't use GROUP BY, HAVING or LIMIT.");
+                Scope inner = PlanFrom(isel.From).Scope;
+                Phase ip = Ph(inner), op = Ph(cx.Outer);
+                if (isel.Where != null)
+                    foreach (Expr c in Conjuncts(isel.Where))
+                    {
+                        BExpr tmp;
+                        if (HasSub(c) || TryBind(c, ip, out tmp)) { rest = AndOf(rest, c); continue; }
+                        BinOp eq = c as BinOp;
+                        if (eq != null && eq.Op == "=")
+                        {
+                            bool li = TryBind(eq.L, ip, out tmp), ri = TryBind(eq.R, ip, out tmp), lo = TryBind(eq.L, op, out tmp), ro = TryBind(eq.R, op, out tmp);
+                            if (li && !ri && ro) { innerKeys.Add(eq.L); outerKeys.Add(eq.R); continue; }
+                            if (ri && !li && lo) { innerKeys.Add(eq.R); outerKeys.Add(eq.L); continue; }
+                            if (!li && !ri && !lo && !ro) throw firstErr;
+                        }
+                        throw new EngineException("SQL_UNSUPPORTED", "A correlated subquery can only be linked to the outer query by equality conditions (inner.col = outer.col); not supported: " + NameOf(c) + ".");
+                    }
+                if (innerKeys.Count == 0) throw firstErr;
+                if (needVal)
+                {
+                    if (isel.Items.Count != 1 || isel.Items[0].E is StarE) throw new EngineException("SQL_SUBQUERY", "A subquery used as a value must return exactly one column.");
+                    val = isel.Items[0].E;
+                }
+                baseRef = isel.From;
+            }
+
+            // Derived table: correlation keys (grouped) + what the expression needs.
+            Func<string, SelectStmt> derived = alias =>
+            {
+                SelectStmt d = new SelectStmt(); d.From = baseRef; d.Where = rest;
+                for (int i = 0; i < innerKeys.Count; i++) { d.Items.Add(Item(innerKeys[i], "__k" + i)); d.GroupBy.Add(innerKeys[i]); }
+                return d;
+            };
+            Func<string, Expr> keysOn = alias => { Expr on = null; for (int i = 0; i < outerKeys.Count; i++) on = AndOf(on, Bin("=", outerKeys[i], Col(alias, "__k" + i))); return on; };
+            Action<SelectStmt, string, Expr> join = (d, alias, on) =>
+            {
+                QueryStmt dq = new QueryStmt(); dq.Body = d;
+                SubqueryTable st = new SubqueryTable(); st.Query = dq; st.Alias = alias; st.Hidden = true;
+                JoinRef j = new JoinRef(); j.Left = cx.From; j.Right = st; j.Kind = on == null ? "CROSS" : "LEFT"; j.On = on;
+                cx.From = j;
+            };
+
+            if (se is ExistsE)
+            {
+                SelectStmt d = derived(A); d.Items.Add(Item(CountStar(), "__c")); join(d, A, keysOn(A));
+                return Bin(">", Fn("coalesce", Col(A, "__c"), Zero()), Zero());
+            }
+            if (se is SubqueryE)
+            {
+                if (innerKeys.Count > 0 && HasAgg(val))
+                {
+                    // Correlated aggregate: per-key value; keys with no rows get the aggregate of an empty input.
+                    SelectStmt d = derived(A); d.Items.Add(Item(val, "__v")); d.Items.Add(Item(True(), "__m")); join(d, A, keysOn(A));
+                    SelectStmt e = new SelectStmt(); e.Items.Add(Item(val, "__e"));
+                    TableRef empty = EmptyOf(baseRef);
+                    if (empty != null) e.From = empty; else { e.From = baseRef; e.Where = False(); }
+                    join(e, A + "e", null);
+                    return CaseOf(new List<Expr> { IsNullOf(Col(A, "__m"), false) }, new List<Expr> { Col(A + "e", "__e") }, Col(A, "__v"));
+                }
+                SelectStmt d1 = derived(A); d1.Items.Add(Item(CountStar(), "__n")); d1.Items.Add(Item(Fn("any_value", val), "__v")); join(d1, A, keysOn(A));
+                return Fn("__one_row", Col(A, "__n"), Col(A, "__v"));
+            }
+            // IN / ANY / ALL: counts and min/max of the subquery's values (per key).
+            SelectStmt ds = derived(A);
+            ds.Items.Add(Item(CountStar(), "__c")); ds.Items.Add(Item(Fn("count", val), "__cv"));
+            ds.Items.Add(Item(Fn("min", val), "__mn")); ds.Items.Add(Item(Fn("max", val), "__mx"));
+            join(ds, A, keysOn(A));
+            Expr cnt = Fn("coalesce", Col(A, "__c"), Zero()), cv = Fn("coalesce", Col(A, "__cv"), Zero()), mn = Col(A, "__mn"), mx = Col(A, "__mx");
+            string qop = qe != null ? qe.Op : "="; bool all = qe != null && qe.All, neg = ins != null && ins.Not;
+            if (ins != null || (qop == "=" && !all) || (qop == "<>" && all))
+            {
+                if (qop == "<>" && all) neg = true;
+                // Membership: distinct (key, value) pairs joined on the keys and the value.
+                SelectStmt dm = derived(A + "m"); dm.Where = AndOf(rest, IsNullOf(val, true));
+                dm.Items.Add(Item(val, "__v")); dm.GroupBy.Add(val); dm.Items.Add(Item(True(), "__m"));
+                join(dm, A + "m", AndOf(keysOn(A + "m"), Bin("=", x, Col(A + "m", "__v"))));
+                Expr r = CaseOf(new List<Expr> { Col(A + "m", "__m"), Bin("=", cnt, Zero()), IsNullOf(x, false), Bin("<", cv, cnt) },
+                                new List<Expr> { True(), False(), NullLit(), NullLit() }, False());
+                return neg ? (Expr)NotOf(r) : r;
+            }
+            if (qop == "=" || qop == "<>")
+            {
+                // = ALL (all values equal x); <> ANY is NOT (= ALL).
+                Expr r = CaseOf(new List<Expr> { Bin("=", cnt, Zero()), IsNullOf(x, false), Bin("<>", mn, mx), Bin("<>", x, mn), Bin("<", cv, cnt) },
+                                new List<Expr> { True(), NullLit(), False(), False(), NullLit() }, True());
+                return qop == "<>" ? (Expr)NotOf(r) : r;
+            }
+            bool greater = qop == ">" || qop == ">=";
+            if (!all)
+                return CaseOf(new List<Expr> { Bin("=", cnt, Zero()), IsNullOf(x, false), Bin(qop, x, greater ? mn : mx), Bin("<", cv, cnt) },
+                              new List<Expr> { False(), NullLit(), True(), NullLit() }, False());
+            return CaseOf(new List<Expr> { Bin("=", cnt, Zero()), IsNullOf(x, false), NotOf(Bin(qop, x, greater ? mx : mn)), Bin("<", cv, cnt) },
+                          new List<Expr> { True(), NullLit(), False(), NullLit() }, True());
+        }
+        // The same table with no rows (LIMIT 0), keeping its name, for "aggregate over nothing"; null for joins.
+        static TableRef EmptyOf(TableRef t)
+        {
+            if (t is JoinRef || t is PivotRef || t.ColAliases != null) return null;
+            NamedTable nt = t as NamedTable;
+            string alias = t.Alias ?? (nt != null ? nt.Name : null);
+            if (alias == null) return null;
+            TableRef inner;
+            if (nt != null) { NamedTable c = new NamedTable(); c.Name = nt.Name; inner = c; }
+            else { SubqueryTable sq = t as SubqueryTable; if (sq == null) return null; SubqueryTable c = new SubqueryTable(); c.Query = sq.Query; c.Alias = "__e"; inner = c; }
+            SelectStmt s = new SelectStmt(); s.Items.Add(Item(new StarE(), null)); s.From = inner;
+            QueryStmt q = new QueryStmt(); q.Body = s; q.Limit = 0;
+            SubqueryTable r = new SubqueryTable(); r.Query = q; r.Alias = alias;
+            return r;
         }
 
         // Literal argument helpers for table functions.

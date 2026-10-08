@@ -2,9 +2,8 @@
     "fileThreads":  16,
     "engineWorkers":  64,
     "engineMemory":  0.5,
-    "port":  42060,
+    "port":  41223,
     "browser":  "edge",
     "portMode":  "random",
-    "theme":  "dark",
-    "page":  "html/home.html"
+    "theme":  "dark"
 }

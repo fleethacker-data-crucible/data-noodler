@@ -54,13 +54,13 @@ const UI = (() => {
   // Form dialog: resolves { name: value, ... } or null when cancelled.
   const form = (title, fields, { ok = 'Save' } = {}) => dialog(title, fields.map(fieldHtml).join(''), [
     { label: 'Cancel', value: null, kind: 'ghost' },
-    { label: ok, submit: true, value: f => Object.fromEntries(new FormData(f)) },
+    { label: ok, submit: true, kind: /^save/i.test(ok) ? 'go' : '', value: f => Object.fromEntries(new FormData(f)) },
   ]);
 
   // ---- formatting ----
   const num = v => v == null ? '' : Number(v).toLocaleString();
   const bytes = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : b >= 1024 ? Math.round(b / 1024) + ' KB' : (b || 0) + ' B';
-  const ms = v => v >= 60000 ? `${Math.floor(v / 60000)}m ${Math.round(v % 60000 / 1000)}s` : v >= 1000 ? (v / 1000).toFixed(2) + ' s' : Math.round(v) + ' ms';
+  const ms = v => (v / 1000).toFixed(1) + ' s';   // every timer: seconds, 1 decimal
   const date = iso => iso ? new Date(iso).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
   const rows = n => n >= 1e9 ? +(n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? +(n / 1e3).toFixed(1) + 'k' : String(n);
 
@@ -74,6 +74,8 @@ const UI = (() => {
   // Wrap an async handler: errors become a red toast instead of a silent failure.
   const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { console.error(e); toast(e.message || String(e), 'err'); } };
   const debounce = (fn, wait = 200) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), wait); }; };
+  // Log time stamp: yyyy-mm-dd hh:mm:ss, 24 h, local time.
+  const stamp = (d = new Date()) => { const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; };
   const params = () => Object.fromEntries(new URLSearchParams(location.search));
 
   // Table scrollbars stay hidden until the mouse is within 10px of one. The vertical one is drawn
@@ -113,5 +115,5 @@ const UI = (() => {
     }
   }, { passive: true });
 
-  return { $, esc, toast, dialog, confirm, alert, form, num, bytes, ms, date, rows, dataTable, guard, debounce, params };
+  return { $, esc, stamp, toast, dialog, confirm, alert, form, num, bytes, ms, date, rows, dataTable, guard, debounce, params };
 })();

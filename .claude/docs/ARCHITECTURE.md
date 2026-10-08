@@ -1,0 +1,203 @@
+# Data Noodler: How It Works
+
+What actually happens from launch to query. Updated 2026-10-05 for the native C# engine (replaced DuckDB-WASM).
+`CODE_INDEX.md` is the file map; this is the runtime story. Re-check line refs after edits.
+
+## Ground rules
+
+- **No DuckDB, no WebAssembly, no third-party DLLs.** The data engine is our own C# source (`engine/`), compiled at
+  server start by PowerShell 5.1 `Add-Type` (C# 5 syntax only), using .NET Framework assemblies and Windows' `winsqlite3.dll`.
+- **No installs, no admin.** Server is plain PowerShell + .NET `HttpListener`; browsers are the installed Edge/Chrome.
+- **Project-relative paths only.** The folder can move to any machine.
+- **`.trash/` is off-limits** unless explicitly asked (see `CLAUDE.md`). Retired DuckDB/sql.js files are in `.trash/duckdb-wasm-20261005/`.
+
+## 1. Launch
+
+```
+Start Data Noodler.lnk  (or start-server.cmd, which flashes one console)
+  └─ conhost --headless powershell -WindowStyle Hidden -File .server/server.ps1
+```
+`Start Data Noodler.lnk` holds absolute paths (recreate it if the folder moves). No VBS launchers.
+
+`server.ps1` startup, top to bottom:
+1. `$root` = project folder (one up from `.server`), `$uiPort = 8079`, log file `.server/logs/Data_Noodler_Server_Logs_<time>.log`.
+2. Loads `.server/settings.json` (`port`, `portMode`, `browser`, `theme`, `fileThreads`, `engineWorkers`, `engineMemory`).
+   App entry point is hard-coded: `$entryPage = 'html/project_manager.html'` (site `/` redirects there).
+3. Kills a stale instance via `.server/.pid`, writes its own PID.
+4. Clears leftover `temp/upload-*.tmp`.
+5. One `HttpListener` listens on **two ports**: **8079** = control panel, **site port** = the app (started/stopped from the panel).
+6. **Engine:** `.server/engine-loader.ps1` hashes `engine/**/*.cs`; a cached DLL `%LOCALAPPDATA%\data-noodler\engine\NativeDataEngine-<hash>.dll`
+   is loaded if present, else the sources are compiled with `Add-Type -CompilerParameters` (`/optimize+`, ~0.5 s) into that DLL.
+   Then `New-DataEngine` creates the one `NativeDataEngine.DataEngine` (workers, memory guard). A compile error is logged and
+   the site still runs (engine calls answer 503).
+7. Starts the site and opens `$entryPage` (Project Manager). The panel is NOT opened at startup: the red **Server Control**
+   button in the Project Manager calls `POST /api/panel` (`Open-Panel`: opens it, or raises it if already open; `--app` window,
+   own profile in `%LOCALAPPDATA%\data-noodler\.profile`).
+8. Main loop: one request at a time on the main thread, except plain static files (runspace pool) and engine calls (engine threads).
+   Each loop pass also moves engine log lines into the server log (`Read-EngineLog`).
+
+**Shutdown:** the Project Manager window closes → `/api/bye` → exits after 4 s (a reload sends `/api/hello` and cancels it); or no heartbeat (panel log poll or any app window's `/api/status`) for 120 s, i.e. all windows closed; or nothing
+connects within 60 s. Closing the panel alone does not stop the server. The engine is disposed (jobs cancelled, workers stopped).
+
+## 2. Control panel (port 8079, `.server/server.html`)
+
+- Polls `GET /api/log?since=` every 1 s. Heartbeats = this poll + each app window's `/api/status` (5 s); the server exits
+  120 s after the last one (60 s if none ever connects). Closing the panel does not stop the server.
+- Window: 1200×800, centred (`Open-App -Width/-Height` + `resizeTo` in the page; the profile's saved app-window placement is cleared on launch).
+- `GET /api/state`: status, port, page, user (`$env:USERNAME`), uptime, list of `html/*.html` modules.
+- Side panel: Current User; Uptime, Port; Web Server (PowerShell), Data Engine (C#) — each `ONLINE` (green) or `OFFLINE` (red), details in the tooltip.
+- **Engine check:** `GET /api/engine` runs `SELECT sum(range) FROM range(1000000)` in the engine and returns its status
+  (version, workers, cores, memory budget); click to re-run.
+- Server Actions (blue): `/api/site`, `/api/clear`, `/api/users`, Settings (port, browser, theme). Dev Actions (orange): Modules dialog (module list + Open Module, for testing; no default module).
+- Favicons: `/favicon.ico` → `assets/server_favicon.ico` (panel, red) and `assets/client_favicon.ico` (site, blue).
+- Log kinds and colors: `req`, `sys` (pink), `err` (red), `engine` (teal), `start`/`stop`. `sys`/`err` and 4xx/5xx pop a notification.
+
+## 3. Site (site port) — `Handle-Site`
+
+| Request | Handling |
+|---|---|
+| `/` | 302 → shell (`html/app.html?m=<page>`). |
+| `*.html` | `Send-File -Token`: injects `window.DN_TOKEN` before `</head>`, `no-store`. |
+| other static | Runspace pool (`fileThreads`, default 16) → `Send-Stream`, in parallel. Range requests supported. |
+| `/api/engine/<op>` | Same-site check (`Test-FsRequest`), then `[NativeDataEngine.EngineApi]::Handle($engine, $ctx, $op)`: answered on an engine thread. |
+| `/api/fs/<op>` | File API (below). |
+| `/api/import/<op>` | Outside-file probe (below). |
+| `/api/status`, `/api/mem`, `/api/theme`, `/api/project/trash` | Shell status, memory graph (browser + engine process + system), theme, project trash. |
+
+## 4. File API (`/api/fs/*`) and `DNFS` (`js/dn-fs.js`)
+
+Pages never touch disk directly. `DNFS` sends `X-DN-Token` + same-origin; server checks:
+- `Test-FsRequest`: correct Host (anti DNS-rebinding), no foreign Origin, valid token.
+- `Resolve-ProjectPath`: rejects absolute paths, `..`, `:`, any dot-segment (`.server`, `.git`, `.trash`), and links.
+
+Ops: `list`, `stat`, `read`, `write`, `mkdir`, `delete`, `move`, `copy`.
+
+## 4b. Files outside the project
+
+- `/api/import/probe?src=` (`.server/import-api.ps1`, `ExternalSource.probe`): exists/size/modified on a background
+  runspace, 10 s warn / 30 s timeout, so a dead network drive can't freeze the server. Used by Import and Update.
+- The **engine reads the file in place** (read only): `read_csv('X:\…')`, `read_parquet('\\server\share\…')`. `PathGuard.Source`
+  allows full paths only for data files (csv/tsv/txt/parquet/pq/sqlite/sqlite3/db). Writes stay inside the project.
+- `/api/import/read` and `copy` still exist but the app no longer uses them.
+
+## 5. Native engine (`engine/`, namespace `NativeDataEngine`)
+
+```
+EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planner ─► Optimizer.Prune ─► operators ─► WorkerPool
+                                   │                                                          │
+                                   ├─ Jobs (write / export / pipeline: id + progress + cancel) │
+                                   ├─ MemoryGuard (budget, reservations, free-RAM floor)       │
+                                   └─ sources: ParquetSource (row groups), CsvSource, SqliteSource, RangeSource, MemSource
+```
+
+- **Columnar batches** (`engine/Arrow`): `Column` = typed array (`long[]` ints/dates/timestamps, `double[]` doubles/decimals,
+  `string[]`, `bool[]`) + null flags; `Batch` = columns + schema. Dates = days since 1970, timestamps = microseconds.
+- **SQL** (`Query/SqlParser.cs`): DuckDB-style subset: `WITH [RECURSIVE]` (+ `name(cols)`), `SELECT [DISTINCT]`, `VALUES`, `* EXCLUDE (…)`,
+  joins (INNER/LEFT/RIGHT/FULL/CROSS, `ON` / `USING`), `WHERE`, `GROUP BY [ALL | ROLLUP | CUBE | GROUPING SETS]` (+ `GROUPING()`),
+  `HAVING`, `ORDER BY [ALL]`, `LIMIT/OFFSET`, `UNION [ALL]`, `PIVOT (agg FOR col IN (…))`, window functions, `CAST/TRY_CAST/::`, `CASE`,
+  `IN`, `BETWEEN`, `LIKE/ILIKE`, `FILTER (WHERE …)`, lateral aliases, `[bracket]` names, `DESCRIBE`.
+  **Subqueries** (scalar, `EXISTS`, `IN (SELECT)`, `ANY/SOME/ALL`; correlated on equality conditions) are rewritten by
+  `Planner.Unnest` into hidden helper joins (CROSS JOIN when uncorrelated, LEFT JOIN on the correlation keys), so they run
+  in parallel like any join. Recursive CTEs run round by round (`RecursiveOp`, working table `WorkSource`).
+- **Scripts** (`Core/Script.cs`): several statements separated by `;` run against a per-request session (in-memory tables,
+  views, indexes): `CREATE TABLE` (constraints: PRIMARY KEY / UNIQUE / NOT NULL / DEFAULT / CHECK / AUTO_INCREMENT, or `AS query`),
+  `CREATE [OR REPLACE] VIEW`, `DROP TABLE/VIEW/INDEX`, `ALTER TABLE`, `INSERT` (VALUES / query / DEFAULT VALUES, `ON DUPLICATE KEY
+  UPDATE`, `ON CONFLICT`, `OR REPLACE/IGNORE`), `UPDATE`, `DELETE`, `TRUNCATE`, `MERGE`, `SELECT … INTO`, `BEGIN/COMMIT/ROLLBACK`,
+  `BEGIN TRY … END TRY BEGIN CATCH … END CATCH` (`ERROR_MESSAGE()`), `THROW/RAISERROR`, `CREATE [UNIQUE] [CLUSTERED] INDEX`.
+  Datasets are read only: changing one works on a session copy. The result is the final `SELECT` (planned with the session
+  catalog, streamed in parallel), else the last table created/changed. Tests: `tests/sql-cheatsheet.ps1` (every command in
+  `ref-docs/*-sql-cheatsheet.md` + edge cases + Parquet row groups).
+  Table functions: `read_parquet(file | folder | [list])`, `read_csv(file, delim=, header=, …)`, `read_sqlite(file, table)`, `range(…)`.
+  Functions: `Query/Functions.cs` (+ `choose`, `add_seconds`). Aggregates: `Query/Aggregates.cs`. Windows: `Query/Window.cs`.
+- **Views:** every request may pass `views: { name: sql }`; the pages pass the project's datasets
+  (`name → SELECT * FROM read_parquet('<dataset folder>')`) and pipeline steps.
+- **Declarative queries** (`Query/QuerySpec.cs`): dashboard widgets send `{ dataset, groupBy, aggregate, where, sort, limit }`.
+- **Parallelism:** one engine, `min(engineWorkers ≤ 64, logical cores)` worker threads. A scan + its filters/projections/join probes
+  runs per Parquet row group on the workers; aggregates are built per row group and merged **in row-group order**, so
+  answers are identical for any worker count. Join build sides are built on the coordinator thread; nested parallel work
+  started from a worker runs inline (no pool deadlock). A query may limit its workers (`workers`, used by the benches).
+- **Column pruning** (`Query/Optimizer.cs`): only the Parquet columns a query reads are decoded.
+- **Memory guard** (`Core/MemoryGuard.cs`): budget = `engineMemory` (default 50%) of physical RAM. Sort, hash join build, hash
+  aggregate, window and cached tables reserve what they hold; over budget → `QUERY_OUT_OF_MEMORY` (HTTP 507) instead of
+  paging the machine. Parallel readers stop starting new row groups while free RAM is below max(512 MB, 10%).
+  No disk spilling yet: a sort/join/window must fit the budget.
+
+### API (`/api/engine/*`, client `js/core/engine-client.js` = `Engine`)
+
+| Call | Body → result |
+|---|---|
+| `GET status` | engine, version, workers, cores, memory, jobs |
+| `POST query` | `{ sql \| query, views, limit, workers }` → `{ cols, types, rows, rowCount, truncated, ms }` (≤ 200k rows) |
+| `POST describe` | `{ sql, views }` → `{ columns: [{ name, type }] }` |
+| `POST preview` | `{ sql, views, limit }` → query result + `count` (script statements run once; rows and count in parallel) |
+| `POST open` | `{ src, table }` → `{ kind, tables, columns, rows, size, modified }` |
+| `POST write` | `{ sql, views, dest, meta, codec }` → job → dataset manifest |
+| `POST export` | `{ sql, views, to, format: csv\|parquet\|sqlite, table }` → job → `{ path, rows, bytes }` |
+| `POST pipeline` | `{ datasets: {name: path}, nodes: [{ id, name, sql, output, dest }], changed, version }` → job |
+| `GET job?id=` / `POST job/cancel?id=` / `GET jobs` | job state, stage, progress, rows, result or error `{ code, message }` |
+| `POST cache/load` / `cache/drop` | in-memory tables (engine bench) |
+
+Errors: `{ ok: false, error, code }` with codes like `CSV_INVALID_QUOTE`, `PARQUET_CORRUPT`, `PARQUET_UNSUPPORTED_CODEC`,
+`SQL_SYNTAX`, `COLUMN_NOT_FOUND`, `PIPELINE_CYCLE`, `QUERY_OUT_OF_MEMORY`, `PATH_FORBIDDEN`. Details go to the server log.
+
+## 6. Storage: datasets
+
+```
+data/staged/<name>/  or  data/source/<name>/
+  part-000000.parquet   Snappy, 100k-row row groups, new part every 2M rows (EngineOptions.PartRows)
+  dataset.json          { name, version, rowCount, bytes, columns, partitions: [{ file, rows, bytes }], codec,
+                          createdUtc, updatedUtc, lineage?: { pipelineStep, pipelineVersion, upstream: [{ dataset, version }] } }
+```
+
+- **Atomic writes** (`Storage/Datasets.cs` `DatasetWriter`): written into `<name>.tmp-xxxx/`, then the old folder is moved aside,
+  the new one moved in, the old one deleted. A failed or cancelled write leaves the previous version untouched; `version` + 1.
+- **Parquet** (`engine/Parquet`): own Thrift compact codec, writer (PLAIN, dictionary for repeated text, RLE definition levels,
+  min/max stats) and reader (data pages v1/v2, PLAIN, dictionary, RLE, DELTA_*, BYTE_STREAM_SPLIT; Snappy, GZIP, none; flat
+  schemas, nested columns skipped). **ZSTD/LZ4/Brotli files are rejected** (`PARQUET_UNSUPPORTED_CODEC`): re-import the source.
+- **CSV** (`Providers/CsvProvider.cs`): files over 16 MB are cut into byte ranges on record boundaries (one quote-aware byte
+  scan, cached per file version), parsed in parallel, in file order; unread columns are not converted (count is fast).
+  Streaming state machine (quotes, embedded delimiters/newlines, BOM), delimiter + header
+  detection, types from a 20k-row sample; a later value that does not fit widens that column and the query re-runs.
+- **SQLite** (`Providers/SqliteProvider.cs`): P/Invoke to `winsqlite3.dll`; import streams rows; export = one transaction + prepared INSERT.
+
+**Data flow (only Import reads CSV/SQLite; every dataset is Parquet):**
+
+```
+data/raw/ or X:\… / \\server\share\…   (read in place)
+   │  Import: Engine.write({ sql: SELECT <columns> FROM read_csv/read_sqlite/read_parquet(...) })
+   └─ Stage            column choices applied → data/staged/<name>/  (always; input for Pipeline)
+data/staged ──Transform (active SQL query / script)──→ data/source/CLEAN_<name>/
+data/source ──Dashboard / Publish
+```
+
+## 7. App modules (`html/*.html`)
+
+- **Windows + global header:** every module opens in its own window (95% of screen height, 16:10 width, centred; `Windows.open`); site windows
+  use the same size (`Open-App`), the server panel 1200×800. No app shell, no Back buttons. `js/core/embed.js` adds the same header to
+  every page: logo initials, Data Noodler, module · project, Web Server (PowerShell) status (`/api/status`, 5 s), Data Engine (C#) status (test query); `ONLINE`/`OFFLINE` only.
+- **Import:** `Engine.open` (kind, tables, columns) → preview/count/type checks via `Engine.query` → `Engine.write` (job with
+  progress) → checks columns/order/row count from the manifest → dataset record `{ path: folder, parts, version, … }`.
+- **Transform** (`html/transform.html`, module id `pipeline`): a list of named SQL queries (each one SELECT or a script) in
+  `SqlEditor`; one is **active**. Preview Output / Preview Source = `Engine.preview` (top 100 + count). Build Output Dataset =
+  `PipelineRunner.run`: `Engine.write` of the active query → `data/source/<CLEAN_name>/` (Parquet parts, atomic). Saved in
+  `pipeline/pipeline.json` `{ version: 2, queries: [{ id, name, sql }], active, output }`; run history in `pipeline/runs.json`.
+  (`Engine.pipeline` / `RunPipeline`, the old step DAG, is no longer used by the app.)
+- **Dashboard:** each widget = a widget package + declarative query (`ApexWidget.query`); cache key = query + dataset version, so a new dataset version
+  makes cached results stale.
+- **Publish:** self-contained HTML (results embedded); dataset export to CSV / Parquet (single file) / SQLite via `Engine.exportTo`.
+- **Update:** compares source size/modified, re-imports changed sources, then re-runs **only** the pipeline outputs downstream of them.
+- **Archives:** folder copies (datasets are folders).
+- **Benches:** `engine-bench.html` (worker counts, Auto, profile → `config/engine-profile.json`), `thread-bench.html` (worker sweep),
+  `engine-test.html` (SQL console), `generate-test-parquet-files.html` (test datasets via the engine).
+
+**Light/dark mode:** one global setting, `settings.json` `theme`, chosen in the server panel; pages follow via `js/core/theme.js`.
+Project layout: `projects/<folder>/` with `data/raw`, `data/staged`, `data/source`, `pipeline/`, `dashboard/`, `publish/`, `archives/`.
+
+## 7b. Widget packages
+
+- `widgets/<id>/` = one package: `widget.json` manifest (+ `spec.json`: `data` = the inputs, then an ApexCharts / ApexGrid / ApexTree options object). Valid manifests are listed by `WidgetRegistry` and appear in Dashboard > Add widget.
+- The manifest drives the settings popout (`WidgetSettings`) (Dashboard side panel and Pop-out Settings): `inputs` (each `field` in the spec; dimension = group by, measure = aggregate) and `options` (spec paths: colour, number, switch, choice, text; `show` hides one from the dashboard).
+- Dashboard widget `{ type: "widget", pkg, dataset, inputs: { key: { col, agg } }, opts: { path: value }, sort, top, limit }`. The engine runs `ApexWidget.query` (group by dims, aggregate measures as `v_<key>`, or plain rows when a measure has no aggregation); rows are re-keyed by input key (dates become Date objects) and handed to ApexRender.
+- Theme: `ApexWidget.theme()` reads css/theme.css variables (fonts, text / border colours, `--c1..c8`) and is merged under every spec, so packages only hold what is special about them.
+- Publish draws each widget (Apex) to SVG in the browser and embeds the static SVGs at their grid positions: the published page has no JavaScript.
+

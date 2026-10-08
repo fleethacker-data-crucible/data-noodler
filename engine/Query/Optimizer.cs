@@ -41,6 +41,8 @@ namespace NativeDataEngine
             if (un != null) { foreach (Op p in un.Parts) Need(p, All(p)); return; }
             RenameOp rn = op as RenameOp;
             if (rn != null) { Need(rn.Child, need); return; }
+            RecursiveOp ro = op as RecursiveOp;
+            if (ro != null) { Need(ro.Anchor, All(ro.Anchor)); Need(ro.Rec, All(ro.Rec)); return; }
         }
 
         static HashSet<int> StepNeed(ITransform t, HashSet<int> need)
@@ -59,6 +61,8 @@ namespace NativeDataEngine
         {
             ParquetSource ps = s as ParquetSource;
             if (ps != null) { ps.SetNeeded(need); return; }
+            CsvSource cs = s as CsvSource;
+            if (cs != null) { cs.SetNeeded(need); return; }
             OpSource os = s as OpSource;
             if (os != null) { Need(os.Inner, need); return; }
         }

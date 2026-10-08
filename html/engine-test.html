@@ -23,7 +23,7 @@
     </div>
     <label class="field">SQL<textarea id="sql" spellcheck="false">SELECT 42 AS answer</textarea></label>
     <div class="row">
-      <button id="run" class="go" disabled>Run SQL</button>
+      <button id="run" disabled>Run SQL</button>
       <button id="save" disabled>Write query to test-data/export.parquet</button>
       <span id="status" class="muted"></span>
     </div>
@@ -37,7 +37,7 @@
 <script src="../js/core/engine-client.js"></script>
 <script>
 const { $ } = UI;
-const log = (msg, cls = '') => { const d = document.createElement('div'); d.className = cls; d.textContent = `${new Date().toLocaleTimeString()}  ${msg}`; $('log').prepend(d); };
+const log = (msg, cls = '') => { const d = document.createElement('div'); d.className = cls; d.textContent = `${UI.stamp()}  ${msg}`; $('log').prepend(d); };
 const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };
 
 guard(async () => {

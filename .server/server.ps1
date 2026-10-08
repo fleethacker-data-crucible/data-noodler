@@ -33,16 +33,17 @@ $mime = @{
 
 # --- settings ---
 # fileThreads = how many file requests are served at the same time (background runspaces).
-# portMode = 'manual' (keep port) or 'random' (new 5-digit port each launch). browser = 'edge' or 'chrome' for Open Module.
+# portMode = 'manual' (keep port) or 'random' (new 5-digit port each time the site starts). browser = 'edge' or 'chrome' for Open Module.
 # theme = 'dark' or 'light': one setting for every window (panel and site), so they all follow the toggle.
 # engineWorkers = max C# engine worker threads (capped at 64 and at the CPU's logical cores).
 # engineMemory = share of physical RAM the engine may hold (0.1 - 0.9).
-$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; page = 'html/index.html'; fileThreads = 16; engineWorkers = 64; engineMemory = 0.5 }
+# App entry point (hard-coded): the site's "/" and the app window open this page.
+$entryPage = 'html/project_manager.html'
+$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; fileThreads = 16; engineWorkers = 64; engineMemory = 0.5 }
 if (Test-Path $settingsFile) {
     try {
         $j = Get-Content $settingsFile -Raw | ConvertFrom-Json
         if ($j.port) { $settings.port = [int]$j.port }
-        if ($j.page) { $settings.page = [string]$j.page }
         if ($j.portMode -in 'manual', 'random') { $settings.portMode = [string]$j.portMode }
         if ($j.browser -in 'edge', 'chrome') { $settings.browser = [string]$j.browser }
         if ($j.theme -in 'dark', 'light') { $settings.theme = [string]$j.theme }
@@ -208,15 +209,33 @@ function Get-RandomPort {
     }
     throw 'Could not find a free port.'
 }
-if ($settings.portMode -eq 'random') { try { $settings.port = Get-RandomPort; Save-Settings } catch {} }
 
 function Start-Site {
     if ($script:siteUp) { return }
+    # Random mode: a new port when the server process starts; Stop/Start keeps it, so open module windows reconnect.
+    if ($settings.portMode -eq 'random' -and -not $script:portPicked) { $settings.port = Get-RandomPort; Save-Settings }
+    $script:portPicked = $true
+    # The data engine runs with the site: Stop disposes it, Start creates a fresh one (compiled assembly stays loaded).
+    # It must answer a test query before the site opens, so nothing reports ONLINE until both are ready.
+    if (-not $script:engine) {
+        if (-not ('NativeDataEngine.DataEngine' -as [type])) { throw $script:engineError }
+        try { $script:engine = New-DataEngine -Root $root -MaxWorkers $settings.engineWorkers -MemoryFraction $settings.engineMemory }
+        catch { $script:engineError = "Engine failed to start: $($_.Exception.Message)"; throw $script:engineError }
+    }
+    try {
+        $v = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+        $r = $script:engine.Query('SELECT sum(range) AS s FROM range(1000)', $v, 1, 0, [Threading.CancellationToken]::None)
+        if ($r.Batches[0].Cols[0].I[0] -ne 499500) { throw 'wrong answer to the test query' }
+    } catch {
+        try { $script:engine.Dispose() } catch {}
+        $script:engine = $null; $script:engineError = "Engine failed its start-up test: $($_.Exception.Message)"; throw $script:engineError
+    }
+    Add-Log 'engine' 'Engine started and ready.'
     try { $listener.Prefixes.Add("http://localhost:$($settings.port)/") }
     catch { throw "Port $($settings.port) is unavailable. Pick another port." }
     $script:siteUp = $true
     $script:siteStarted = Get-Date
-    Add-Log 'start' 'SERVER STARTED'; Add-Log 'sys' "Site online. Serving $($settings.page) at http://localhost:$($settings.port)/"
+    Add-Log 'start' 'SERVER STARTED'; Add-Log 'sys' "Site online. Serving $($entryPage) at http://localhost:$($settings.port)/"
 }
 
 # Opens the selected module in $name (default: the Settings browser). Returns an error message or $null.
@@ -235,8 +254,8 @@ function Open-Site([string]$name, [string]$page) {
     $exe = if ($browsers.ContainsKey($name)) { Find-Browser $name }
     if (-not $script:siteUp) { return 'Start the server first.' }
     if (-not $exe) { Add-Log 'err' "Browser '$name' not found."; return "$name is not installed." }
-    Raise-Window (Open-App $exe "http://localhost:$($settings.port)/$(Get-ShellUrl $(if ($page) { $page } else { $settings.page }))" ".profile-site-$name")
-    Add-Log 'sys' "Opened $(if ($page) { "$page (test)" } else { $settings.page }) in $name."
+    Raise-Window (Open-App $exe "http://localhost:$($settings.port)/$(Get-ShellUrl $(if ($page) { $page } else { $entryPage }))" ".profile-site-$name")
+    Add-Log 'sys' "Opened $(if ($page) { "$page (test)" } else { $entryPage }) in $name."
     return $null
 }
 
@@ -244,6 +263,11 @@ function Stop-Site {
     if (-not $script:siteUp) { return }
     $listener.Prefixes.Remove("http://localhost:$($settings.port)/") | Out-Null
     $script:siteUp = $false
+    if ($script:engine) {
+        try { $script:engine.Dispose() } catch {}
+        $script:engine = $null; $script:engineError = 'The data engine is stopped (the server is stopped).'
+        Add-Log 'engine' 'Engine stopped.'
+    }
     $script:hits = 0   # requests are counted per up session
     Add-Log 'stop' 'SERVER STOPPED'; Add-Log 'sys' "Site offline. Port $($settings.port) released."
 }
@@ -260,7 +284,7 @@ function Handle-Ui($req, $res, $rel) {
         'api/state' {
             Send-Json $res @{
                 ps = "$($PSVersionTable.PSVersion)"; loadMs = $script:loadMs; theme = $settings.theme
-                port = $settings.port; portMode = $settings.portMode; browser = $settings.browser; page = $settings.page; up = $script:siteUp; root = $root
+                port = $settings.port; portMode = $settings.portMode; browser = $settings.browser; entry = $entryPage; up = $script:siteUp; engine = [bool]$script:engine; root = $root; user = $env:USERNAME
                 pages = Get-Pages; hits = $script:hits; uptime = $(if ($script:siteUp) { [int]((Get-Date) - $script:siteStarted).TotalSeconds } else { 0 })
             }
         }
@@ -275,25 +299,9 @@ function Handle-Ui($req, $res, $rel) {
                 if ($body.portMode) { if ($body.portMode -notin 'manual', 'random') { throw 'Invalid port mode.' }; $settings.portMode = [string]$body.portMode }
                 if ($body.browser) { if ($body.browser -notin 'edge', 'chrome') { throw 'Invalid browser.' }; $settings.browser = [string]$body.browser }
                 if ($body.theme) { Set-Theme ([string]$body.theme) }
-                if ($body.page) {
-                    if (-not (Test-Path (Join-Path $root $body.page) -PathType Leaf)) { throw "$($body.page) not found." }
-                    $settings.page = [string]$body.page
-                }
                 Save-Settings
-                if ($body.port -or $body.page -or $body.portMode -or $body.browser) { Add-Log 'sys' "Settings applied: page $($settings.page), port $($settings.port) ($($settings.portMode)), browser $($settings.browser)" }
+                if ($body.port -or $body.portMode -or $body.browser) { Add-Log 'sys' "Settings applied: port $($settings.port) ($($settings.portMode)), browser $($settings.browser)" }
                 Send-Json $res @{ ok = $true }
-            } catch {
-                Add-Log 'err' $_.Exception.Message
-                Send-Json $res @{ ok = $false; error = $_.Exception.Message }
-            }
-        }
-        'api/random' {
-            try {
-                $p = Get-RandomPort
-                Set-SitePort $p
-                Save-Settings
-                Add-Log 'sys' "Random port: now on http://localhost:$p/"
-                Send-Json $res @{ ok = $true; port = $p }
             } catch {
                 Add-Log 'err' $_.Exception.Message
                 Send-Json $res @{ ok = $false; error = $_.Exception.Message }
@@ -301,7 +309,7 @@ function Handle-Ui($req, $res, $rel) {
         }
         'api/site' {
             try {
-                if ((Read-Json $req).on) { Start-Site; Open-Site | Out-Null } else { Stop-Site }
+                if ((Read-Json $req).on) { Start-Site } else { Stop-Site }
                 Send-Json $res @{ ok = $true }
             } catch {
                 Add-Log 'err' $_.Exception.Message
@@ -349,10 +357,11 @@ function Handle-Ui($req, $res, $rel) {
             } catch { $out = ConvertTo-Json -Compress @{ ok = $false; error = $_.Exception.Message } }
             Send $res ([Text.Encoding]::UTF8.GetBytes($out)) 'application/json'
         }
-        'api/bye'   { $script:byeAt = (Get-Date).AddSeconds(4); Send-Json $res @{ ok = $true } }
         default {
             if ($rel -eq '') { $rel = 'server.html' }
-            if ((Send-File $res $here $rel -req $req) -lt 0) { $res.StatusCode = 404 }
+            if ($rel -eq 'favicon.ico') { $sent = Send-File $res $root 'assets/server_favicon.ico' -req $req }
+            else { $sent = Send-File $res $here $rel -req $req }
+            if ($sent -lt 0) { $res.StatusCode = 404 }
         }
     }
 }
@@ -662,16 +671,31 @@ function Handle-Site($req, $res, $rel, $ctx) {
         return $false
     }
     # Light/dark toggle from the app header (the panel uses /api/settings).
+    # GET: the current mode, polled every second by js/core/theme.js so every window follows a change at once (not logged).
+    if ($rel -eq 'api/theme' -and $req.HttpMethod -eq 'GET') { Send-Json $res @{ ok = $true; theme = $settings.theme }; return $false }
     if ($rel -eq 'api/theme') {
         if (-not (Test-FsRequest $req) -or $req.HttpMethod -ne 'POST') { $res.StatusCode = 403; return $false }
         try { Set-Theme ([string]$req.QueryString['theme']); Send-Json $res @{ ok = $true; theme = $settings.theme } }
         catch { $res.StatusCode = 400; Send-Json $res @{ ok = $false; error = $_.Exception.Message } }
         return $false
     }
-    # App shell header status, polled every 5 s: not logged.
+    # Server Control button (Project Manager): open the control panel, or bring it to the front.
+    if ($rel -eq 'api/panel') {
+        if (-not (Test-FsRequest $req) -or $req.HttpMethod -ne 'POST') { $res.StatusCode = 403; return $false }
+        Open-Panel; Send-Json $res @{ ok = $true }
+        return $false
+    }
+    # Project Manager closing stops the server (4 s grace so a reload, which says hello, cancels it).
+    if ($rel -eq 'api/bye' -or $rel -eq 'api/hello') {
+        if (-not (Test-FsRequest $req) -or $req.HttpMethod -ne 'POST') { $res.StatusCode = 403; return $false }
+        $script:byeAt = if ($rel -eq 'api/bye') { (Get-Date).AddSeconds(4) } else { $null }
+        Send-Json $res @{ ok = $true }
+        return $false
+    }
+    # App shell header status, polled every 5 s: not logged. Also the app's heartbeat (main loop).
     if ($rel -eq 'api/status') {
         if (Test-FsRequest $req) {
-            Send-Json $res @{ ok = $true; ps = "$($PSVersionTable.PSVersion)"; port = $settings.port; theme = $settings.theme
+            Send-Json $res @{ ok = $true; ps = "$($PSVersionTable.PSVersion)"; port = $settings.port; theme = $settings.theme; engine = [bool]$script:engine
                               uptime = [int]((Get-Date) - $script:siteStarted).TotalSeconds }
         } else { $res.StatusCode = 403 }
         return $false
@@ -704,6 +728,54 @@ function Handle-Site($req, $res, $rel, $ctx) {
         }
         $size = 0
     }
+    elseif ($rel -in 'api/project/trash/list', 'api/project/trash/restore', 'api/project/trash/empty') {
+        # Trash dialog (Project Manager): list projects/.trash, move one back to projects/<folder>, or delete everything.
+        try {
+            if (-not (Test-FsRequest $req)) { throw [FsError]::new(403, 'Forbidden: request did not come from this site.') }
+            $trash = Join-Path $root 'projects\.trash'
+            if ($rel -eq 'api/project/trash/list') {
+                $items = @()
+                if (Test-Path -LiteralPath $trash -PathType Container) {
+                    foreach ($d in Get-ChildItem -LiteralPath $trash -Directory) {
+                        $name = $d.Name
+                        try { $name = (Get-Content -LiteralPath (Join-Path $d.FullName 'project-config.json') -Raw | ConvertFrom-Json).name } catch {}
+                        $items += @{ id = $d.Name; name = $name; trashed = $d.LastWriteTimeUtc.ToString('o') }
+                    }
+                }
+                Send-Json $res @{ ok = $true; items = @($items) }
+            }
+            else {
+                if ($req.HttpMethod -ne 'POST') { throw [FsError]::new(405, 'Use POST.') }
+                if ($rel -eq 'api/project/trash/empty') {
+                    $n = 0
+                    if (Test-Path -LiteralPath $trash -PathType Container) {
+                        foreach ($d in Get-ChildItem -LiteralPath $trash -Force) { Remove-Item -LiteralPath $d.FullName -Recurse -Force; $n++ }
+                    }
+                    Add-Log 'sys' "Trash emptied: $n project(s) permanently deleted."
+                    Send-Json $res @{ ok = $true; deleted = $n }
+                }
+                else {
+                    $id = [string]$req.QueryString['id']
+                    if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,120}$') { throw [FsError]::new(400, 'Invalid trash item.') }
+                    $src = Join-Path $trash $id
+                    if (-not (Test-Path -LiteralPath $src -PathType Container)) { throw [FsError]::new(404, 'Not in the trash.') }
+                    # <folder>-yyyyMMdd-HHmmss -> <folder>; if that name is taken again, add -restored, -restored-2, ...
+                    $folder = $id -replace '-\d{8}-\d{6}$', ''
+                    $dest = Join-Path $root "projects\$folder"; $k = 1
+                    while (Test-Path -LiteralPath $dest) { $dest = Join-Path $root ("projects\$folder-restored" + $(if ($k -gt 1) { "-$k" } else { '' })); $k++ }
+                    Move-Item -LiteralPath $src -Destination $dest
+                    Add-Log 'sys' "Project restored from trash: projects/$(Split-Path $dest -Leaf)"
+                    Send-Json $res @{ ok = $true; folder = (Split-Path $dest -Leaf) }
+                }
+            }
+        } catch {
+            $err = $_.Exception; if ($err.InnerException) { $err = $err.InnerException }
+            try { $res.StatusCode = if ($err -is [FsError]) { $err.Code } else { 500 } } catch {}
+            Add-Log 'err' "Project trash: $($err.Message)"
+            try { Send-Json $res @{ ok = $false; error = $err.Message } } catch {}
+        }
+        $size = 0
+    }
     elseif ($rel.StartsWith('api/fs/')) {
         $op = $rel.Substring(7)
         try { $size = Handle-Fs $req $res $op }
@@ -719,8 +791,9 @@ function Handle-Site($req, $res, $rel, $ctx) {
         }
     }
     # "/" redirects to the chosen page so its relative links (../js, ../fonts) resolve.
-    elseif ($rel -eq '') { $res.Redirect("/$(Get-ShellUrl $settings.page)"); $size = 0 }
+    elseif ($rel -eq '') { $res.Redirect("/$(Get-ShellUrl $entryPage)"); $size = 0 }
     else {
+        if ($rel -eq 'favicon.ico') { $rel = 'assets/client_favicon.ico' }   # one copy of each icon, in assets
         $size = Send-File $res $root $rel -Token -req $req
         if ($size -lt 0) { $res.StatusCode = 404; $size = 0 }
     }
@@ -736,15 +809,24 @@ $browsers = @{
 }
 function Find-Browser($name) { $browsers[$name] | Where-Object { Test-Path $_ } | Select-Object -First 1 }
 
-# Opens $url as an app window sized to 85% of the primary screen's working area, centered.
+# Opens $url as an app window: 95% of the primary screen's working-area height, 16:10 width (capped), centered.
 # Each profile is its own browser process, so the size/position flags apply.
-function Open-App($exe, $url, $profileName) {
+# -Width/-Height: fixed size instead (capped to the working area).
+function Open-App($exe, $url, $profileName, [int]$Width = 0, [int]$Height = 0) {
     Add-Type -AssemblyName System.Windows.Forms
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $w = [int]($wa.Width * 0.85); $h = [int]($wa.Height * 0.85)
+    $h = [int]($wa.Height * 0.95); $w = [Math]::Min([int]($h * 1.6), $wa.Width)
+    if ($Width -gt 0) { $w = [Math]::Min($Width, $wa.Width); $h = [Math]::Min($Height, $wa.Height) }
     $x = $wa.X + [int](($wa.Width - $w) / 2); $y = $wa.Y + [int](($wa.Height - $h) / 2)
     # Profiles live outside the project; flags keep them minimal (no component downloads, cache, sync, extensions).
     $dir = Join-Path $env:LOCALAPPDATA "data-noodler\$profileName"
+    # The browser remembers the last app-window size and ignores --window-size; forget it so the fixed size applies.
+    $pref = Join-Path $dir 'Default\Preferences'
+    if (Test-Path $pref) {
+        $json = [IO.File]::ReadAllText($pref)
+        $new = [regex]::Replace($json, '"app_window_placement":\{(?:[^{}]|\{[^{}]*\})*\}', '"app_window_placement":{}')
+        if ($new -ne $json) { [IO.File]::WriteAllText($pref, $new) }
+    }
     Start-Process $exe @("--app=$url", "--user-data-dir=`"$dir`"",
         "--window-size=$w,$h", "--window-position=$x,$y", '--no-first-run', '--no-default-browser-check',
         '--disable-component-update', '--disable-background-networking', '--disable-sync', '--disable-extensions',
@@ -799,18 +881,29 @@ function Raise-Window($dir) {
     }
 }
 
-# --- open the control panel ---
+# --- control panel: opened on demand (Server Control button in the Project Manager) ---
 $uiUrl = "http://localhost:$uiPort/"
 $browser = (Find-Browser 'edge'), (Find-Browser 'chrome') | Where-Object { $_ } | Select-Object -First 1
-if ($browser) { Open-App $browser $uiUrl '.profile' | Out-Null } else { Start-Process $uiUrl }
+$script:panelBeat = $null
+function Open-Panel {
+    $dir = Join-Path $env:LOCALAPPDATA 'data-noodler\.profile'
+    if ($script:panelBeat -and ((Get-Date) - $script:panelBeat).TotalSeconds -lt 5) { Raise-Window "$dir`"" }   # already open
+    elseif ($browser) { Open-App $browser $uiUrl '.profile' -Width 1200 -Height 800 | Out-Null }
+    else { Start-Process $uiUrl }
+}
+
+# --- start the site and open the app (Project Manager) ---
+if (Test-Path (Join-Path $root $entryPage) -PathType Leaf) {
+    try { Start-Site; Open-Site | Out-Null } catch { Add-Log 'err' "Start failed: $($_.Exception.Message)" }
+} else { Add-Log 'err' "$entryPage not found." }
 
 # --- main loop ---
-# The panel sends a heartbeat (log poll) every second, and /api/bye when it closes.
+# Closing the Project Manager stops the server (/api/bye). Heartbeats: the panel's log poll (1 s) and every app window's status poll (5 s). The server exits
+# 120 s after the last one (all windows closed), or 60 s after start if none ever connects.
 $script:running = $true
 $script:byeAt = $null
 $lastBeat = $null
-$autoStartAt = $null; $autoStartDone = $false
-$deadline = (Get-Date).AddSeconds(60)   # panel must connect within this
+$deadline = (Get-Date).AddSeconds(60)
 $pending = $listener.GetContextAsync()
 $script:loadMs = $startSw.ElapsedMilliseconds
 try {
@@ -824,9 +917,10 @@ try {
             try {
                 $rel = [Uri]::UnescapeDataString($req.Url.AbsolutePath).TrimStart('/')
                 if ($req.Url.Port -eq $uiPort) {
-                    if ($rel -eq 'api/log') { $lastBeat = Get-Date; $script:byeAt = $null }
+                    if ($rel -eq 'api/log') { $lastBeat = $script:panelBeat = Get-Date }
                     Handle-Ui $req $res $rel
                 } else {
+                    if ($rel -eq 'api/status') { $lastBeat = Get-Date }
                     $async = Handle-Site $req $res $rel $ctx
                 }
             } catch {
@@ -839,21 +933,8 @@ try {
         if ($staticJobs.Count) { Complete-StaticJobs }
         Read-EngineLog
         if ($importJobs.Count) { Watch-ImportJobs }
-        # Auto start: 2 s after the panel first connects (so its notifications show), start the site
-        # if a module is selected; otherwise say why not.
-        if ($lastBeat -and -not $autoStartDone) {
-            if (-not $autoStartAt) { $autoStartAt = (Get-Date).AddSeconds(2); Add-Log 'sys' 'Auto start in 2 s...' }
-            elseif ((Get-Date) -ge $autoStartAt) {
-                $autoStartDone = $true
-                if ($settings.page -and (Test-Path (Join-Path $root $settings.page) -PathType Leaf)) {
-                    try { Start-Site; Open-Site | Out-Null } catch { Add-Log 'err' "Auto start failed: $($_.Exception.Message)" }
-                } else {
-                    Add-Log 'warn' 'No module selected. Auto start aborted. Pick one under Modules, then Start server.'
-                }
-            }
-        }
         $now = Get-Date
-        if ($script:byeAt -and $now -gt $script:byeAt) { break }
+        if ($script:byeAt -and $now -gt $script:byeAt) { break }   # Project Manager closed
         if ($lastBeat -and ($now - $lastBeat).TotalSeconds -gt 120) { break }   # throttled/minimized tabs poll slowly
         if (-not $lastBeat -and $now -gt $deadline) { break }
     }

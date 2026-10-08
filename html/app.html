@@ -6,8 +6,8 @@
 <script>
 // Old shell address (app.html?m=<module>&project=...): every module now opens as its own page with the global header.
 (() => {
-  const q = new URLSearchParams(location.search), m = q.get('m') || 'home'; q.delete('m');
-  const page = /^[a-z-]+$/.test(m) ? m : 'home';
+  const q = new URLSearchParams(location.search), m = q.get('m') || 'project_manager'; q.delete('m');
+  const page = /^[a-z_-]+$/.test(m) ? m : 'project_manager';
   location.replace(`/html/${page}.html${q.size ? `?${q}` : ''}`);
 })();
 </script>

@@ -8,7 +8,7 @@
   color-scheme: dark;
   --bg: #1a1a19; --panel: #242422; --panel-2: #2c2c2a; --border: #3a3936; --sel: #44433f;
   --text: #ffffff; --text-2: #c3c2b7; --muted: #8d8b82;
-  --blue: #3987e5; --blue-h: #5a9cec; --ok: #4cc27f; --warn: #d9b343; --err: #e24c4c;
+  --blue: #3987e5; --blue-h: #5a9cec; --ok: #4cc27f; --save: #3aa86a; --warn: #d9b343; --err: #e24c4c;
   --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c9a227; --c5: #9b6bd6; --c6: #d6529a; --c7: #5fb0c9; --c8: #8d8b82;
   --mono: 'Syne Mono', ui-monospace, Consolas, monospace;
   --pink: #f27ab8; --lerr: #ff9090; --time: #aeaca4;
@@ -20,7 +20,7 @@
   color-scheme: light;
   --bg: #fcfcfb; --panel: #f4f4f2; --panel-2: #ecebe7; --border: #dddcd6; --sel: #dcdbd5;
   --text: #0b0b0b; --text-2: #52514e; --muted: #85837c;
-  --blue: #2a78d6; --blue-h: #1f66bd; --ok: #0a7a3d; --warn: #a8850f; --err: #c42b2b;
+  --blue: #2a78d6; --blue-h: #1f66bd; --ok: #0a7a3d; --save: #086832; --warn: #a8850f; --err: #c42b2b;
   --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #c9a227; --c5: #9b6bd6; --c6: #d6529a; --c7: #5fb0c9; --c8: #85837c;
   --pink: #d63a8a; --lerr: #c42b2b; --time: #85837c;
   --thumb: #c9c8c2; --thumb-h: #a9a8a1;
@@ -44,6 +44,10 @@ code, .mono, pre { font-family: var(--mono); font-size: 12.5px; }
 
 /* ---- layout ---- */
 .app { display: flex; flex-direction: column; height: 100%; }
+/* Headers never scroll away: the page is a fixed column (global header + .app) and only the section under the mouse
+   scrolls (.main and any inner list, log or table). */
+body:has(> .app) { display: flex; flex-direction: column; overflow: hidden; }
+body > .app { flex: 1; min-height: 0; height: auto; }
 /* Same header as the server panel: DN logo, title, sub line. */
 .topbar { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .brand { display: flex; align-items: center; gap: 12px; }
@@ -85,12 +89,13 @@ button, .btn {
 }
 /* Hover, every button: the same colour, a little brighter. */
 button:not(:disabled):hover, .btn:not(.disabled):hover { filter: brightness(1.15); }
+:root[data-theme="light"] button:not(:disabled):hover, :root[data-theme="light"] .btn:not(.disabled):hover { filter: brightness(0.9); }   /* light mode: hover darkens the button's own colour */
 button:disabled, .btn.disabled { background: var(--sel); color: var(--muted); cursor: not-allowed; }
 /* ghost = the server panel's cancel button */
 button.ghost { background: var(--sel); color: var(--text); }
 button.ghost:disabled { color: var(--muted); }
 button.danger { background: var(--err); }
-button.go { background: var(--ok); }
+button.go { background: var(--save); }   /* green = Save buttons only */
 button.small { height: 21px; padding: 0 8px; font-size: 12px; }
 
 /* ---- inputs ---- */
@@ -101,6 +106,10 @@ input, select, textarea {
 textarea { font-family: var(--mono); height: auto; min-height: 80px; padding: 6px 8px; width: 100%; resize: vertical; }
 select[multiple] { height: auto; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
+/* No browser focus box anywhere (buttons, links, dialogs, menus, anything focusable); text fields keep the blue ring above. */
+*:focus, *:focus-visible { outline: none; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
+input[type=radio], input[type=checkbox] { outline: none !important; }
 input[type=checkbox] { min-height: 0; accent-color: var(--blue); }
 /* Drop-down lists with rounded corners (Edge/Chrome customizable select; older browsers keep the plain list). */
 @supports (appearance: base-select) {
@@ -147,7 +156,7 @@ table.data td.null { color: var(--muted); font-style: italic; }
   --bc: var(--muted);
   display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
   height: 20px; padding: 0 8px 2px; border: 1px solid var(--bc); border-radius: 4px; /* bottom 2px lifts the text */
-  background: color-mix(in srgb, var(--bc) 50%, #000); color: var(--bc);
+  background: color-mix(in srgb, var(--bc) 50%, #000); color: #d6d4cc;   /* light grey text; the border + background carry the colour */
   font-size: 11px; font-weight: 600; line-height: 1; text-transform: uppercase; letter-spacing: .04em;
   white-space: nowrap; vertical-align: middle;
 }
@@ -187,24 +196,32 @@ dialog footer { padding: 4px 24px 20px; display: flex; justify-content: flex-end
 /* ---- progress, logs ---- */
 .progress { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
 .progress > i { display: block; height: 100%; width: 0; background: var(--blue); transition: width .2s; }
-.log { font-family: var(--mono); font-size: 13px; line-height: 1.6; color: var(--text-2); max-height: 180px; overflow: auto; white-space: pre-wrap; }
-.log .t { color: var(--time); } .log .err { color: var(--lerr); } .log .ok { color: var(--ok); } .log .sys { color: var(--pink); }
+.log { font-family: var(--mono); font-size: 13px; line-height: 1.6; color: var(--text-2); height: calc(5 * 1.6em); overflow: auto; white-space: pre-wrap; border: 1px solid var(--border); border-radius: 4px; padding: 0 8px; }
+.log.more { height: calc(25 * 1.6em); }   /* Show More (js/core/embed.js) sets the real height: down to the window bottom */
+a.log-more { display: inline-block; font-size: 12px; line-height: 1.2; text-decoration: none; }
+.log-more-row + .log, .stack > .log-more-row + .log { margin-top: 2px; }   /* link sits just above its log */
+.log .t { color: var(--time); } .log .err { color: var(--lerr); } .log .ok { color: var(--ok); } .log .sys { color: var(--pink); } .log .warn { color: #f08c00; }
 
 /* ---- module buttons row (home page) ---- */
 .modules { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 0; }
 
 /* ---- charts ---- */
 svg text { fill: var(--text-2); font-size: 11px; font-family: 'Exo 2', system-ui, sans-serif; }
+/* ApexCharts writes its own font-family on every label: keep the app font everywhere in a chart. */
+.apexcharts-canvas text, .apexcharts-canvas .apexcharts-legend-text, .apexcharts-tooltip, .apexcharts-xaxistooltip, .apexcharts-yaxistooltip { font-family: 'Exo 2', system-ui, sans-serif !important; }
 svg .gridline { stroke: var(--border); stroke-width: 1; }
+.gtip { position: fixed; z-index: 1000; pointer-events: none; display: none; max-width: 420px; padding: 5px 9px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.35); font-size: 12px; line-height: 1.4; white-space: pre-line; }   /* title tooltips (js/core/embed.js) */
 .tip { position: fixed; pointer-events: none; background: var(--text); color: var(--bg); padding: 4px 8px; border-radius: 4px; font-size: 12px; z-index: 60; display: none; }
 .kpi { font-size: 28px; font-weight: 600; }
 .kpi-label { font-size: 12px; color: var(--text-2); }
 
 /* ---- user pickers (js/core/user-picker.js) ---- */
 .upick .ubox { position: relative; }
-.upick .usel { width: 100%; justify-content: space-between; background: var(--bg); color: var(--text); border: 1px solid var(--border); font-weight: 400; padding: 0 8px; }
-.upick .usel:hover { background: var(--panel-2); }
-.upick .usel i { font-style: normal; color: var(--muted); }
+.upick .uhead { display: flex; align-items: center; gap: 8px; }
+.upick .uplus { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 0; min-height: 0; padding: 0; border-radius: 3px; background: var(--save); color: #fff; }
+.upick .uplus:hover { background: var(--ok); }
+.upick .uplus svg { display: block; }
+.upick .umenu { right: auto; width: 300px; }
 .umenu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 20px #0008; padding: 6px; }
 .umenu .uq { width: 100%; margin-bottom: 6px; }
 .uitems { max-height: 260px; overflow-y: scroll; overscroll-behavior: contain; } /* 10 rows x 26px */
@@ -217,7 +234,7 @@ svg .gridline { stroke: var(--border); stroke-width: 1; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 25px; padding: 0 4px 0 10px; border-radius: 4px; background: var(--sel); color: var(--text); }
 .chip button { height: 19px; padding: 0 6px; background: none; color: var(--muted); }
 .chip button:hover { background: var(--err); color: #fff; }
-.upick.multi .ubox { align-self: flex-start; }
+
 dialog { overflow: visible; }
 
 /* ---- shared: code editor (js/pipeline/sql-editor.js) and right settings popout (.side) ---- */
@@ -228,17 +245,20 @@ dialog { overflow: visible; }
 .sqled-hl, .sqled-ta { position: absolute; inset: 0; margin: 0; padding: 8px 10px; font: inherit; white-space: pre; tab-size: 4; overflow: auto; border: 0; }
 .sqled-hl { color: var(--text); pointer-events: none; scrollbar-width: none; }
 .sqled-hl::-webkit-scrollbar { display: none; }
-.sqled-ta { background: transparent; color: transparent; caret-color: var(--text); resize: none; outline: none; }
-.sqled-ta::selection { background: var(--sel); color: transparent; }
+.sqled-ta, .sqled-ta:focus { background: transparent; color: transparent; caret-color: var(--text); resize: none; outline: none; }
+.sqled-ta::selection { background: color-mix(in srgb, var(--blue) 35%, transparent); color: transparent; }   /* see-through: the coloured code underneath stays readable */
+::selection { background: color-mix(in srgb, var(--blue) 45%, transparent); }
 .t-kw { color: var(--blue); font-weight: 600; } .t-fn { color: var(--c5); } .t-str { color: var(--ok); } .t-num { color: var(--warn); }
 .t-com { color: var(--muted); font-style: italic; } .t-ty { color: var(--c6); } .t-tb { color: var(--c3); } .t-id { color: var(--text-2); }
+.sqled-hl .t-err { text-decoration: underline wavy var(--err); text-decoration-skip-ink: none; text-underline-offset: 3px; background: color-mix(in srgb, var(--err) 18%, transparent); }   /* live SQL check */
+.sqled-gut .bad { color: var(--err); font-weight: 700; }
 .sqled-pop { position: absolute; z-index: 5; min-width: 220px; max-height: 240px; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
 .sqled-pop div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 8px; cursor: pointer; }
 .sqled-pop div.sel { background: var(--sel); }
 .sqled-pop small { color: var(--muted); }
 /* Settings popout: slides in from the right. */
 .side { position: fixed; top: 0; right: 0; bottom: 0; width: 340px; max-width: 92vw; z-index: 40; display: flex; flex-direction: column;
-  background: var(--panel); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0, 0, 0, .3); transform: translateX(100%); transition: transform .18s ease-out; }
+  background: var(--panel); border-left: 1px solid var(--border); transform: translateX(100%); transition: transform .18s ease-out; }
 .side.open { transform: none; }
 .side header { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .side header b { flex: 1; font-size: 15px; }
@@ -251,21 +271,33 @@ dialog { overflow: visible; }
 .seg button { flex: 1; }
 .seg button:not(.on) { background: var(--sel); color: var(--text); }
 
-/* ---- developer button (orange): Widget Builder ---- */
+/* ---- developer button (orange) ---- */
 :root { --orange: #f08a3c; }
 button.dev { background: var(--orange); color: #1a1a19; }
 button.dev:hover { filter: brightness(1.1); }
+:root[data-theme="light"] button.dev:hover { filter: brightness(0.9); }
 
 /* ---- widget settings (js/widgets/widget-settings.js) ---- */
 .ws-in { display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); }
 .ws-inh { display: flex; align-items: center; gap: 8px; }
 .ws-inh b { flex: 1; font-weight: 600; } .ws-inh small { color: var(--muted); }
 .ws-inh .ws-lbl { flex: 1; min-width: 0; }
-.ws-role button { flex: 0 0 auto; }
+.ws-fields { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 260px; overflow: auto; }
+.ws-fields label { display: flex; align-items: center; gap: 8px; padding: 3px 8px; color: var(--text-2); }
+.ws-fields label small { margin-left: auto; color: var(--muted); }
 .ws-opt { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-height: 28px; }
 .ws-opt > span:not(.ws-cp):not(.ws-num), .ws-opt > .ws-olbl { flex: 1; min-width: 0; }
 .ws-opt.wide > :last-child { flex: 1 0 100%; }
 .ws-opt .ws-olbl { height: 24px; font-size: 12.5px; }
+details.ws-grp { border-top: 1px solid var(--border); }
+details.ws-grp > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 10px 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); user-select: none; }
+details.ws-grp > summary::-webkit-details-marker { display: none; }
+details.ws-grp > summary::before { content: '\25B8'; color: var(--muted); font-size: 11px; transition: transform .12s; }
+details.ws-grp[open] > summary::before { transform: rotate(90deg); }
+details.ws-grp > summary small { margin-left: auto; color: var(--muted); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.ws-gb { display: flex; flex-direction: column; gap: 8px; padding: 0 0 12px; }
+.ws-opt.off > span, .ws-opt.off .switch, .ws-opt.off select, .ws-opt.off input:not(.ws-inc), .ws-opt.off .cp-chip { opacity: .45; }
+.ws-opt .ws-inc { accent-color: var(--ok); }
 .ws-num { display: flex; align-items: center; gap: 8px; }
 .ws-num input[type=range] { flex: 1; accent-color: var(--blue); }
 .ws-num input[type=number] { width: 76px; }

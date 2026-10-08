@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Widget Settings</title>
+<script src="../js/core/theme.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+  .pop { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
+  .tree { border-right: 1px solid var(--border); background: var(--panel); overflow: auto; padding: 8px 0; user-select: none; }
+  .tree .node { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tree .node:hover { background: var(--panel-2); }
+  .tree .node.on { background: var(--sel); }
+  .tree .node .tw { width: 12px; flex: none; color: var(--muted); font-size: 11px; transition: transform .12s; text-align: center; }
+  .tree .grp.open > .node .tw { transform: rotate(90deg); }
+  .tree .node small { margin-left: auto; color: var(--muted); }
+  .tree .kids { display: none; }
+  .tree .grp.open > .kids { display: block; }
+  .tree .kids .node { padding-left: 36px; color: var(--text-2); }
+  .tree .root { font-weight: 600; padding: 8px 12px; color: var(--text); }
+  .main { overflow: auto; padding: 16px 24px; }
+  .main h2 { margin: 0 0 14px; }
+  .body { display: flex; flex-direction: column; gap: 12px; max-width: 560px; text-align: left; }
+  .empty { color: var(--muted); padding: 24px; }
+  .flash { outline: 1px solid var(--blue); outline-offset: 3px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="pop">
+  <nav class="tree" id="tree"></nav>
+  <main class="main"><h2 id="h"></h2><div class="body" id="body"></div></main>
+</div>
+<script src="../js/widgets/color-picker.js"></script>
+<script src="../js/widgets/apex-options.js"></script>
+<script src="../js/widgets/apex-widget.js"></script>
+<script src="../js/widgets/widget-settings.js"></script>
+<script>
+// Dashboard settings pop-out (opened by the Dashboard's "Pop-out Settings"). The Dashboard calls DNSettings.show() whenever
+// the selection changes; everything is read from / written to the opener through window.opener.DashBridge.
+// Left: tree (Widget, Inputs, option groups; expand a group for its settings). Right: the picked group's settings.
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const B = () => window.opener && !window.opener.closed ? window.opener.DashBridge : null;
+let cur = null, group = 'Widget';
+const openGroups = new Set(['Widget', 'Filter fields']);
+
+function show() {
+  const b = B(); cur = b ? b.state() : null;
+  if (!cur) { $('tree').innerHTML = ''; $('h').textContent = ''; $('body').innerHTML = `<div class="empty">${b ? 'Click a widget on the dashboard to edit its settings.' : 'The dashboard window is closed.'}</div>`; return; }
+  tree(); pane();
+}
+// The tree only (keeps the right side and its focus): after filter fields are added / removed / renamed.
+function tree() {
+  const groups = [{ name: 'Widget', count: 2, items: [{ label: 'Title', path: 'w:title' }, { label: 'Dataset', path: 'w:dataset' }] }, ...(cur.m ? WidgetSettings.tree(args()) : [])];
+  if (!groups.some(g => g.name === group)) group = 'Widget';
+  $('tree').innerHTML = `<div class="root">${esc(cur.title)}</div>` + groups.map(g => `<div class="grp ${openGroups.has(g.name) ? 'open' : ''}" data-g="${esc(g.name)}">
+    <div class="node ${g.name === group ? 'on' : ''}"><span class="tw">&#9656;</span>${esc(g.name)}<small>${g.count}</small></div>
+    <div class="kids">${g.items.map(i => `<div class="node" data-p="${esc(i.path)}">${esc(i.label)}</div>`).join('')}</div></div>`).join('');
+}
+const args = () => ({ manifest: cur.m, w: cur.w, columns: cur.columns, onChange: (kind, live) => { B()?.change(cur.w, kind, live); if (cur.m?.kind === 'filter') tree(); } });
+function pane() {
+  $('h').textContent = group;
+  const el = $('body');
+  if (group !== 'Widget') return WidgetSettings.render(el, { ...args(), only: group });
+  const w = cur.w;
+  el.innerHTML = `<label class="field" data-path="w:title">Title<input id="pTitle" type="text" value="${esc(w.title)}" placeholder="${esc(cur.pkgName)}"></label>
+    <label class="field" data-path="w:dataset">Dataset<select id="pDs"><option value="">Select a dataset…</option>${cur.datasets.map(d => `<option ${d === w.dataset ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></label>
+    ${cur.datasets.length ? '' : '<div class="muted">No ready datasets. Use Import Directly, or run the Transform on staged data.</div>'}`;
+  $('pTitle').oninput = e => { B()?.setTitle(w, e.target.value); $('tree').querySelector('.root').textContent = e.target.value || cur.pkgName; };
+  $('pDs').onchange = e => { B()?.setDataset(w, e.target.value); show(); };
+}
+$('tree').addEventListener('click', e => {
+  const n = e.target.closest('.node'); if (!n) return;
+  const p = n.dataset.p, g = n.closest('.grp');
+  if (!g) return;
+  if (!p) {   // group: toggle open (twisty) and show it
+    const name = g.dataset.g;
+    if (e.target.closest('.tw') || name === group) { g.classList.toggle('open'); g.classList.contains('open') ? openGroups.add(name) : openGroups.delete(name); }
+    else { g.classList.add('open'); openGroups.add(name); }
+    if (name !== group) { group = name; $('tree').querySelectorAll('.node.on').forEach(x => x.classList.remove('on')); n.classList.add('on'); pane(); }
+    return;
+  }
+  // a setting: show its group, then scroll to it and flash it
+  if (g.dataset.g !== group) { group = g.dataset.g; $('tree').querySelectorAll('.node.on').forEach(x => x.classList.remove('on')); g.querySelector('.node').classList.add('on'); pane(); }
+  const row = [...$('body').querySelectorAll('[data-path]')].find(x => x.dataset.path === p);
+  if (row) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 900); row.querySelector('input, select')?.focus(); }
+});
+// Own size / place (800 x 800, bottom-right corner of the screen), whatever the browser restored.
+function place() {
+  const W = 800, H = 800;
+  try { resizeTo(W, H); moveTo((screen.availLeft ?? 0) + screen.availWidth - W, (screen.availTop ?? 0) + screen.availHeight - H); } catch {}
+}
+place(); addEventListener('load', place);
+window.DNSettings = { show };
+show();
+setInterval(() => { if (!B() && cur) show(); }, 1500);   // the dashboard went away
+</script>
+</body>
+</html>

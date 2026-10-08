@@ -1,54 +1,84 @@
-// Settings popout body for a widget package, built from its manifest. Same UI in the Dashboard and the Widget Builder.
-// Global: WidgetSettings.
-//   WidgetSettings.render(el, { manifest, w, columns, builder, onChange(kind) })
+// Settings body for a dashboard widget, built from its package manifest. Global: WidgetSettings.
+//   WidgetSettings.render(el, { manifest, w, columns, onChange(kind, live), only })
 //     w        = dashboard widget ({ inputs, opts, limit }); values are written into it
 //     columns  = [{ name, type }] of the chosen dataset (null = no dataset: data inputs are hidden)
-//     builder  = true: also edit the manifest (input roles, option labels, "show in dashboard")
-//     kind     = 'data' (re-run the query) | 'look' (redraw only) | 'manifest'
+//     only     = a group name: render just that group's rows (no collapsible wrapper); omitted = every group, collapsible
+//     kind     = 'data' (re-run the query) | 'look' (redraw only)
+//   WidgetSettings.tree(args) -> [{ name, count, items: [{ label, path }] }]   the groups (Inputs first) for a tree view
+// Filter widgets (kind 'filter'): w.filters = [{ col, label, sort: 'asc' | 'desc' | 'count' }], w.showCounts, w.maxValues;
+// the selected values live in w.sel = { <col>: value } (set from the dropdowns on the dashboard).
+// Every row carries data-path (option path, or "in:<key>" for an input) so a tree can jump to it.
 const WidgetSettings = (() => {
+  const OPEN = new Set(['Inputs']);   // groups the user opened (kept across re-renders)
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const section = (name, body, count) => `<details class="ws-grp" data-g="${esc(name)}" ${OPEN.has(name) ? 'open' : ''}><summary>${esc(name)}<small>${count}</small></summary><div class="ws-gb">${body}</div></details>`;
   const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i;
+  const groupName = (m, o) => m.kind === 'apexcharts' && typeof ApexOptions !== 'undefined' ? ApexOptions.groupOf(o.path) : o.group || 'General';
+  // Option groups: Map(name -> [index in m.options]) of the options shown in the dashboard.
+  function optionGroups(m) {
+    const groups = new Map();
+    (m.options || []).forEach((o, k) => { if (o.show === false) return; const g = groupName(m, o); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); });
+    return groups;
+  }
+
+  const SORTS = [['asc', 'Ascending (A to Z)'], ['desc', 'Descending (Z to A)'], ['count', 'Most rows first']];
+  function tree({ manifest: m, w, columns }) {
+    if (m.kind === 'filter') return columns ? [{ name: 'Filter fields', count: (w.filters || []).length, items: (w.filters || []).map((f, k) => ({ label: f.label || f.col || 'Field', path: `f:${k}` })) },
+      { name: 'Filter options', count: 2, items: [{ label: 'Show row counts', path: 'f:counts' }, { label: 'Max values', path: 'f:max' }] }] : [];
+    const out = [];
+    const ins = ApexWidget.inputsOf(m);
+    if (columns) out.push({ name: 'Inputs', count: ins.length, items: ins.map(i => ({ label: i.label, path: `in:${i.key}` })) });
+    for (const [g, list] of optionGroups(m)) out.push({ name: g, count: list.length, items: list.map(k => ({ label: m.options[k].label, path: m.options[k].path })) });
+    return out;
+  }
 
   function render(el, args) {
-    const { manifest: m, w, columns, builder = false, onChange = () => {} } = args;
+    const { manifest: m, w, columns, only, onChange = () => {} } = args;
     w.inputs ||= {}; w.opts ||= {};
     const valOf = o => o.path in w.opts ? w.opts[o.path] : o.default;
-    let h = '';
-    if (columns || builder) {
-      h += `<h2>Data</h2>`;
-      if (!(m.inputs || []).length) h += `<div class="muted">The code has no <code>field</code> to connect.</div>`;
-      for (const i of m.inputs || []) {
-        const b = VegaWidget.binding(m, w, i), isM = i.role === 'measure';
-        const cols = (columns || []).filter(c => !isM || ['count', 'count_distinct', 'min', 'max', 'none'].includes(b.agg) || NUMERIC.test(c.type));
-        h += `<div class="ws-in" data-k="${esc(i.key)}">
-          <div class="ws-inh">${builder ? `<input class="ws-lbl" data-k="${esc(i.key)}" value="${esc(i.label)}" title="Label shown in the dashboard">` : `<b>${esc(i.label)}</b>`}
-            ${builder ? `<div class="seg ws-role"><button data-r="dimension" class="small ${!isM ? 'on' : ''}" title="Group by this field">Dimension</button><button data-r="measure" class="small ${isM ? 'on' : ''}" title="Aggregate this field">Measure</button></div>` : `<small>${isM ? 'measure' : 'dimension'}</small>`}</div>
-          ${columns ? `<select class="ws-col"><option value="">${isM && b.agg === 'count' ? 'All rows' : 'Select a field…'}</option>${cols.map(c => `<option ${c.name === b.col ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>` : ''}
-          ${isM ? `<select class="ws-agg">${VegaWidget.AGGS.map(a => `<option value="${a}" ${a === b.agg ? 'selected' : ''}>${VegaWidget.AGG_LABEL[a]}</option>`).join('')}</select>` : ''}
+    const A = ApexWidget, ins = A.inputsOf(m), parts = [];
+    if (m.kind === 'filter') return filterSettings(el, args);
+    if (columns) {
+      let h = '';
+      for (const i of ins) {
+        const b = A.binding(m, w, i), isM = i.role === 'measure';
+        if (i.role === 'fields') {
+          const on = b.cols || [];
+          h += `<div class="ws-in" data-k="${esc(i.key)}" data-path="in:${esc(i.key)}"><div class="ws-inh"><b>${esc(i.label)}</b><small>${on.length} of ${columns.length}</small></div>
+            <div class="row"><button class="ghost small ws-all">All</button><button class="ghost small ws-none">None</button></div>
+            <div class="ws-fields">${columns.map(c => `<label><input type="checkbox" class="ws-f" value="${esc(c.name)}" ${on.includes(c.name) ? 'checked' : ''}> ${esc(c.name)} <small>${esc(c.type)}</small></label>`).join('')}</div></div>`;
+          continue;
+        }
+        const cols = columns.filter(c => !isM || ['count', 'count_distinct', 'min', 'max'].includes(b.agg) || NUMERIC.test(c.type) || (b.agg === 'none' && i.anyType));
+        const blank = isM && b.agg === 'count' ? 'All rows' : i.optional ? 'None' : 'Select a field…';
+        h += `<div class="ws-in" data-k="${esc(i.key)}" data-path="in:${esc(i.key)}">
+          <div class="ws-inh"><b>${esc(i.label)}</b><small>${isM ? 'measure' : 'dimension'}</small></div>
+          <select class="ws-col"><option value="">${blank}</option>${cols.map(c => `<option ${c.name === b.col ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+          ${isM ? `<select class="ws-agg">${A.AGGS.map(a => `<option value="${a}" ${a === b.agg ? 'selected' : ''}>${A.AGG_LABEL[a]}</option>`).join('')}</select>` : ''}
         </div>`;
       }
-      if (columns) h += `<label class="field">Max rows<input id="wsLimit" type="number" min="1" max="200000" value="${+w.limit || 5000}"></label>`;
-    }
-    const groups = new Map();
-    (m.options || []).filter(o => builder || o.show !== false).forEach((o, idx) => { if (!groups.has(o.group)) groups.set(o.group, []); groups.get(o.group).push([o, (m.options || []).indexOf(o)]); });
-    for (const [g, list] of groups) {
-      h += `<h2>${esc(g)}</h2>`;
-      for (const [o, ix] of list) {
-        const v = valOf(o), lbl = builder ? `<input class="ws-olbl" data-i="${ix}" value="${esc(o.label)}" title="${esc(o.path)}">` : `<span title="${esc(o.path)}">${esc(o.label)}</span>`;
-        const eye = builder ? `<input type="checkbox" class="ws-show" data-i="${ix}" ${o.show !== false ? 'checked' : ''} title="Show in the dashboard">` : '';
-        let ctl = '';
-        if (o.type === 'color') ctl = `<span class="ws-cp" data-i="${ix}"></span>`;
-        else if (o.type === 'boolean') ctl = `<label class="switch"><input type="checkbox" data-i="${ix}" class="ws-v" ${v ? 'checked' : ''}><span></span></label>`;
-        else if (o.type === 'select') ctl = `<select class="ws-v" data-i="${ix}">${(o.choices || []).map(c => `<option ${c === v ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
-        else if (o.type === 'number') ctl = `<span class="ws-num"><input type="range" class="ws-v" data-i="${ix}" min="${o.min}" max="${o.max}" step="${o.step}" value="${v}"><input type="number" class="ws-v" data-i="${ix}" step="${o.step}" value="${v}"></span>`;
-        else ctl = `<input type="text" class="ws-v" data-i="${ix}" value="${esc(v)}">`;
-        h += `<div class="ws-opt ${o.type === 'text' || o.type === 'number' ? 'wide' : ''}">${eye}${lbl}${ctl}</div>`;
+      if (A.hasTop(m)) {
+        const s = A.sortOf(m, w);
+        h += `<label class="field">Order<select id="wsSort">${[['desc', 'Largest first'], ['asc', 'Smallest first'], ['label', 'By label (A to Z)']].map(([v, l]) => `<option value="${v}" ${v === s ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="field">Max categories<input id="wsTop" type="number" min="1" max="1000" value="${A.topOf(m, w)}"></label>`;
       }
+      parts.push(['Inputs', h, ins.length]);
     }
-    if (!(m.options || []).length) h += `<div class="muted">No options found in the code.</div>`;
-    el.innerHTML = h;
+    const control = (o, ix, v) => {
+      if (o.type === 'color') return `<span class="ws-cp" data-i="${ix}"></span>`;
+      if (o.type === 'boolean') return `<label class="switch"><input type="checkbox" data-i="${ix}" class="ws-v" ${v ? 'checked' : ''}><span></span></label>`;
+      if (o.type === 'select') return `<select class="ws-v" data-i="${ix}">${(o.choices || []).map(c => `<option ${c === v ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`;
+      if (o.type === 'number') return `<span class="ws-num"><input type="range" class="ws-v" data-i="${ix}" min="${o.min}" max="${o.max}" step="${o.step}" value="${v}"><input type="number" class="ws-v" data-i="${ix}" step="${o.step}" value="${v}"></span>`;
+      return `<input type="text" class="ws-v" data-i="${ix}" value="${esc(v)}">`;
+    };
+    const row = (o, ix) => `<div class="ws-opt ${o.type === 'text' || o.type === 'number' ? 'wide' : ''}" data-path="${esc(o.path)}"><span title="${esc(o.path)}">${esc(o.label)}</span>${control(o, ix, valOf(o))}</div>`;
+    for (const [g, list] of optionGroups(m)) parts.push([g, list.map(k => row(m.options[k], k)).join(''), list.length]);
+
+    if (only) { const p = parts.find(x => x[0] === only); el.innerHTML = p ? `<div class="ws-gb">${p[1]}</div>` : '<div class="muted">Nothing here.</div>'; }
+    else el.innerHTML = parts.map(p => section(...p)).join('') || '<div class="muted">This widget has no settings.</div>';
 
     // ---- bind ----
+    el.querySelectorAll('details.ws-grp').forEach(d => d.addEventListener('toggle', () => { if (d.open) OPEN.add(d.dataset.g); else OPEN.delete(d.dataset.g); }));
     el.querySelectorAll('.ws-cp').forEach(span => {
       const o = m.options[+span.dataset.i];
       span.append(ColorPicker.swatch(valOf(o), { allowTheme: true, onInput: v => { w.opts[o.path] = v; onChange('look', true); }, onChange: v => { w.opts[o.path] = v; onChange('look'); } }));
@@ -60,20 +90,48 @@ const WidgetSettings = (() => {
       if (o.type === 'number') inp.closest('.ws-num').querySelectorAll('input').forEach(x => { if (x !== inp) x.value = v; });
       onChange('look');
     }));
-    el.querySelectorAll('.ws-in').forEach(row => {
-      const i = m.inputs.find(x => x.key === row.dataset.k), cur = () => (w.inputs[i.key] ||= { col: '', agg: i.agg });
-      row.querySelector('.ws-col')?.addEventListener('change', e => { cur().col = e.target.value; onChange('data'); });
-      row.querySelector('.ws-agg')?.addEventListener('change', e => { cur().agg = e.target.value; if (builder) i.agg = e.target.value; onChange('data'); render(el, args); });
-      row.querySelector('.ws-role')?.addEventListener('click', e => {
-        const r = e.target.closest('[data-r]')?.dataset.r; if (!r || r === i.role) return;
-        i.role = r; i.agg = r === 'measure' ? 'sum' : undefined; delete w.inputs[i.key];
-        onChange('manifest'); render(el, args);
-      });
+    el.querySelectorAll('.ws-in').forEach(r => {
+      const i = ins.find(x => x.key === r.dataset.k), cur = () => (w.inputs[i.key] ||= { col: '', agg: i.agg });
+      r.querySelector('.ws-col')?.addEventListener('change', e => { cur().col = e.target.value; onChange('data'); });
+      r.querySelector('.ws-agg')?.addEventListener('change', e => { cur().agg = e.target.value; onChange('data'); render(el, args); });
+      const fl = r.querySelector('.ws-fields');
+      if (fl) {
+        const sync = () => { cur().cols = [...fl.querySelectorAll('.ws-f:checked')].map(x => x.value); r.querySelector('.ws-inh small').textContent = `${cur().cols.length} of ${columns.length}`; onChange('data'); };
+        fl.addEventListener('change', sync);
+        r.querySelector('.ws-all').onclick = () => { fl.querySelectorAll('.ws-f').forEach(x => x.checked = true); sync(); };
+        r.querySelector('.ws-none').onclick = () => { fl.querySelectorAll('.ws-f').forEach(x => x.checked = false); sync(); };
+      }
     });
-    el.querySelectorAll('.ws-lbl').forEach(inp => inp.addEventListener('input', () => { m.inputs.find(x => x.key === inp.dataset.k).label = inp.value; onChange('manifest'); }));
-    el.querySelectorAll('.ws-olbl').forEach(inp => inp.addEventListener('input', () => { m.options[+inp.dataset.i].label = inp.value; onChange('manifest'); }));
-    el.querySelectorAll('.ws-show').forEach(inp => inp.addEventListener('change', () => { m.options[+inp.dataset.i].show = inp.checked; onChange('manifest'); }));
-    el.querySelector('#wsLimit')?.addEventListener('input', e => { w.limit = Math.max(1, Math.min(200000, +e.target.value || 5000)); onChange('data'); });
+    el.querySelector('#wsSort')?.addEventListener('change', e => { w.sort = e.target.value; onChange('data'); });
+    el.querySelector('#wsTop')?.addEventListener('input', e => { w.top = Math.max(1, Math.min(1000, +e.target.value || 20)); onChange('data'); });
   }
-  return { render };
+  // ---- filter widget: the fields with a dropdown each, their order; Add field / remove ----
+  function filterSettings(el, args) {
+    const { w, columns, only, onChange = () => {} } = args;
+    if (!columns) { el.innerHTML = '<div class="muted">Choose a dataset first (Widget).</div>'; return; }
+    w.filters ||= []; w.sel ||= {};
+    const fields = w.filters.map((f, k) => `<div class="ws-in" data-f="${k}" data-path="f:${k}">
+        <div class="ws-inh"><b>Field ${k + 1}</b><button class="ghost small ws-fdel" title="Remove this field">Remove</button></div>
+        <select class="ws-fcol"><option value="">Select a field…</option>${columns.map(c => `<option ${c.name === f.col ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+        <input type="text" class="ws-flbl" placeholder="Label (default: field name)" value="${esc(f.label || '')}">
+        <select class="ws-fsort">${SORTS.map(([v, l]) => `<option value="${v}" ${v === (f.sort || 'asc') ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      </div>`).join('') + `<div class="row"><button class="ghost small" id="wsFAdd">Add field</button></div>`;
+    const optsH = `<label class="field" data-path="f:counts"><span><input type="checkbox" id="wsFCounts" ${w.showCounts !== false ? 'checked' : ''}> Show row counts next to each value</span></label>
+      <label class="field" data-path="f:max">Max values per dropdown<input id="wsFMax" type="number" min="10" max="100000" value="${+w.maxValues || 1000}"></label>`;
+    const parts = [['Filter fields', fields, w.filters.length], ['Filter options', optsH, 2]];
+    if (only) { const p = parts.find(x => x[0] === only); el.innerHTML = p ? `<div class="ws-gb">${p[1]}</div>` : '<div class="muted">Nothing here.</div>'; }
+    else el.innerHTML = parts.map(p => section(...p)).join('');
+    const again = () => { onChange('data'); render(el, args); };
+    el.querySelectorAll('.ws-in[data-f]').forEach(r => {
+      const f = w.filters[+r.dataset.f];
+      r.querySelector('.ws-fcol').onchange = e => { if (f.col) delete w.sel[f.col]; f.col = e.target.value; again(); };
+      r.querySelector('.ws-flbl').oninput = e => { f.label = e.target.value; onChange('data'); };
+      r.querySelector('.ws-fsort').onchange = e => { f.sort = e.target.value; onChange('data'); };
+      r.querySelector('.ws-fdel').onclick = () => { if (f.col) delete w.sel[f.col]; w.filters.splice(+r.dataset.f, 1); again(); };
+    });
+    el.querySelector('#wsFAdd')?.addEventListener('click', () => { w.filters.push({ col: '', label: '', sort: 'asc' }); again(); });
+    el.querySelector('#wsFCounts')?.addEventListener('change', e => { w.showCounts = e.target.checked; onChange('data'); });
+    el.querySelector('#wsFMax')?.addEventListener('input', e => { w.maxValues = Math.max(10, Math.min(100000, +e.target.value || 1000)); onChange('data'); });
+  }
+  return { render, tree };
 })();

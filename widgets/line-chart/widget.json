@@ -1,0 +1,119 @@
+{
+  "id": "line-chart",
+  "name": "Line Chart",
+  "description": "",
+  "version": 1,
+  "kind": "apexcharts",
+  "spec": "spec.json",
+  "inputs": [
+    {
+      "label": "Category",
+      "role": "dimension",
+      "key": "category"
+    },
+    {
+      "label": "Series",
+      "role": "dimension",
+      "key": "series",
+      "optional": true
+    },
+    {
+      "label": "Value",
+      "role": "measure",
+      "key": "value",
+      "agg": "sum"
+    }
+  ],
+  "options": [
+    {
+      "path": "chart.type",
+      "label": "Chart type",
+      "group": "Chart",
+      "default": "line",
+      "show": true,
+      "type": "select",
+      "choices": [
+        "line",
+        "area",
+        "bar",
+        "pie",
+        "donut",
+        "radialBar",
+        "scatter",
+        "bubble",
+        "heatmap",
+        "candlestick",
+        "boxPlot",
+        "radar",
+        "polarArea",
+        "rangeBar",
+        "rangeArea",
+        "treemap"
+      ]
+    },
+    {
+      "path": "chart.zoom.enabled",
+      "label": "Chart zoom enabled",
+      "group": "Chart",
+      "default": false,
+      "show": true,
+      "type": "boolean"
+    },
+    {
+      "path": "dataLabels.enabled",
+      "label": "Data Labels enabled",
+      "group": "DataLabels",
+      "default": false,
+      "show": true,
+      "type": "boolean"
+    },
+    {
+      "path": "stroke.curve",
+      "label": "Stroke curve",
+      "group": "Stroke",
+      "default": "straight",
+      "show": true,
+      "type": "select",
+      "choices": [
+        "straight",
+        "linear",
+        "step",
+        "step-after",
+        "step-before",
+        "basis",
+        "cardinal",
+        "catmull-rom",
+        "monotone-x",
+        "monotone-y",
+        "natural",
+        "bump-x",
+        "bump-y",
+        "smooth",
+        "stepline",
+        "monotoneCubic"
+      ]
+    },
+    {
+      "path": "title.text",
+      "label": "Title text",
+      "group": "Title",
+      "default": "New Sign-ups by Month",
+      "show": true,
+      "type": "text"
+    },
+    {
+      "path": "title.align",
+      "label": "Title align",
+      "group": "Title",
+      "default": "left",
+      "show": true,
+      "type": "select",
+      "choices": [
+        "left",
+        "center",
+        "right"
+      ]
+    }
+  ],
+  "updated": "2026-10-08T00:21:20.240Z"
+}

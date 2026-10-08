@@ -19,7 +19,7 @@ namespace NativeDataEngine
 
     public sealed class MemTable { public Schema Schema; public List<Batch> Batches; public long Bytes, Rows; public MemoryLease Lease; }
 
-    public sealed class DataEngine : IDisposable
+    public sealed partial class DataEngine : IDisposable
     {
         public const string Version = "1.0.0";
         public readonly EngineOptions Options;
@@ -52,17 +52,37 @@ namespace NativeDataEngine
         }
 
         // ---------- catalog ----------
-        sealed class Catalog : ICatalog
+        // Names a query can read: script session tables / views first, then the request's views (datasets), then
+        // cached tables. Disposing it frees the session's in-memory tables.
+        internal sealed class Catalog : ICatalog, IDisposable
         {
             readonly DataEngine e; readonly Dictionary<string, string> views;
             public long KnownRows, SourceBytes;
+            public ScriptSession Session;
             public Catalog(DataEngine e, Dictionary<string, string> views) { this.e = e; this.views = views ?? new Dictionary<string, string>(); }
-            public string ViewSql(string name) { string s; return views.TryGetValue(name, out s) ? s : null; }
+            public string BaseViewSql(string name) { string s; return views.TryGetValue(name, out s) ? s : null; }
+            public string ViewSql(string name)
+            {
+                if (Session != null)
+                {
+                    if (Session.Tables.ContainsKey(name)) return null;
+                    string v; if (Session.Views.TryGetValue(name, out v)) return v;
+                    if (Session.Dropped.Contains(name)) return null;
+                }
+                return BaseViewSql(name);
+            }
             public Source MemTable(string name)
             {
+                if (Session != null)
+                {
+                    SessTable st;
+                    if (Session.Tables.TryGetValue(name, out st)) return new MemSource(st.Schema, st.Batches);
+                    if (Session.Dropped.Contains(name)) return null;
+                }
                 MemTable t; if (!e.tables.TryGetValue(name, out t)) return null;
                 return new MemSource(t.Schema, t.Batches);
             }
+            public void Dispose() { if (Session != null) { Session.Dispose(); Session = null; } }
             public Source TableFunction(FuncTable f, Planner p)
             {
                 switch (f.Name)
@@ -120,10 +140,16 @@ namespace NativeDataEngine
             return Datasets.Files(f);
         }
 
-        Planned Plan(string sql, Dictionary<string, string> views, out QueryStmt q, out Catalog cat)
+        // sql may be one query or a script (Script.cs); the caller disposes cat when the result has been read.
+        Planned Plan(string sql, Dictionary<string, string> views, out QueryStmt q, out Catalog cat, CancellationToken ct)
         {
-            q = Parser.ParseQuery(sql);
-            cat = new Catalog(this, views);
+            q = Prepare(sql, views, out cat, ct);
+            try { return PlanQ(q, cat); }
+            catch { cat.Dispose(); throw; }
+        }
+        Planned Plan(string sql, Dictionary<string, string> views, out QueryStmt q, out Catalog cat) { return Plan(sql, views, out q, out cat, CancellationToken.None); }
+        Planned PlanQ(QueryStmt q, Catalog cat)
+        {
             Planned p = new Planner(cat, Options.BatchRowCount).Plan(q);
             Optimizer.Prune(p.Op);
             return p;
@@ -167,29 +193,91 @@ namespace NativeDataEngine
             {
                 Stopwatch sw = Stopwatch.StartNew();
                 QueryStmt q; Catalog cat;
-                Planned p = Plan(sql, views, out q, out cat);
-                QueryResult r = new QueryResult(); r.Schema = p.Op.Schema;
-                if (q.Describe) { r.Schema = DescribeSchema(p.Op.Schema, r); r.Ms = sw.ElapsedMilliseconds; return r; }
-                ExecCtx ctx = Ctx(null, workers, ct);
-                long limit = maxRows > 0 ? maxRows : Options.MaxResultRows;
-                using (MemoryLease lease = new MemoryLease(Mem, "Query result"))
+                Planned p = Plan(sql, views, out q, out cat, ct);
+                try
                 {
-                    try
-                    {
-                        foreach (Batch b in p.Op.Run(ctx))
-                        {
-                            Batch x = b;
-                            if (r.Rows + x.Rows > limit) { x = x.Slice(0, (int)(limit - r.Rows)); r.Truncated = true; }
-                            if (x.Rows > 0) { lease.Add(x.Bytes); r.Batches.Add(x); r.Rows += x.Rows; }
-                            if (r.Truncated) break;
-                        }
-                    }
-                    finally { ctx.End(); }
+                    QueryResult r = new QueryResult(); r.Schema = p.Op.Schema;
+                    if (q.Describe) { r.Schema = DescribeSchema(p.Op.Schema, r); r.Ms = sw.ElapsedMilliseconds; return r; }
+                    CollectRows(p, r, maxRows, workers, ct);
+                    r.Ms = sw.ElapsedMilliseconds;
+                    return r;
                 }
-                r.Ms = sw.ElapsedMilliseconds;
-                return r;
+                finally { cat.Dispose(); }
             });
         }
+        void CollectRows(Planned p, QueryResult r, long maxRows, int workers, CancellationToken ct)
+        {
+            ExecCtx ctx = Ctx(null, workers, ct);
+            long limit = maxRows > 0 ? maxRows : Options.MaxResultRows;
+            using (MemoryLease lease = new MemoryLease(Mem, "Query result"))
+            {
+                try
+                {
+                    foreach (Batch b in p.Op.Run(ctx))
+                    {
+                        Batch x = b;
+                        if (r.Rows + x.Rows > limit) { x = x.Slice(0, (int)(limit - r.Rows)); r.Truncated = true; }
+                        if (x.Rows > 0) { lease.Add(x.Bytes); r.Batches.Add(x); r.Rows += x.Rows; }
+                        if (r.Truncated) break;
+                    }
+                }
+                finally { ctx.End(); }
+            }
+        }
+
+        // Preview: the first `limit` rows and the total row count of a query or script. A script's statements run
+        // once; the rows and the count are then two plans of the final query, run at the same time on the workers.
+        public QueryResult Preview(string sql, Dictionary<string, string> views, int limit, int workers, CancellationToken ct, out long count)
+        {
+            long n = -1;
+            QueryResult res = WithWiden(() =>
+            {
+                Stopwatch sw = Stopwatch.StartNew();
+                Catalog cat;
+                QueryStmt q = Prepare(sql, views, out cat, ct);
+                try
+                {
+                    q = q.Copy(); q.Describe = false;
+                    QueryStmt top = Wrap(q, false), cnt = Wrap(q, true);
+                    top.Limit = limit > 0 ? limit : 100;
+                    Planned pTop = PlanQ(top, cat), pCnt = PlanQ(cnt, cat);
+                    long total = -1; Exception cntErr = null;
+                    Thread th = new Thread(() =>
+                    {
+                        try
+                        {
+                            ExecCtx cx = Ctx(null, workers, ct);
+                            try { foreach (Batch b in pCnt.Op.Run(cx)) if (b.Rows > 0) total = b.Cols[0].IsNull(0) ? 0 : b.Cols[0].I[0]; }
+                            finally { cx.End(); }
+                        }
+                        catch (Exception e) { cntErr = e; }
+                    });
+                    th.IsBackground = true; th.Start();
+                    QueryResult r = new QueryResult(); r.Schema = pTop.Op.Schema;
+                    try { CollectRows(pTop, r, 0, workers, ct); }
+                    finally { th.Join(); }
+                    if (cntErr != null) throw cntErr;
+                    n = total;
+                    r.Ms = sw.ElapsedMilliseconds;
+                    return r;
+                }
+                finally { cat.Dispose(); }
+            });
+            count = n;
+            return res;
+        }
+        // SELECT * / count(*) FROM (q)
+        static QueryStmt Wrap(QueryStmt q, bool count)
+        {
+            SelectStmt s = new SelectStmt();
+            SelectItem it = new SelectItem();
+            if (count) { Call c = new Call(); c.Name = "count"; c.Star = true; it.E = c; it.Alias = "n"; } else it.E = new StarE();
+            s.Items.Add(it);
+            SubqueryTable st = new SubqueryTable(); st.Query = q; st.Alias = "__preview"; s.From = st;
+            QueryStmt w = new QueryStmt(); w.Body = s;
+            return w;
+        }
+
         static Schema DescribeSchema(Schema s, QueryResult r)
         {
             Schema d = new Schema(new List<Field> { new Field("column_name", DataType.Varchar), new Field("column_type", DataType.Varchar) });
@@ -201,7 +289,7 @@ namespace NativeDataEngine
 
         public Schema Describe(string sql, Dictionary<string, string> views)
         {
-            return WithWiden(() => { QueryStmt q; Catalog cat; return Plan(sql, views, out q, out cat).Op.Schema; });
+            return WithWiden(() => { QueryStmt q; Catalog cat; Schema s = Plan(sql, views, out q, out cat).Op.Schema; cat.Dispose(); return s; });
         }
 
         // ---------- write a dataset ----------
@@ -213,7 +301,7 @@ namespace NativeDataEngine
             {
                 QueryStmt q; Catalog cat;
                 j.Stage = "Planning";
-                Planned p = Plan(sql, views, out q, out cat);
+                Planned p = Plan(sql, views, out q, out cat, j.Cts.Token);
                 if (cat.SourceBytes > 0) j.BytesTotal = cat.SourceBytes; else if (cat.KnownRows > 0) j.RowsTotal = cat.KnownRows;
                 ExecCtx ctx = Ctx(j, workers, j.Cts.Token);
                 j.Stage = "Writing Parquet";
@@ -227,7 +315,7 @@ namespace NativeDataEngine
                         return m;
                     }
                 }
-                finally { ctx.End(); }
+                finally { ctx.End(); cat.Dispose(); }
             });
         }
 
@@ -274,7 +362,7 @@ namespace NativeDataEngine
             return WithWiden(() =>
             {
                 QueryStmt q; Catalog cat;
-                Planned p = Plan(sql, views, out q, out cat);
+                Planned p = Plan(sql, views, out q, out cat, j.Cts.Token);
                 if (cat.KnownRows > 0) j.RowsTotal = cat.KnownRows;
                 ExecCtx ctx = Ctx(j, 0, j.Cts.Token);
                 long rows = 0;
@@ -318,7 +406,7 @@ namespace NativeDataEngine
                     File.Move(tmp, to);
                 }
                 catch { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } throw; }
-                finally { ctx.End(); }
+                finally { ctx.End(); cat.Dispose(); }
                 Dictionary<string, object> res = new Dictionary<string, object>();
                 res["path"] = PathGuard.Rel(Root, to); res["rows"] = rows; res["bytes"] = new FileInfo(to).Length; res["format"] = format;
                 return res;
@@ -381,7 +469,7 @@ namespace NativeDataEngine
                 MemTable m = new MemTable(); m.Schema = p.Op.Schema; m.Batches = new List<Batch>(); m.Lease = new MemoryLease(Mem, "Cached table");
                 try { foreach (Batch b in p.Op.Run(ctx)) { m.Lease.Add(b.Bytes); m.Batches.Add(b); m.Rows += b.Rows; m.Bytes += b.Bytes; } }
                 catch { m.Lease.Dispose(); throw; }
-                finally { ctx.End(); }
+                finally { ctx.End(); cat.Dispose(); }
                 return m;
             });
             tables[name] = t;

@@ -76,8 +76,8 @@ Every value is computed from the row id, so the data is the same every time and 
 <script src="../js/test-data-gen.js"></script>
 <script>
 const $ = id => document.getElementById(id), T = TestDataGen;
-const log = (m, c = '') => { const d = document.createElement('div'); d.className = c; d.textContent = `${new Date().toLocaleTimeString()}  ${m}`; $('log').append(d); $('log').scrollTop = 1e9; };
-const fmtS = ms => ms >= 60000 ? `${Math.floor(ms / 60000)}m ${Math.round(ms % 60000 / 1000)}s` : (ms / 1000).toFixed(1) + ' s';
+const log = (m, c = '') => { const d = document.createElement('div'); d.className = c; d.textContent = `${new Date().toLocaleString('sv-SE')}  ${m}`; $('log').append(d); $('log').scrollTop = 1e9; };
+const fmtS = ms => (ms / 1000).toFixed(1) + ' s';
 const MB = b => (b / 1048576).toFixed(0) + ' MB';
 const fmtRows = n => n >= 1e6 ? (n / 1e6) + 'M' : (n / 1e3) + 'k';
 const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };

@@ -96,7 +96,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const log = (m, c = '') => { const d = document.createElement('div'); d.className = c; d.textContent = m; $('log').append(d); $('log').scrollTop = 1e9; };
-const fmtMs = ms => ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : Math.round(ms) + ' ms';
+const fmtMs = ms => (ms / 1000).toFixed(1) + ' s';
 const med = a => { const b = [...a].sort((x, y) => x - y), h = b.length >> 1; return b.length % 2 ? b[h] : (b[h - 1] + b[h]) / 2; };
 const COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', 'var(--s4)', 'var(--s5)', 'var(--s6)'];
 const guard = fn => async () => { try { await fn(); } catch (e) { log('FAILED: ' + e.message, 'err'); console.error(e); } };
@@ -116,7 +116,7 @@ const QUERIES = [
 
 // ---- progress ----
 let step = 0, total = 1, t0 = 0, label = '';
-const paint = () => { $('fill').style.width = (100 * step / total) + '%'; $('msg').textContent = `${step}/${total}  ${label}  ${((performance.now() - t0) / 1000).toFixed(1)}s`; };
+const paint = () => { $('fill').style.width = (100 * step / total) + '%'; $('msg').textContent = `${step}/${total}  ${label}  ${((performance.now() - t0) / 1000).toFixed(1)} s`; };
 const begin = l => { label = l; t0 = performance.now(); paint(); };
 
 // ---- start ----

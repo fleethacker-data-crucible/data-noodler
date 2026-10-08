@@ -1,8 +1,0 @@
-{
-  "id": "table",
-  "name": "Table",
-  "description": "Pick and order fields",
-  "kind": "builtin",
-  "builtin": "table",
-  "version": 1
-}
