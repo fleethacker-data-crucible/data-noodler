@@ -28,6 +28,7 @@ const Publisher = (() => {
   const loadRenderers = () => renderers ||= (async () => {
     if (typeof ApexRender === 'undefined') await addScript('/js/widgets/apex-render.js');
     await Promise.all([typeof ApexCharts === 'undefined' && '/js/vendor/apexcharts.min.js', typeof ApexTree === 'undefined' && '/js/vendor/apextree.min.js',
+      typeof d3 === 'undefined' && '/js/vendor/d3.min.js', typeof D3Render === 'undefined' && '/js/widgets/d3-render.js',
       typeof ApexWidget === 'undefined' && '/js/widgets/apex-widget.js', typeof Pptx === 'undefined' && '/js/core/pptx.js', typeof Pdf === 'undefined' && '/js/core/pdf.js']
       .filter(Boolean).map(addScript));
   })().catch(e => { renderers = null; throw e; });

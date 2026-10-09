@@ -5,22 +5,16 @@
 <title>Dashboard</title>
 <script src="../js/core/embed.js"></script>
 <script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<script src="../js/core/icons.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   html, body { height: 100%; overflow: hidden; }
   /* Global header (embedded) sits above .app: share the window height instead of adding to it. */
   body { display: flex; flex-direction: column; }
   body > .app { flex: 1; min-height: 0; height: auto; }
-  .addwrap { position: relative; }
-  .addmenu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 4px; display: none; min-width: 150px; }
-  .addmenu.open { display: block; }
-  .addmenu div { padding: 5px 10px; border-radius: 4px; cursor: pointer; }
-  .addmenu div:hover { background: var(--sel); }
-  .addmenu small { color: var(--muted); display: block; font-size: 11.5px; }
+  /* Menus: the global drop-down look (theme.css .dd-menu, js/core/menus.js); the right-click one floats at the mouse. */
   .ctxmenu { position: fixed; top: 0; left: 0; z-index: 50; box-shadow: 0 6px 20px #0006; }
-  .addmenu small { display: none; }          /* menu tips (every menu here): only while Shift is held */
-  .addmenu.tips small { display: block; }
-  .addmenu .danger { color: var(--err); font-weight: 600; }   /* destructive item: bold red, always last */
 
   /* Canvas: a fixed 16:9 grid (COLS x ROWS cells) scaled to fit the window; cells are whole pixels (--g), so the
      grid ends on a full cell at every edge. Widgets snap to it. */
@@ -55,6 +49,25 @@
   .wd .rz[data-dir="ne"] { top: 0; right: 0; cursor: nesw-resize; } .wd .rz[data-dir="nw"] { top: 0; left: 0; cursor: nwse-resize; }
   .wd .rz[data-dir="se"] { bottom: 0; right: 0; cursor: nwse-resize; } .wd .rz[data-dir="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
   .wd:hover .rz[data-dir="se"] { background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); }
+  /* Add widget popup: categories (collapsible, arrow far left), 8 tiles per row; tile = 100 x 80 picture + name under it. */
+  .wpick { position: fixed; inset: 0; z-index: 60; background: #0008; display: grid; place-items: center; }
+  .wpick[hidden] { display: none; }
+  .wp-box { width: min(944px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 12px 40px #0008; }
+  .wp-head { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .wp-head b { font-weight: 600; font-size: 14px; }
+  .wp-head .spacer { flex: 1; }
+  .wp-body { overflow: auto; padding: 6px 14px 14px; scrollbar-width: none; }
+  .wp-body::-webkit-scrollbar { display: none; }
+  .wp-ch { display: flex; align-items: center; gap: 8px; padding: 8px 0 6px; cursor: pointer; user-select: none; text-align: left; }
+  .wp-ch b { font-weight: 600; }
+  .wp-ch small { color: var(--muted); }
+  .wp-grid { display: none; grid-template-columns: repeat(8, 100px); gap: 12px 12px; justify-content: start; padding: 4px 0 8px 20px; }
+  .wp-cat.open .wp-grid { display: grid; }
+  .wp-tile { width: 100px; cursor: pointer; text-align: left; }
+  .wp-img { width: 100px; height: 80px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: 11px; }
+  .wp-img img { width: 100%; height: 100%; object-fit: contain; }
+  .wp-tile:hover .wp-img { border-color: var(--blue); outline: 1px solid var(--blue); }
+  .wp-name { margin-top: 4px; font-size: 12px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ghostbox { position: absolute; border: 1px dashed var(--blue); border-radius: 4px; background: color-mix(in srgb, var(--blue) 10%, transparent); pointer-events: none; z-index: 2147483000; }
 
 </style>
@@ -64,19 +77,18 @@
   <header class="topbar">
     <div class="brand"><span class="logo">DN</span><div><h1 id="title">Dashboard</h1><div class="sub" id="sub"></div></div></div>
     <div class="row hdr-tools" id="tools">
-      <div class="addwrap"><button id="add" class="ghost">Add widget ▾</button>
-        <div class="addmenu" id="addmenu"></div>
-      </div>
-      <div class="addwrap"><button id="opts" class="ghost">Options ▾</button>
-        <div class="addmenu" id="optmenu">
+      <button id="addChart" class="ghost" title="Add a chart (D3 Studio's published charts)">Charts</button>
+      <button id="add" class="ghost" title="Add a widget">Widgets</button>
+      <div class="dd-wrap"><button id="opts" class="ghost">Options ▾</button>
+        <div class="dd-menu" id="optmenu">
           <div data-act="size">Size Window<small>Resize the window so the grid fills it edge to edge (16:9)</small></div>
+          <div data-act="refresh">Refresh All<small>Re-run every widget (ignores the cache)</small></div>
         </div>
       </div>
-      <button id="refresh" class="ghost" title="Re-run every widget (ignores the cache)">Refresh all</button>
     </div>
     <div class="spacer"></div>
   </header>
-  <div class="addmenu ctxmenu" id="ctxmenu">
+  <div class="dd-menu ctxmenu" id="ctxmenu">
   <div data-act="settings">Widget Settings<small>Open the settings window for this widget</small></div>
   <div data-act="grid">Data Grid<small>Open the rows under this widget in a Data Grid window</small></div>
   <div data-act="refresh">Refresh<small>Re-run this widget (ignores the cache)</small></div>
@@ -84,17 +96,28 @@
 </div>
 <div class="canvas-wrap" id="wrap"><div class="canvas" id="canvas"></div></div>
 </div>
+<div class="wpick" id="wpick" hidden>
+  <div class="wp-box">
+    <div class="wp-head"><b id="wp-title">Add widget</b><span class="spacer"></span>
+      <button id="wp-close" class="ghost small">Close</button></div>
+    <div class="wp-body" id="wp-body"></div>
+  </div>
+</div>
 
 
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/engine-client.js"></script>
 <script src="../js/core/ui.js"></script>
+<script src="../js/core/menus.js"></script>
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
 <script src="../js/widgets/color-picker.js"></script>
 <script src="../js/vendor/apexcharts.min.js"></script>
 <script src="../js/vendor/apextree.min.js"></script>
+<script src="../js/vendor/d3.min.js"></script>
+<script src="../js/widgets/d3-render.js"></script>
+<script src="../js/core/windows.js"></script>
 <script src="../js/widgets/apex-render.js"></script>
 <script src="../js/widgets/apex-options.js"></script>
 <script src="../js/widgets/apex-widget.js"></script>
@@ -111,11 +134,11 @@ let G = 20;                                     // cell size, px (fitGrid: large
 const SIZE = [16, 9], MIN = [4, 3];             // new widget: 16:9 tile
 let ctx, dash = { version: 3, widgets: [] }, selId = null;
 const results = new Map();                      // id -> last result (redraw on resize without re-querying)
-// Widget packages (global widgets/ folder): Apex.
+// Packages: widgets (widget-studio/live/) and charts (d3-studio/live/).
 let pkgs = new Map();
 const pkgOf = w => pkgs.get(w.pkg);
 const isReady = w => { const m = pkgOf(w); return !!m && ApexWidget.ready(m, w); };
-const queryOf = w => { const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found in widgets/.`); return ApexWidget.query(m, { ...w, where: whereOf(w) }); };
+const queryOf = w => { const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found (widget-studio/live/ or d3-studio/live/).`); return ApexWidget.query(m, { ...w, where: whereOf(w) }); };
 // ---- Filter widgets: w.filters = [{ col, label, sort }], w.sel = { col: value }. Every selection is ANDed into the WHERE of each
 // widget on the same dataset (a Filter's own dropdown ignores its own field so its list stays complete).
 const isFilter = w => pkgOf(w)?.kind === 'filter';
@@ -190,9 +213,14 @@ function draw(w, fresh = false) {
     const body = el.querySelector('.wb'), meta = el.querySelector('.wh small');
     results.delete(w.id);
     const fail = h => { ApexWidget.dispose(body); body.innerHTML = h; meta.textContent = ''; };
-    if (!pkgOf(w)) return fail(`<div class="note err">Widget package "${esc(w.pkg)}" not found in widgets/.</div>`);
+    if (!pkgOf(w)) return fail(`<div class="note err">Widget package "${esc(w.pkg)}" not found (widget-studio/live/ or d3-studio/live/).</div>`);
     if (pkgOf(w).kind === 'apexgrid' && isReady(w)) { try { await drawGrid(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
     if (isFilter(w) && isReady(w)) { try { await drawFilter(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
+    if (!isReady(w) && pkgOf(w).sampleRows?.length) {   // D3 widget not connected yet: its sample data until it is
+      try { await ApexWidget.render(body, pkgOf(w), pkgOf(w).specJson, w, pkgOf(w).sampleRows, { sample: true }); meta.textContent = 'sample data · Right-click > Widget Settings to connect'; }
+      catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); }
+      return;
+    }
     if (!isReady(w)) {
       ApexWidget.dispose(body); meta.textContent = '';
       body.innerHTML = `<div class="note">${!w.dataset ? 'Right-click > Widget Settings to choose a dataset' : 'Right-click > Widget Settings to connect the data inputs'}</div>`;
@@ -213,7 +241,7 @@ const titleOf = w => w.title || pkgOf(w)?.name || w.pkg || 'Widget';
 // other filters. Picking a value re-runs every widget on the dataset.
 async function drawFilter(w, body, meta) {
   await ensureMem(w.dataset);
-  ApexWidget.useStyle(pkgOf(w), body);   // its look: widgets/<id>/style.css only
+  ApexWidget.useStyle(pkgOf(w), body);   // its look: the package's style.css only
   const views = viewsOf(w.dataset), fields = (w.filters || []).filter(f => f.col);
   w.sel ||= {};
   if (!fields.length) { body.innerHTML = '<div class="note">Right-click > Widget Settings to add filter fields</div>'; meta.textContent = ''; return; }
@@ -339,22 +367,48 @@ $('canvas').addEventListener('click', ev => {
 $('canvas').addEventListener('grid-export', e => UI.toast(`Export to .${e.detail.format}: not built yet.`));
 // ---- add ----
 // Every menu here lists its items alphabetically (A to Z, by the item name without its tip).
-function sortMenu(m) {
-  const name = d => (d.firstChild?.textContent || '').trim();
-  [...m.querySelectorAll(':scope > div[data-act], :scope > div[data-pkg]')].sort((a, b) => a.classList.contains('last') - b.classList.contains('last') || name(a).localeCompare(name(b), undefined, { sensitivity: 'base' })).forEach(d => m.append(d));
+document.querySelectorAll('.dd-menu').forEach(Menus.sort);
+
+// ---- Add popup (Charts button = D3 Studio's published charts, Widgets button = widget-studio/live/): its packages by category
+// (collapsible; the open ones are remembered), 8 tiles per row.
+// Tile = the package's thumb.svg (D3 Studio saves one) or a blank 100 x 80 placeholder, name under it. Click = add it.
+const WP_OPEN = 'dn-dashboard-picker-open';
+const catOf = m => m.category || { apexgrid: 'Tables', filter: 'Controls' }[m.kind] || 'Other';
+function pickerOpen() { try { return JSON.parse(localStorage.getItem(WP_OPEN)) || {}; } catch { return {}; } }
+let pickCharts = false;   // which list the popup shows
+function drawPicker() {
+  const open = pickerOpen(), cats = new Map();
+  $('wp-title').textContent = pickCharts ? 'Add chart' : 'Add widget';
+  for (const m of [...pkgs.values()].filter(m => !!m.chart === pickCharts).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))) { const c = catOf(m); if (!cats.has(c)) cats.set(c, []); cats.get(c).push(m); }
+  $('wp-body').innerHTML = [...cats].sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b)).map(([c, list]) =>
+    `<div class="wp-cat ${open[c] !== false ? 'open' : ''}" data-cat="${esc(c)}"><div class="wp-ch">${Icons.caret(0, 'wp-arrow')}<b>${esc(c)}</b><small>${list.length}</small></div>
+    <div class="wp-grid">${list.map(m => `<div class="wp-tile" data-pkg="${esc(m.id)}" title="${esc(m.description || m.name)}">
+      <div class="wp-img">${m.thumb ? `<img src="/${m.dir.split('/').map(encodeURIComponent).join('/')}/${encodeURIComponent(m.thumb)}?v=${esc(m.version || 0)}" alt="">` : ''}</div>
+      <div class="wp-name">${esc(m.name)}</div></div>`).join('')}</div></div>`).join('') || `<div class="muted" style="padding:12px 0">${pickCharts ? 'No published charts yet. Build one in D3 Studio and Publish it.' : 'No widgets in the widgets folder.'}</div>`;
 }
-document.querySelectorAll('.addmenu').forEach(sortMenu);
-$('add').onclick = ev => { ev.stopPropagation(); $('addmenu').classList.toggle('open'); tips($('addmenu'), false); if (ev.shiftKey) tips($('addmenu'), true); };
-addEventListener('click', () => { $('addmenu').classList.remove('open'); $('optmenu').classList.remove('open'); });
-$('add').addEventListener('click', () => $('optmenu').classList.remove('open'));
+const showPicker = UI.guard(async () => { $('wpick').hidden = false; drawPicker(); await loadPkgs(); drawPicker(); });   // picks up packages added to widgets/ meanwhile
+const hidePicker = () => { $('wpick').hidden = true; };
+$('add').onclick = ev => { ev.stopPropagation(); $('optmenu').classList.remove('open'); pickCharts = false; showPicker(); };
+$('addChart').onclick = ev => { ev.stopPropagation(); $('optmenu').classList.remove('open'); pickCharts = true; showPicker(); };
+$('wp-close').onclick = hidePicker;
+$('wpick').addEventListener('click', ev => { if (ev.target === $('wpick')) hidePicker(); });
+$('wp-body').addEventListener('click', ev => {
+  const head = ev.target.closest('.wp-ch');
+  if (head) {
+    const cat = head.parentElement, open = pickerOpen();
+    cat.classList.toggle('open'); open[cat.dataset.cat] = cat.classList.contains('open');
+    try { localStorage.setItem(WP_OPEN, JSON.stringify(open)); } catch {}
+    return;
+  }
+  const t = ev.target.closest('.wp-tile'); if (t) { hidePicker(); addWidget(t.dataset.pkg); }
+});
+addEventListener('keydown', e => { if (e.key === 'Escape' && !$('wpick').hidden) { e.stopImmediatePropagation(); hidePicker(); } }, true);
 
 // ---- options ----
-$('opts').onclick = ev => { ev.stopPropagation(); $('addmenu').classList.remove('open'); $('optmenu').classList.toggle('open'); tips($('optmenu'), false); if (ev.shiftKey) tips($('optmenu'), true); };
-$('optmenu').onclick = ev => {
-  const act = ev.target.closest('[data-act]')?.dataset.act; if (!act) return;
-  $('optmenu').classList.remove('open');
+Menus.bind($('opts'), $('optmenu'), act => {
   if (act === 'size') sizeWindow();
-};
+  else if (act === 'refresh') refreshAll();
+});
 // Size Window: resize the window so the grid area is exactly 16:9 (the grid then touches every edge). Keeps the current
 // width unless the height would not fit on the screen; then the largest size that does.
 function sizeWindow() {
@@ -370,21 +424,20 @@ function sizeWindow() {
   } catch {}
   setTimeout(() => { if (Math.abs(outerWidth - W) > 2 || Math.abs(outerHeight - H) > 2) UI.toast('This window cannot be resized from the page (only module windows opened by Data Noodler can).', 'err'); }, 400);
 }
-$('addmenu').onclick = UI.guard(async ev => {
-  const pid = ev.target.closest('[data-pkg]')?.dataset.pkg; if (!pid) return;
-  $('addmenu').classList.remove('open');
-  const m = pkgs.get(pid), ds = readyDs();
+const addWidget = UI.guard(async pid => {
+  const m = pkgs.get(pid), ds = readyDs(); if (!m) return;
   const w = { id: crypto.randomUUID().slice(0, 8), type: 'widget', pkg: m.id, title: '', dataset: ds.length === 1 ? ds[0].name : '',
     // A new widget always opens in the middle of the grid (and on top: select() below).
     x: Math.floor((COLS - SIZE[0]) / 2), y: Math.floor((ROWS - SIZE[1]) / 2), w: SIZE[0], h: SIZE[1], inputs: {}, opts: {} };
   clamp(w);
+  if (w.dataset) ApexWidget.autoBind(m, w, dsOf(w.dataset)?.columns || []);   // one dataset: connected at once
   dash.widgets.push(w); await saveNow();
   $('canvas').append(widgetEl(w)); fitCanvas(); draw(w);
   select(w.id);
   document.querySelector(`.wd[data-id="${w.id}"]`).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   ctx.log(`Widget added: ${m.name}`);
 });
-$('refresh').onclick = UI.guard(async () => { await ctx.reload(); renderAll(true); await Projects.touchModule(ctx.folder, 'dashboard'); });
+const refreshAll = UI.guard(async () => { await ctx.reload(); renderAll(true); await Projects.touchModule(ctx.folder, 'dashboard'); });
 
 // ---- settings: always in the Pop-out Settings window (html/dashboard-settings.html), which reads / writes the selected
 // widget through window.DashBridge. Selecting a widget opens the window when it is not open yet.
@@ -423,6 +476,7 @@ window.DashBridge = {
   setTitle(w, v) { w.title = v; changed(w, false); },
   setDataset(w, v) {
     const old = w.dataset; w.dataset = v; w.inputs = {};
+    if (!isFilter(w)) ApexWidget.autoBind(pkgOf(w), w, dsOf(v)?.columns || []);   // plug and play: inputs connected at once
     if (isFilter(w)) { w.sel = {}; w.filters = []; dash.widgets.filter(x => x.dataset === old && x !== w).forEach(x => draw(x)); }
     changed(w);
   },
@@ -453,25 +507,12 @@ let ctxId = null;
 $('canvas').addEventListener('contextmenu', ev => {
   const el = ev.target.closest('.wd'); if (!el) return;
   ev.preventDefault(); ctxId = el.dataset.id; select(ctxId);
-  const m = $('ctxmenu'); tips(m, false); m.classList.add('open');
+  const m = $('ctxmenu'); Menus.closeAll(); Menus.tips(m, false); m.classList.add('open');
   const x = Math.min(ev.clientX, innerWidth - m.offsetWidth - 4), y = Math.min(ev.clientY, innerHeight - m.offsetHeight - 4);
   m.style.left = `${Math.max(0, x)}px`; m.style.top = `${Math.max(0, y)}px`;
-  if (ev.shiftKey) tips(m, true);
+  if (ev.shiftKey) Menus.tips(m, true);   // Shift tips: js/core/menus.js (every .dd-menu)
 });
-addEventListener('click', () => $('ctxmenu').classList.remove('open'));
-addEventListener('blur', () => { $('ctxmenu').classList.remove('open'); document.querySelectorAll('.addmenu').forEach(m => tips(m, false)); });
-// Shift held while the menu is open: show the tips under each item.
-// Tips on: the menu doubles its width so the tips fit (kept on screen); off: back to its own width.
-function tips(m, on) {
-  if (on === m.classList.contains('tips')) return;
-  if (!on) { m.classList.remove('tips'); m.style.width = ''; return; }
-  const w = Math.min(m.offsetWidth * 2, innerWidth - 8);
-  m.classList.add('tips'); m.style.width = `${w}px`;
-  const r = m.getBoundingClientRect();
-  if (m.id === 'ctxmenu' && r.right > innerWidth - 4) m.style.left = `${Math.max(4, innerWidth - 4 - w)}px`;
-}
-addEventListener('keydown', e => { if (e.key === 'Shift') document.querySelectorAll('.addmenu.open').forEach(m => tips(m, true)); });
-addEventListener('keyup', e => { if (e.key === 'Shift') document.querySelectorAll('.addmenu').forEach(m => tips(m, false)); });
+addEventListener('blur', () => $('ctxmenu').classList.remove('open'));
 $('ctxmenu').onclick = ev => {
   const act = ev.target.closest('[data-act]')?.dataset.act, w = byId(ctxId); if (!act || !w) return;
   $('ctxmenu').classList.remove('open');
@@ -492,13 +533,11 @@ const delWidget = UI.guard(async w => {
   ctx.log(`Widget deleted: ${titleOf(w)}`);
 });
 
-// Add widget list = every folder in widgets/ with a valid widget.json.
+// Add lists = every package in widget-studio/live/ (Widgets) and d3-studio/live/ (Charts) with a valid widget.json.
 async function loadPkgs() {
   const list = await WidgetRegistry.list(true);
   pkgs = new Map(list.map(m => [m.id, m]));
-  $('addmenu').innerHTML = [...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })).map(m => `<div data-pkg="${esc(m.id)}">${esc(m.name)}<small>${esc(m.description || ApexWidget.KINDS[m.kind])}</small></div>`).join('') || '<div class="muted">No widgets in the widgets folder.</div>';
 }
-$('add').addEventListener('click', () => loadPkgs().catch(() => {}));   // pick up packages added to widgets/ meanwhile
 // Window resized: redraw charts at their new pixel size (from the last result, no re-query).
 // The canvas area changed size (window resize, header added): re-fit the grid, move / redraw the widgets.
 // Live while resizing: grid + widget boxes every frame; charts redraw once the size settles.

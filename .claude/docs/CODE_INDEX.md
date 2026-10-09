@@ -59,16 +59,19 @@ files (`js/...` for pages, `engine/<Area>/...cs` for the engine). Exceptions: `.
 | `js/dn-fs.js` | `DNFS`: client for the project file API. |
 | `js/import/external-source.js` | `ExternalSource`: probe for files outside the project. |
 | `js/pipeline/steps.js` | `PipelineSteps`: step → SQL (pipelines are now `sql` steps; older form steps are converted on load). |
-| `js/pipeline/sql-editor.js` | `SqlEditor`: SQL / JSON (`lang`) code editor (line numbers, colours, Tab/Shift+Tab, auto-indent, SQL completion). CSS in theme.css. |
+| `js/pipeline/sql-editor.js` | `SqlEditor`: SQL / JSON / JS (`lang`) code editor (Ctrl+F find / Ctrl+H replace bar, Ctrl+/ comment) (line numbers, colours, Tab/Shift+Tab, auto-indent, SQL completion). CSS in theme.css. |
 | `js/pipeline/runner.js` | `PipelineRunner`: `load` (pipeline.json v2: queries + active + output; v1 steps converted), `run` = `Engine.write` of the active query to `data/source/<CLEAN_name>/`. |
 | `js/publish/publisher.js` | `Publisher`: dashboard publishing (Web App, PDF, PowerPoint, per-chart images) and dataset exports; shared by Publish and Update. Saved choices: `cfg.publish` (`targets`, `image`, `name`, `data: { names, fmt }`). |
 | `js/update/project-update.js` | `ProjectUpdate.run(folder)` (Project Manager: Update button + workflow in each expanded project): Import (changed sources, same columns), Transform (active query), Dashboard (clears widget caches), Publish (saved choices), Archive (snapshot); result in `cfg.modules.update` (`ok`, `steps`). |
-| `widgets/<id>/widget.json` (+ `spec.json`, `style.css`) | Global widget packages. `spec.$kind` = apexcharts / apexgrid / apextree. `style.css` (widget.json "style") is the widget's ONLY style: PAGE part scoped by `.WIDGET` (= class dn-w-<id>), `/* ===== SHADOW ===== */` part for shadow roots, `--w-*` vars feed chart colours (ApexWidget.useStyle / theme(el)). |
+| `d3-studio/dev/<id>/`, `d3-studio/live/<id>/` | CHARTS (D3 Studio): dev = Save (work in progress, the live code file `d3-code.js`), live = Publish (Dashboard > Charts). |
+| `widget-studio/live/<id>/widget.json` (+ `spec.json`, `style.css`) (dev: `widget-studio/dev/`) | Widget packages (Dashboard > Widgets). `spec.$kind` = apexcharts / apexgrid / apextree. `style.css` (widget.json "style") is the widget's ONLY style: PAGE part scoped by `.WIDGET` (= class dn-w-<id>), `/* ===== SHADOW ===== */` part for shadow roots, `--w-*` vars feed chart colours (ApexWidget.useStyle / theme(el)). |
 | `js/widgets/apex-widget.js` | `ApexWidget` (all widget kinds: inputs from spec.data or defaults per Apex chart type, option detection, query, row shaping, theme, render via ApexRender, sample data) and `WidgetRegistry` (widgets/ folder). |
 | `js/widgets/apex-render.js` | `ApexRender`: ApexCharts (rows -> series / labels / categories by chart type), ApexTree (dimensions = levels), ApexGrid (picked fields); theme defaults merged under the spec. |
 | `js/widgets/apex-options.js` | `ApexOptions`: catalog of ApexCharts options in groups (per chart type) `groupOf(path)` groups widget options in the Dashboard settings. |
-| `widgets/data-grid/grid.js` | `DNGrid`: the Data Grid renderer (our own table, no ApexGrid): one native scroller, rows on screen only, sort / filter / search / resize / autosize, right-click column menu, Export, Pop-out; engine paging via `GridRemote` (grid.provider). Loaded by ApexRender from widget.json "renderer". |
-| `js/vendor/apexcharts.min.js`, `apextree.min.js`, `apex-grid/` | Vendored libraries (offline; no CDN at runtime). |
+| `widget-studio/live/data-grid/grid.js` | `DNGrid`: the Data Grid renderer (our own table, no ApexGrid): one native scroller, rows on screen only, sort / filter / search / resize / autosize, right-click column menu, Export, Pop-out; engine paging via `GridRemote` (grid.provider). Loaded by ApexRender from widget.json "renderer". |
+| `js/vendor/apexcharts.min.js`, `apextree.min.js`, `apex-grid/`, `d3.min.js` (v7.9.0) | Vendored libraries (offline; no CDN at runtime). |
+| `js/widgets/d3-render.js` | `D3Render`: `compile` / `draw` a D3 widget's code (kind `d3`), `colorsOf`. Called by ApexRender.render and D3 Studio. |
+| `html/d3-studio.html`, `js/d3studio/studio.js`, `observable.js` | D3 Studio (global module, no project): code + sample data editors (paste: Observable notebook cells converted by `ObservableImport`, fixed width/height -> W/H), CHARTS only. Preview redraws on every code / data change (no Run), 8 locked default colours, inputs from sample columns; Save (top left) writes `d3-studio/dev/<id>/` (widget.json, d3-code.js, sample.json, spec.json, style.css, thumb.svg), Publish = Save + copy to `d3-studio/live/<id>/`. Settings table = widget.json options (code reads `opts.<path>`). Live code file `d3-studio/dev/<id>/d3-code.js` (new chart: `d3-studio/dev/_new/d3-code.js`) mirrors the code editor both ways (editor writes it; disk edits reload the editor ~1 s, watched by quiet `DNFS.stat`). |
 | `js/widgets/widget-settings.js` | `WidgetSettings.render` / `tree`: widget settings built from a manifest (Dashboard side panel + Pop-out Settings). |
 | `js/widgets/color-picker.js` | `ColorPicker.swatch`: SV square, hue strip, hex, theme palette, recent colours. |
 | `js/vendor/vega.min.js`, `vega-lite.min.js` | Vendored Vega 5.30 / Vega-Lite 5.21 (offline). |
@@ -76,6 +79,9 @@ files (`js/...` for pages, `engine/<Area>/...cs` for the engine). Exceptions: `.
 | `js/mem-monitor.js` | `MemMonitor`: live graph of engine (server process), browser, system memory (`/api/mem`). |
 | `js/test-data-gen.js` | `TestDataGen`: 50-column synthetic data SQL (engine dialect), sizes, part plans. |
 | `js/core/ui.js`, `user-picker.js`, `projects.js`, `project-log.js`, `windows.js`, `module-page.js`, `embed.js`, `theme.js` | Shared page code (unchanged by the engine switch). |
+| `js/core/icons.js` | `Icons`: every inline SVG icon (`Icons.svg(name)`, `Icons.caret(open)` = 24px expand/collapse arrow, CSS `.dn-caret` in theme.css). |
+| `js/core/menus.js` | `Menus`: every page's drop-down menus (`.dd-wrap` / `.dd-menu` in theme.css): `bind`, `sort`, Shift = item tips. Project Manager's Utilities menu (D3 Studio; Widget Studio = not built yet). |
+| `js/core/no-autofill.js` | On every page: text boxes get `autocomplete="off"` on focus, so the browser never saves typed text. |
 | `css/theme.css`, `assets/fonts/` | Universal theme (see `THEME_GUIDE.md`). |
 | `html/app.html` | Redirect only (old shell links → the module page). |
 | `js/core/embed.js` | Global header on every page (logo initials, Data Noodler, module · project, Web Server (PowerShell) + Data Engine (C#) status, ONLINE/OFFLINE); `GlobalHeader.setInfo`. |

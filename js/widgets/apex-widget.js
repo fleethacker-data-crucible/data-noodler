@@ -12,7 +12,7 @@
 const ApexWidget = (() => {
   const AGGS = ['count', 'count_distinct', 'sum', 'avg', 'median', 'min', 'max', 'none'];
   const AGG_LABEL = { count: 'Count', count_distinct: 'Count distinct', sum: 'Sum', avg: 'Average', median: 'Median', min: 'Min', max: 'Max', none: 'No aggregation' };
-  const KINDS = { apexcharts: 'ApexCharts', apexgrid: 'ApexGrid', apextree: 'ApexTree', filter: 'Filter' };   // filter: drawn by the Dashboard (dropdowns)
+  const KINDS = { apexcharts: 'ApexCharts', apexgrid: 'ApexGrid', apextree: 'ApexTree', filter: 'Filter', d3: 'D3' };   // filter: drawn by the Dashboard (dropdowns); d3: the widget's own code (D3 Studio)
   const APEX = new Set(['apexcharts', 'apexgrid', 'apextree']);
 
   // ---- option detection: every colour / number / switch / known choice / text in the spec becomes an option ----
@@ -131,6 +131,51 @@ const ApexWidget = (() => {
     const s = sortOf(m, w);
     return { dataset: w.dataset, groupBy: dims, aggregate, where, sort: s === 'label' ? [{ column: dims[0] }] : [{ column: aggregate[0].as, direction: s }], limit: topOf(m, w) };
   }
+  // ---- axes: every input is named by where it goes. X = bottom (left to right), Y = vertical (the value), Series = colour.
+  // input.axis ('x' | 'y' | 'series' | 'other', set in D3 Studio) wins; else inputs keyed x / y; else 1st dimension = X,
+  // 2nd = Series, measures = Y. A horizontal bar chart (manifest "horizontal") flips the X / Y names.
+  function axisOf(m, i) {
+    if (i.axis) return i.axis;
+    if (i.role === 'fields') return 'other';
+    if (/^(x|y)$/i.test(i.key)) return i.key.toLowerCase();
+    if (i.role === 'measure') return 'y';
+    return dimsOf(m)[0] === i ? 'x' : 'series';
+  }
+  const AXIS_LABEL = { x: 'X axis (bottom, left to right)', y: 'Y axis (vertical, value)', series: 'Series (colour)' };
+  const AXIS_FLIP = { x: 'Y axis (left, top to bottom)', y: 'X axis (bottom, value)', series: 'Series (colour)' };
+  // Charts (kind d3): d.x is always "X Axis", d.y always "Y Axis" (never flipped).
+  const CHART_AXIS = { x: 'X Axis', y: 'Y Axis', series: 'Series (colour)' };
+  function labelOf(m, i) {
+    const a = axisOf(m, i), base = (m.kind === 'd3' ? CHART_AXIS : m.horizontal ? AXIS_FLIP : AXIS_LABEL)[a];
+    if (!base) return i.label || i.key;
+    const same = inputsOf(m).filter(o => axisOf(m, o) === a), n = same.indexOf(i);
+    return same.length > 1 && n > 0 ? `${base.replace(/ \(.*/, '')} ${n + 1} (${i.label || i.key})` : base;
+  }
+  // Plug and play: a dataset picked for a widget connects its inputs at once. Same name first (case, spaces and _ ignored),
+  // then by type: X = a date column, else a text one; Y = a number column; Series (optional) only by name;
+  // Fields (Data Grid) = every column. Inputs already connected are kept.
+  function autoBind(m, w, columns) {
+    if (!columns?.length || m.kind === 'filter') return w;
+    w.inputs ||= {};
+    const norm = s => String(s).toLowerCase().replace(/[\s_-]+/g, ''), NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, DATE = /DATE|TIME/i;
+    const used = new Set(Object.values(w.inputs).map(b => b?.col).filter(Boolean));
+    const take = c => { if (c) used.add(c.name); return c?.name; };
+    const free = f => columns.find(c => !used.has(c.name) && f(c));
+    for (const i of inputsOf(m)) {
+      if (w.inputs[i.key]?.col || w.inputs[i.key]?.cols?.length) continue;
+      if (i.role === 'fields') { w.inputs[i.key] = { cols: columns.map(c => c.name) }; continue; }
+      const isM = i.role === 'measure', a = axisOf(m, i);
+      let col = take(free(c => norm(c.name) === norm(i.key) || norm(c.name) === norm(i.label || '')));
+      // X is a date when the input looks like one (its name, or its sample value); id / key / code columns come last for Y.
+      const sv = m.sampleRows?.[0]?.[i.key], wantsDate = /date|time|day|week|month|year|period/i.test(i.key) || sv instanceof Date || /^\d{4}-\d{2}-\d{2}/.test(String(sv ?? ''));
+      const idLike = c => /(^|[_\s-])(id|key|code|no|num|number)$|^id/i.test(c.name);
+      const text = c => !NUMERIC.test(c.type) && !DATE.test(c.type), date = c => DATE.test(c.type);
+      if (!col && !i.optional && a !== 'series') col = isM ? take(free(c => NUMERIC.test(c.type) && !idLike(c)) || free(c => NUMERIC.test(c.type)))
+        : take((wantsDate ? free(date) || free(text) : free(text) || free(date)) || free(() => true));
+      if (col) w.inputs[i.key] = { col, ...(isM ? { agg: i.agg || 'sum' } : {}) };
+    }
+    return w;
+  }
   const objects = res => res.rows.map(r => Object.fromEntries(res.cols.map((c, k) => [typeof c === 'string' ? c : c.name, r[k]])));
   // Query rows -> rows keyed by input key. Dates become Date objects.
   // Two dimensions: keep the top N values of the first one (by total of the first measure).
@@ -208,39 +253,50 @@ const ApexWidget = (() => {
     }
     el._type = type;
     useStyle(m, el);
-    el._inst = await ApexRender.render(m.kind, el.firstElementChild, s, inputsOf(m), data, W, H, theme(el), { live: !sample, names, columns, prev: reuse ? el._inst : null, remote, more, total, wid: m.id, renderer: m.renderer });
+    el._inst = await ApexRender.render(m.kind, el.firstElementChild, s, inputsOf(m), data, W, H, theme(el), { live: !sample, names, columns, prev: reuse ? el._inst : null, remote, more, total, wid: m.id, renderer: m.renderer, code: m.codeJs });
     return el._inst;
   }
 
-  return { AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, hasTop, ready, query, objects, shape, render, dispose, theme, useStyle, cssParts, getAt, setAt, binding, sortOf, topOf };
+  return { AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, axisOf, labelOf, autoBind, hasTop, ready, query, objects, shape, render, dispose, theme, useStyle, cssParts, getAt, setAt, binding, sortOf, topOf };
 })();
 
 // Packages in the global widgets/ folder: a folder with a valid widget.json is a widget.
+// Packages the Dashboard can add, LIVE folders only: WIDGETS (widget-studio/live/<id>/, any kind but d3) and CHARTS
+// (D3 Studio's published charts, d3-studio/live/<folder>/, kind d3; id "chart-<folder>", m.chart = true).
+// m.dir = the package folder. Work in progress (the dev folders) is never listed here: scan(<dev>) is for the studios.
 const WidgetRegistry = (() => {
-  const ROOT = 'widgets';
+  const ROOT = 'widget-studio/live', WIDGETS_DEV = 'widget-studio/dev', CHARTS_DEV = 'd3-studio/dev', CHARTS_LIVE = 'd3-studio/live';
   let cache = null;
   const valid = m => m && typeof m.id === 'string' && m.name && !!ApexWidget.KINDS[m.kind];
+  // Every package folder under root (a folder with a valid widget.json). prefix = id prefix (charts).
+  async function scan(root, { prefix = '', only = null } = {}) {
+    const out = [];
+    for (const e of (await DNFS.list(root).catch(() => [])).filter(e => e.dir && !e.name.startsWith('_'))) {
+      try {
+        const dir = `${root}/${e.name}`, m = await DNFS.readJSON(`${dir}/widget.json`);
+        if (!valid(m) || (only && !only(m))) continue;
+        m.id = prefix + e.name; m.folder = e.name; m.dir = dir;   // the folder name is the id
+        m.specJson = await DNFS.readJSON(`${dir}/${m.spec || 'spec.json'}`);
+        // The package's own style sheet (widget.json "style"): its whole look, the same wherever it is drawn.
+        if (m.style) m.styleCss = await DNFS.readText(`${dir}/${m.style}`).catch(() => '');
+        // Charts (D3): their code (widget.json "code") and sample rows (widget.json "sample", drawn until a dataset is connected).
+        if (m.code) m.codeJs = await DNFS.readText(`${dir}/${m.code}`).catch(() => '');
+        if (m.sample) m.sampleRows = await DNFS.readJSON(`${dir}/${m.sample}`).catch(() => []);
+        out.push(m);
+      } catch { /* not a package */ }
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
   async function list(fresh = false) {
     if (cache && !fresh) return cache;
-    const out = [];
-    for (const e of (await DNFS.list(ROOT).catch(() => [])).filter(e => e.dir)) {
-      try {
-        const m = await DNFS.readJSON(`${ROOT}/${e.name}/widget.json`);
-        if (!valid(m)) continue;
-        m.id = e.name;   // the folder name is the id
-        m.specJson = await DNFS.readJSON(`${ROOT}/${e.name}/${m.spec || 'spec.json'}`);
-        // The widget's own style sheet (widget.json "style"): its whole look, the same wherever it is drawn.
-        if (m.style) m.styleCss = await DNFS.readText(`${ROOT}/${e.name}/${m.style}`).catch(() => '');
-        out.push(m);
-      } catch { /* not a widget package */ }
-    }
-    out.sort((a, b) => a.name.localeCompare(b.name));
-    return (cache = out);
+    const [widgets, charts] = await Promise.all([scan(ROOT, { only: m => m.kind !== 'd3' }), scan(CHARTS_LIVE, { prefix: 'chart-', only: m => m.kind === 'd3' })]);
+    charts.forEach(m => { m.chart = true; });
+    return (cache = [...widgets, ...charts].sort((a, b) => a.name.localeCompare(b.name)));
   }
   const get = async id => (await list()).find(m => m.id === id);
   const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'widget';
   async function save(manifest, spec) {
-    const { specJson, styleCss: _s, code: _c, ...m } = manifest;
+    const { specJson, styleCss: _s, codeJs: _c, sampleRows: _r, ...m } = manifest;
     m.spec = 'spec.json'; m.version = (+m.version || 0) + 1; m.updated = new Date().toISOString();
     // Every widget has its own style sheet (its only style): a new one starts from a widget of the same kind.
     if (!m.style || !(await DNFS.exists(`${ROOT}/${m.id}/${m.style}`))) {
@@ -255,5 +311,5 @@ const WidgetRegistry = (() => {
     return m;
   }
   async function remove(id) { await DNFS.remove(`${ROOT}/${id}`, { recursive: true }); cache = null; }
-  return { ROOT, list, get, save, remove, slug };
+  return { ROOT, WIDGETS_DEV, CHARTS_DEV, CHARTS_LIVE, scan, list, get, save, remove, slug };
 })();

@@ -1,0 +1,18 @@
+{
+  "$kind": "d3",
+  "data": [
+    {
+      "key": "x",
+      "label": "X Axis",
+      "role": "dimension",
+      "axis": "x"
+    },
+    {
+      "key": "y",
+      "label": "Y Axis",
+      "role": "measure",
+      "axis": "y",
+      "agg": "sum"
+    }
+  ]
+}

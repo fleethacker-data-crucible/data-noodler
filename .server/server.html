@@ -187,6 +187,9 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
   </style>
   <!-- Last mode used, applied before paint (the server's setting is applied on the first poll). -->
   <script>try { document.documentElement.dataset.theme = localStorage.getItem('dn-theme') || 'dark'; } catch {}</script>
+  <script>// No browser text history (same as js/core/no-autofill.js): text boxes get autocomplete="off" when focused.
+    document.addEventListener('focusin', e => { const el = e.composedPath()[0];
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) { el.setAttribute('autocomplete', 'off'); if (el.form) el.form.setAttribute('autocomplete', 'off'); } }, true);</script>
 </head>
 <body>
   <header>

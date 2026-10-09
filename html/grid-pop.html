@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Data Grid</title>
 <script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
@@ -34,7 +35,7 @@ async function draw(d) {
     ApexRender.dispose(inst);
     document.title = `${d.title} · Data Grid`; document.getElementById('h').textContent = d.title;
     const s = JSON.parse(JSON.stringify(d.s)), rows = JSON.parse(JSON.stringify(d.rows || [])), names = [...d.names], columns = JSON.parse(JSON.stringify(d.columns || []));
-    // Same widget package, same style sheet (widgets/<id>/style.css) as where it was popped out from.
+    // Same widget package, same style sheet (<package>/style.css) as where it was popped out from.
     const m = (await WidgetRegistry.list()).find(x => x.id === d.wid) || {};
     body.innerHTML = '<div style="width:100%;height:100%;overflow:hidden"></div>';
     ApexWidget.useStyle(m, body);

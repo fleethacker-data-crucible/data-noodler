@@ -5,6 +5,8 @@
 <title>Transform</title>
 <script src="../js/core/embed.js"></script>
 <script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<script src="../js/core/icons.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   /* No visible scrollbars; scrolling is by mouse wheel (global rules in embed.js: Ctrl = 4x, Shift = sideways in tables). */
@@ -26,9 +28,7 @@
   .lst > div:hover { background: var(--panel); }
   .lst > div.sel { background: var(--sel); font-weight: 600; }
   .lst small { color: var(--muted); white-space: nowrap; }
-  /* Expand arrow: the same ▾ glyph, size and weight as the Preview Source Datasets button; turned when shut. */
-  .lst .tw { color: var(--muted); display: inline-block; width: 16px; font-size: 17px; font-weight: 600; line-height: 1; text-align: center; margin-right: 4px; }
-  .lst .tw.shut { transform: rotate(-90deg); }
+  .lst .dn-caret { vertical-align: middle; margin-right: 4px; }   /* expand arrow (Icons.caret) */
   .fsrch { margin-bottom: 5px; }
   .fsrch input { display: block; width: 100%; box-sizing: border-box; }
   .lst > div.fld { padding-left: 30px; font-family: var(--mono); font-size: 12.5px; }
@@ -161,7 +161,7 @@ const ed = SqlEditor.mount($('sql'), {
 });
 
 function render() {
-  $('dsList').innerHTML = staged().map(d => `<div data-ds="${esc(d.name)}" title="Click: show fields · Shift+click: insert name"><span><span class="tw${open.has(d.name) ? '' : ' shut'}">▾</span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows · ${d.columns.length} cols</small></div>`
+  $('dsList').innerHTML = staged().map(d => `<div data-ds="${esc(d.name)}" title="Click: show fields · Shift+click: insert name"><span>${Icons.caret(open.has(d.name), 'tw')}${esc(d.name)}</span><small>${UI.rows(d.rows)} rows · ${d.columns.length} cols</small></div>`
     + (open.has(d.name) ? [...d.columns].sort((a, b) => abc(a.name, b.name)).map(c => `<div class="fld" data-col="${esc(c.name)}" title="Click to insert"${fhit(c.name) ? '' : ' hidden'}><span>${esc(c.name)}</span><small>${esc(c.type)}</small></div>`).join('') : '')).join('') || '<div class="muted">Nothing staged. Import data first.</div>';
   $('qList').innerHTML = pipe.queries.map((q, i) => `<div data-i="${i}" draggable="true" title="Drag to reorder" class="${i === sel ? 'sel' : ''}"><span><span class="n">${i + 1}</span>${named(q) ? esc(q.name) : '<span class="muted" style="font-weight:400">blank</span>'}</span>${q.id === pipe.active ? '<small class="act" title="Build Output Dataset runs this query">ACTIVE</small>' : ''}</div>`).join('') || '<div class="muted">No queries yet.</div>';
   $('none').hidden = sel >= 0; $('editor').hidden = sel < 0;

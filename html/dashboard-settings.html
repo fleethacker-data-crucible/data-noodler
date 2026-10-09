@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <title>Widget Settings</title>
 <script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<script src="../js/core/icons.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
@@ -12,8 +14,6 @@
   .tree .node { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tree .node:hover { background: var(--panel-2); }
   .tree .node.on { background: var(--sel); }
-  .tree .node .tw { width: 12px; flex: none; color: var(--muted); font-size: 11px; transition: transform .12s; text-align: center; }
-  .tree .grp.open > .node .tw { transform: rotate(90deg); }
   .tree .node small { margin-left: auto; color: var(--muted); }
   .tree .kids { display: none; }
   .tree .grp.open > .kids { display: block; }
@@ -55,7 +55,7 @@ function tree() {
   const groups = [{ name: 'Widget', count: 2, items: [{ label: 'Title', path: 'w:title' }, { label: 'Dataset', path: 'w:dataset' }] }, ...(cur.m ? WidgetSettings.tree(args()) : [])];
   if (!groups.some(g => g.name === group)) group = 'Widget';
   $('tree').innerHTML = `<div class="root">${esc(cur.title)}</div>` + groups.map(g => `<div class="grp ${openGroups.has(g.name) ? 'open' : ''}" data-g="${esc(g.name)}">
-    <div class="node ${g.name === group ? 'on' : ''}"><span class="tw">&#9656;</span>${esc(g.name)}<small>${g.count}</small></div>
+    <div class="node ${g.name === group ? 'on' : ''}">${Icons.caret(0, 'tw')}${esc(g.name)}<small>${g.count}</small></div>
     <div class="kids">${g.items.map(i => `<div class="node" data-p="${esc(i.path)}">${esc(i.label)}</div>`).join('')}</div></div>`).join('');
 }
 const args = () => ({ manifest: cur.m, w: cur.w, columns: cur.columns, onChange: (kind, live) => { B()?.change(cur.w, kind, live); if (cur.m?.kind === 'filter') tree(); } });

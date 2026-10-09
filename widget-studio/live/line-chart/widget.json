@@ -1,6 +1,7 @@
 {
   "id": "line-chart",
   "name": "Line Chart",
+  "category": "Line & Area",
   "description": "",
   "version": 1,
   "kind": "apexcharts",

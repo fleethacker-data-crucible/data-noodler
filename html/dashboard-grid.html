@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Data Grid</title>
 <script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); scrollbar-width: none; }
@@ -39,7 +40,7 @@
     if (!s) throw new Error('Open this window from the Dashboard (right-click a widget > Data Grid).');
     document.title = `${s.title} · Data Grid`; document.getElementById('h').textContent = s.title;
     const m = (await WidgetRegistry.list(true)).find(x => x.kind === 'apexgrid');
-    if (!m) throw new Error('No Data Grid widget package (kind apexgrid) in widgets/.');
+    if (!m) throw new Error('No Data Grid widget package (kind apexgrid) in widget-studio/live/.');
     const columns = JSON.parse(JSON.stringify(s.columns)), cols = columns.map(c => c.name), views = JSON.parse(JSON.stringify(s.views));
     const w = { id: 'drill', dataset: s.dataset, inputs: { fields: { cols } }, opts: { exportFilename: s.title } };
     const remote = (g, bar) => GridRemote.attach(g, { dataset: s.dataset, views: () => views, cols, columns, where: s.where,

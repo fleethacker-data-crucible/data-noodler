@@ -11,7 +11,7 @@
 const WidgetSettings = (() => {
   const OPEN = new Set(['Inputs']);   // groups the user opened (kept across re-renders)
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const section = (name, body, count) => `<details class="ws-grp" data-g="${esc(name)}" ${OPEN.has(name) ? 'open' : ''}><summary>${esc(name)}<small>${count}</small></summary><div class="ws-gb">${body}</div></details>`;
+  const section = (name, body, count) => `<details class="ws-grp" data-g="${esc(name)}" ${OPEN.has(name) ? 'open' : ''}><summary>${Icons.caret()}${esc(name)}<small>${count}</small></summary><div class="ws-gb">${body}</div></details>`;
   const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i;
   const groupName = (m, o) => m.kind === 'apexcharts' && typeof ApexOptions !== 'undefined' ? ApexOptions.groupOf(o.path) : o.group || 'General';
   // Option groups: Map(name -> [index in m.options]) of the options shown in the dashboard.
@@ -27,7 +27,7 @@ const WidgetSettings = (() => {
       { name: 'Filter options', count: 2, items: [{ label: 'Show row counts', path: 'f:counts' }, { label: 'Max values', path: 'f:max' }] }] : [];
     const out = [];
     const ins = ApexWidget.inputsOf(m);
-    if (columns) out.push({ name: 'Inputs', count: ins.length, items: ins.map(i => ({ label: i.label, path: `in:${i.key}` })) });
+    if (columns) out.push({ name: 'Inputs', count: ins.length, items: ins.map(i => ({ label: ApexWidget.labelOf(m, i), path: `in:${i.key}` })) });
     for (const [g, list] of optionGroups(m)) out.push({ name: g, count: list.length, items: list.map(k => ({ label: m.options[k].label, path: m.options[k].path })) });
     return out;
   }
@@ -44,7 +44,7 @@ const WidgetSettings = (() => {
         const b = A.binding(m, w, i), isM = i.role === 'measure';
         if (i.role === 'fields') {
           const on = b.cols || [];
-          h += `<div class="ws-in" data-k="${esc(i.key)}" data-path="in:${esc(i.key)}"><div class="ws-inh"><b>${esc(i.label)}</b><small>${on.length} of ${columns.length}</small></div>
+          h += `<div class="ws-in" data-k="${esc(i.key)}" data-path="in:${esc(i.key)}"><div class="ws-inh"><b>${esc(A.labelOf(m, i))}</b><small>${on.length} of ${columns.length}</small></div>
             <div class="row"><button class="ghost small ws-all">All</button><button class="ghost small ws-none">None</button></div>
             <div class="ws-fields">${columns.map(c => `<label><input type="checkbox" class="ws-f" value="${esc(c.name)}" ${on.includes(c.name) ? 'checked' : ''}> ${esc(c.name)} <small>${esc(c.type)}</small></label>`).join('')}</div></div>`;
           continue;
@@ -52,7 +52,7 @@ const WidgetSettings = (() => {
         const cols = columns.filter(c => !isM || ['count', 'count_distinct', 'min', 'max'].includes(b.agg) || NUMERIC.test(c.type) || (b.agg === 'none' && i.anyType));
         const blank = isM && b.agg === 'count' ? 'All rows' : i.optional ? 'None' : 'Select a field…';
         h += `<div class="ws-in" data-k="${esc(i.key)}" data-path="in:${esc(i.key)}">
-          <div class="ws-inh"><b>${esc(i.label)}</b><small>${isM ? 'measure' : 'dimension'}</small></div>
+          <div class="ws-inh"><b>${esc(A.labelOf(m, i))}</b><small>${isM ? 'measure' : 'dimension'}${m.kind === 'd3' ? ` · d.${esc(i.key)}` : ''}</small></div>
           <select class="ws-col"><option value="">${blank}</option>${cols.map(c => `<option ${c.name === b.col ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
           ${isM ? `<select class="ws-agg">${A.AGGS.map(a => `<option value="${a}" ${a === b.agg ? 'selected' : ''}>${A.AGG_LABEL[a]}</option>`).join('')}</select>` : ''}
         </div>`;

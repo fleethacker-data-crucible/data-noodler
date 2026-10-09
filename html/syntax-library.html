@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <title>Syntax Library · Data Noodler</title>
 <script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<script src="../js/core/icons.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
   /* No visible scrollbars; scrolling is by mouse wheel (Ctrl = 4x, as in js/core/embed.js). */
@@ -19,8 +21,6 @@
   .tree .node.on { background: var(--sel); color: var(--text); }
   .tree .node small { margin-left: auto; color: var(--muted); }
   .tree .root { font-weight: 600; padding: 8px 12px; color: var(--text); }
-  .tree .tw { width: 12px; flex: none; color: var(--muted); font-size: 11px; transition: transform .12s; text-align: center; }
-  .tree .grp.open > .node .tw { transform: rotate(90deg); }
   .tree .kids { display: none; }
   .tree .grp.open > .kids { display: block; }
   .tree .kids .node { padding-left: 36px; font-size: 12.5px; }
@@ -231,7 +231,7 @@ function draw() {
   const hl = s => rx ? esc(s).replace(rx, '<mark>$1</mark>') : esc(s);
   const hit = e => words.every(w => (e.n + ' ' + e.c + ' ' + e.s + ' ' + e.d + ' ' + e.x).toLowerCase().includes(w));
   const by = cats.map(c => [c, L.filter(e => e.c === c && hit(e))]).filter(([, es]) => es.length);
-  $('cats').innerHTML = by.map(([c, es]) => `<div class="grp${words.length || open.has(c) ? ' open' : ''}" data-c="${esc(c)}"><div class="node${!words.length && c === cat ? ' on' : ''}"><span class="tw">▶</span><span>${hl(c)}</span><small>${es.length}</small></div><div class="kids">${
+  $('cats').innerHTML = by.map(([c, es]) => `<div class="grp${words.length || open.has(c) ? ' open' : ''}" data-c="${esc(c)}"><div class="node${!words.length && c === cat ? ' on' : ''}">${Icons.caret(0, 'tw')}<span>${hl(c)}</span><small>${es.length}</small></div><div class="kids">${
     es.map(e => `<div class="node" data-n="${esc(e.n)}"><span>${hl(e.n)}</span></div>`).join('')}</div></div>`).join('');
   const show = words.length ? by : by.filter(([c]) => c === cat);
   $('list').innerHTML = show.map(([c, es]) => (words.length ? `<h2>${esc(c)}</h2>` : '') +es.map(e => `<div class="e" data-n="${esc(e.n)}"><h3>${hl(e.n)}</h3><p>${hl(e.d)}</p>

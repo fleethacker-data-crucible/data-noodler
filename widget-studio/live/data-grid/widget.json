@@ -1,6 +1,7 @@
 {
   "id": "data-grid",
   "name": "Data Grid",
+  "category": "Tables",
   "description": "Table of the picked fields: sort, filter, search, resize, export",
   "version": 2,
   "kind": "apexgrid",

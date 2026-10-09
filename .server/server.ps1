@@ -823,6 +823,8 @@ function Handle-Site($req, $res, $rel, $ctx) {
         if ($size -lt 0) { $res.StatusCode = 404; $size = 0 }
     }
     $script:hits++
+    # File watchers (DNFS.stat(path, { quiet: true }), e.g. D3 Studio's live code file, about 1x a second): not logged.
+    if ($rel -eq 'api/fs/stat' -and $req.QueryString['quiet'] -and $res.StatusCode -eq 200) { return $false }
     Add-Log 'req' ("/$rel" + $req.Url.Query) $res.StatusCode $req.HttpMethod $size $sw.ElapsedMilliseconds
     return $false
 }

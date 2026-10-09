@@ -27,7 +27,8 @@ const DNFS = (() => {
     // [{ name, path, dir, size, modified }]
     list: async (path = '', { recursive = false } = {}) =>
       (await json(call('list', { path, recursive: recursive ? 1 : undefined }))).entries,
-    stat: path => json(call('stat', { path })),
+    // { exists, modified, size, ... }; quiet = not written to the server log (for files watched by polling).
+    stat: (path, { quiet = false } = {}) => json(call('stat', { path, quiet: quiet ? 1 : undefined })),
     exists: async path => (await json(call('stat', { path }))).exists,
 
     read: path => call('read', { path }),                          // raw Response (stream it for big files)

@@ -6,7 +6,7 @@
 (() => {
   const id = location.pathname.split('/').pop().replace(/\.html$/, '');
   const MODS = { project_manager: ['Project Management Module', 'PR'], import: ['Import', 'IM'], pipeline: ['Transform', 'PL'], dashboard: ['Dashboard', 'DA'],
-    publish: ['Publish', 'PU'], update: ['Update', 'UP'] };
+    publish: ['Publish', 'PU'], update: ['Update', 'UP'], 'd3-studio': ['D3 Studio', 'D3'] };
   const [label, initials] = MODS[id] || [document.title || id, id.slice(0, 2).toUpperCase()];
   document.documentElement.classList.add('embedded');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

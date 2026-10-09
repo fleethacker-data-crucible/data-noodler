@@ -100,7 +100,7 @@ const ApexRender = (() => {
   function loadRenderer(doc, wid, file) {
     const win = doc.defaultView;
     let m = loads.get(win); if (!m) loads.set(win, m = new Map());
-    const src = `/widgets/${encodeURIComponent(wid || 'data-grid')}/${file || 'grid.js'}`;
+    const src = `/widget-studio/live/${encodeURIComponent(wid || 'data-grid')}/${file || 'grid.js'}`;
     if (!m.has(src)) m.set(src, new Promise((res, rej) => {
       const s = Object.assign(doc.createElement('script'), { src, onload: res, onerror: () => rej(new Error(`Could not load the grid renderer ${src}.`)) });
       doc.head.append(s);
@@ -142,8 +142,9 @@ const ApexRender = (() => {
   }
 
   // el: an empty box; rows keyed by input key (grid: by column name). live = rows come from a dataset (else the spec's own data).
-  async function render(kind, box, s, ins, rows, W, H, th, { live, names = [], columns = [], prev = null, remote = null, more = null, total = null, popped = false, wid = '', renderer = '' }) {
+  async function render(kind, box, s, ins, rows, W, H, th, { live, names = [], columns = [], prev = null, remote = null, more = null, total = null, popped = false, wid = '', renderer = '', code = '' }) {
     if (kind === 'apexgrid') return grid(box, s, rows, names, columns, remote, popped, wid, renderer, more, total);
+    if (kind === 'd3') { need(typeof D3Render === 'undefined' ? undefined : D3Render, 'D3Render (js/widgets/d3-render.js)'); return D3Render.draw(box, code, rows, { W, H, colors: D3Render.colorsOf(s, th), opts: strip(s), theme: th }); }
     await document.fonts?.load(`11px ${th.font.split(',')[0]}`).catch(() => {});   // Exo 2 loaded before Apex measures label widths
     if (kind === 'apexcharts') return chart(box, s, ins, rows, W, H, th, live, prev);
     if (kind === 'apextree') return tree(box, s, ins, rows, W, H, th, live);

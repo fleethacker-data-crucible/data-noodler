@@ -26,11 +26,16 @@ const SqlEditor = (() => {
   const IND = '    ';
   const isW = c => /[A-Za-z0-9_]/.test(c || '');
 
-  // lang 'json': JSON colours, no completion.
+  // lang 'json' / 'js': JSON or JavaScript colours, no completion.
   function mount(el, { onChange = () => {}, words = () => ({ tables: [], columns: [] }), lang = 'sql', check = null, onCheck = () => {} } = {}) {
     el.classList.add('sqled');
     el.innerHTML = `<div class="sqled-gut"></div><div class="sqled-body"><pre class="sqled-hl" aria-hidden="true"></pre>` +
-      `<textarea class="sqled-ta" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" wrap="off"></textarea></div><div class="sqled-pop" hidden></div><div class="sqled-tip" hidden></div>`;
+      `<textarea class="sqled-ta" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" wrap="off"></textarea></div><div class="sqled-pop" hidden></div><div class="sqled-tip" hidden></div>` +
+      `<div class="sqled-find" hidden><input class="f-q" type="text" placeholder="Find" spellcheck="false">` +
+      `<button type="button" class="f-case" title="Match case">Aa</button><button type="button" class="f-prev" title="Previous (Shift+Enter)">&#8593;</button>` +
+      `<button type="button" class="f-next" title="Next (Enter)">&#8595;</button><span class="f-n"></span>` +
+      `<input class="f-r" type="text" placeholder="Replace" spellcheck="false"><button type="button" class="f-one" title="Replace this match (Enter)">Replace</button>` +
+      `<button type="button" class="f-all" title="Replace every match">All</button><button type="button" class="f-x" title="Close (Esc)">&#215;</button></div>`;
     const ta = el.querySelector('textarea'), hl = el.querySelector('.sqled-hl'), gut = el.querySelector('.sqled-gut'), pop = el.querySelector('.sqled-pop'), tip = el.querySelector('.sqled-tip');
     let items = [], pick = 0, chosen = false;   // chosen: user moved through the list (then Enter accepts)
     let errs = [], checkT, checkSeq = 0;
@@ -84,10 +89,39 @@ const SqlEditor = (() => {
       }
       return out;
     }
+    const JS_KW = new Set('const let var function return if else for while do switch case break continue new this typeof instanceof of in class extends async await try catch finally throw default import export delete void yield'.split(' '));
+    // bad: [{ ta, tb }] error ranges, drawn dark grey (their whole line gets a dark red bar, see paint()).
+    function paintJs(t, bad = []) {
+      let out = '', m;
+      const re = /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|("(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?|`(?:[^`\\]|\\.)*`?)|(\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([A-Za-z_$][\w$]*)|([\s\S])/g;
+      while ((m = re.exec(t))) {
+        const [s, com, str, num, word] = m;
+        let h;
+        if (com) h = `<span class="t-com">${esc(com)}</span>`;
+        else if (str) h = `<span class="t-str">${esc(str)}</span>`;
+        else if (num) h = `<span class="t-num">${s}</span>`;
+        else if (word) h = JS_KW.has(word) ? `<span class="t-kw">${word}</span>` : /^(true|false|null|undefined)$/.test(word) ? `<span class="t-fn">${word}</span>` : word === 'd3' ? `<span class="t-tb">${word}</span>` : esc(word);
+        else h = esc(s);
+        out += s !== '\n' && bad.some(x => x.ta < m.index + s.length && x.tb > m.index) ? `<span class="t-jserr">${h}</span>` : h;
+      }
+      return out;
+    }
     let marks = [];   // { a, b, st, msg } for this paint (hover reads it)
     function paint() {
-      if (lang === 'json') {
-        hl.innerHTML = paintJson(ta.value) + '\n';
+      if (lang === 'js') {
+        // Errors: the bad line gets a dark red bar, the error itself dark grey; hovering the line shows the message.
+        const t = ta.value, cs = getComputedStyle(hl), lh = parseFloat(cs.lineHeight) || 20, padT = parseFloat(cs.paddingTop) || 0;
+        marks = errs.filter(e => e.pos >= 0).map(e => {
+          const [a, b] = span(t, e), ls = t.lastIndexOf('\n', a - 1) + 1, le = t.indexOf('\n', a) < 0 ? t.length : t.indexOf('\n', a);
+          return { a: ls, b: le + 1, ta: a, tb: b, L: lineOf(t, a), st: 'bad', msg: e.message };
+        });
+        const bad = new Set(marks.map(x => x.L));
+        hl.innerHTML = findMarks() + [...bad].map(L => `<div class="sqled-bar" style="top:${padT + (L - 1) * lh}px;height:${lh}px"></div>`).join('') + paintJs(t, marks) + '\n';
+        gut.innerHTML = Array.from({ length: t.split('\n').length }, (_, i) => bad.has(i + 1) ? `<span class="bad">${i + 1}</span>` : i + 1).join('<br>');
+        return sync();
+      }
+      if (lang !== 'sql') {
+        hl.innerHTML = findMarks() + paintJson(ta.value) + '\n';
         gut.innerHTML = Array.from({ length: ta.value.split('\n').length }, (_, i) => i + 1).join('<br>');
         return sync();
       }
@@ -129,7 +163,7 @@ const SqlEditor = (() => {
         const c = s === '\n' ? '' : s.trim() ? cls(m.index, m.index + s.length) : (m.index < sB && m.index >= sA ? 't-stmt' : '');   // spaces: only the statement grey
         out += c ? `<span class="${c}">${h}</span>` : h;
       }
-      hl.innerHTML = out + '\n';
+      hl.innerHTML = findMarks() + out + '\n';
       const n = t.split('\n').length;
       gut.innerHTML = Array.from({ length: n }, (_, i) => badLines.has(i + 1) ? `<span class="bad">${i + 1}</span>` : i + 1).join('<br>');
       sync();
@@ -159,6 +193,19 @@ const SqlEditor = (() => {
       const block = v.slice(a, b), lines = block.split('\n');
       const done = lines.map(l => out ? l.replace(/^( {1,4}|\t)/, '') : IND + l).join('\n');
       ta.setSelectionRange(a, b); insert(done); ta.setSelectionRange(a, a + done.length);
+    }
+    // Ctrl+/: comment / uncomment the caret's line (or every selected line): '//' in JS, '--' in SQL. The caret stays put.
+    function toggleComment() {
+      const mark = lang === 'js' ? '//' : lang === 'sql' ? '--' : null; if (!mark) return;
+      const v = ta.value, s = ta.selectionStart, e = ta.selectionEnd, a = lineStart(s);
+      let b = v.indexOf('\n', e > s && v[e - 1] === '\n' ? e - 1 : e); if (b < 0) b = v.length;
+      const lines = v.slice(a, b).split('\n'), used = lines.filter(l => l.trim());
+      const off = used.length && used.every(l => l.trimStart().startsWith(mark));
+      const ind = Math.min(...used.map(l => l.match(/^[ \t]*/)[0].length), Infinity);
+      const done = lines.map(l => !l.trim() ? l : off ? l.replace(new RegExp(`^([ \\t]*)${mark.replace(/\//g, '\\/')} ?`), '$1') : l.slice(0, ind) + mark + ' ' + l.slice(ind)).join('\n');
+      const d = done.length - (b - a);
+      ta.setSelectionRange(a, b); insert(done);
+      if (e > s) ta.setSelectionRange(a, a + done.length); else { const p = Math.max(a, s + (lines.length === 1 ? d : 0)); ta.setSelectionRange(p, p); }
     }
 
     // ---- completion ----
@@ -198,7 +245,7 @@ const SqlEditor = (() => {
       return tb ? fields[tb] || [] : null;
     }
     function suggest(force) {
-      if (lang === 'json') return;
+      if (lang !== 'sql') return;
       const { w } = wordAt(), lw = w.toLowerCase(), df = dotFields();
       if (df !== undefined) {
         if (!df) return close();
@@ -261,8 +308,9 @@ const SqlEditor = (() => {
       } else if (ev.key === 'Enter' && !ev.ctrlKey) {
         ev.preventDefault();
         const line = ta.value.slice(lineStart(ta.selectionStart), ta.selectionStart), ind = line.match(/^[ \t]*/)[0];
-        insert('\n' + ind + ((lang === 'json' ? /[{[]\s*$/ : /\(\s*$/).test(line) ? IND : ''));
+        insert('\n' + ind + ((lang === 'sql' ? /\(\s*$/ : /[{[(]\s*$/).test(line) ? IND : ''));
       } else if ((ev.key === ' ' || ev.code === 'Space') && ev.ctrlKey) { ev.preventDefault(); suggest(true); }
+      else if ((ev.key === '/' || ev.code === 'Slash') && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); close(); toggleComment(); }
     });
     ta.addEventListener('input', ev => {
       if (quiet) return; changed();
@@ -276,6 +324,77 @@ const SqlEditor = (() => {
     // Caret moves (arrows, clicks) change the error colours.
     let lastCaret = -1;
     document.addEventListener('selectionchange', () => { if (document.activeElement === ta && ta.selectionStart !== lastCaret) { lastCaret = ta.selectionStart; if (errs.length) paint(); } });
+    // ---- find / replace (Ctrl+F, Ctrl+H): matches boxed in the code (the current one brighter), scrolled into view ----
+    const fb = el.querySelector('.sqled-find'), fq = fb.querySelector('.f-q'), fr = fb.querySelector('.f-r'), fn = fb.querySelector('.f-n');
+    let found = [], cur = -1, matchCase = false;
+    function findAll() {
+      const q = fq.value; found = [];
+      if (q && !fb.hidden) { const t = matchCase ? ta.value : ta.value.toLowerCase(), s = matchCase ? q : q.toLowerCase(); for (let p = t.indexOf(s); p >= 0; p = t.indexOf(s, p + s.length)) found.push(p); }
+      if (cur >= found.length) cur = found.length - 1;
+      fn.textContent = !q ? '' : found.length ? `${cur + 1} of ${found.length}` : 'No results';
+      fn.classList.toggle('none', !!q && !found.length);
+    }
+    function findMarks() {
+      if (fb.hidden || !found.length) return '';
+      const cs = getComputedStyle(hl), lh = parseFloat(cs.lineHeight) || 20, cw = measure(cs), padT = parseFloat(cs.paddingTop) || 0, padL = parseFloat(cs.paddingLeft) || 0, n = fq.value.length, t = ta.value;
+      return found.map((p, k) => { const ls = t.lastIndexOf('\n', p - 1) + 1, L = t.slice(0, p).split('\n').length;
+        return `<div class="sqled-hit${k === cur ? ' cur' : ''}" style="top:${padT + (L - 1) * lh}px;left:${padL + (p - ls) * cw}px;width:${n * cw}px;height:${lh}px"></div>`; }).join('');
+    }
+    // Go to match k (wraps): select it in the code and scroll it into view.
+    function goTo(k) {
+      findAll(); if (!found.length) { paint(); return; }
+      cur = (k + found.length) % found.length; findAll();
+      const p = found[cur], t = ta.value, cs = getComputedStyle(hl), lh = parseFloat(cs.lineHeight) || 20, cw = measure(cs);
+      const L = t.slice(0, p).split('\n').length, x = (p - t.lastIndexOf('\n', p - 1) - 1) * cw, y = (L - 1) * lh;
+      ta.setSelectionRange(p, p + fq.value.length);
+      if (y < ta.scrollTop || y > ta.scrollTop + ta.clientHeight - lh * 2) ta.scrollTop = Math.max(0, y - ta.clientHeight / 3);
+      if (x < ta.scrollLeft || x > ta.scrollLeft + ta.clientWidth - 60) ta.scrollLeft = Math.max(0, x - 60);
+      paint();
+    }
+    // From the caret: the first match at or after it.
+    const fromCaret = () => { findAll(); const i = found.findIndex(p => p >= ta.selectionStart); return i < 0 ? 0 : i; };
+    function openFind(replace) {
+      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+      fb.hidden = false; el.classList.add('finding');   // the code moves down two lines under the bar
+      if (sel && !sel.includes('\n')) fq.value = sel;
+      const box = replace ? fr : fq; box.focus(); box.select();
+      cur = -1; if (fq.value) goTo(sel ? found.indexOf(ta.selectionStart) >= 0 ? found.indexOf(ta.selectionStart) : fromCaret() : fromCaret()); else { findAll(); paint(); }
+    }
+    function closeFind() { fb.hidden = true; el.classList.remove('finding'); found = []; paint(); ta.focus(); }
+    function replaceOne() {
+      findAll(); if (!found.length) return;
+      if (cur < 0) return goTo(fromCaret());
+      const p = found[cur]; ta.setSelectionRange(p, p + fq.value.length); insert(fr.value);
+      findAll(); goTo(found.findIndex(x => x >= p + fr.value.length) < 0 ? 0 : found.findIndex(x => x >= p + fr.value.length));
+      fr.focus();
+    }
+    function replaceAll() {
+      findAll(); if (!found.length) return;
+      const n = found.length, q = fq.value, t = ta.value;
+      let out = '', last = 0; for (const p of found) { out += t.slice(last, p) + fr.value; last = p + q.length; } out += t.slice(last);
+      ta.setSelectionRange(0, t.length); insert(out); ta.setSelectionRange(0, 0);   // one undo step
+      cur = -1; findAll(); paint(); fn.textContent = `Replaced ${n}`; fr.focus();
+    }
+    fq.addEventListener('input', () => { cur = -1; goTo(fromCaret()); fq.focus(); });
+    fb.querySelector('.f-next').onclick = () => goTo(cur + 1);
+    fb.querySelector('.f-prev').onclick = () => goTo(cur - 1);
+    fb.querySelector('.f-x').onclick = closeFind;
+    fb.querySelector('.f-one').onclick = replaceOne;
+    fb.querySelector('.f-all').onclick = replaceAll;
+    fb.querySelector('.f-case').onclick = e => { matchCase = !matchCase; e.currentTarget.classList.toggle('on', matchCase); cur = -1; goTo(fromCaret()); fq.focus(); };
+    fb.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); return closeFind(); }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'h')) { e.preventDefault(); (e.key === 'h' ? fr : fq).focus(); return; }
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      if (e.target === fr && !e.shiftKey) replaceOne(); else goTo(cur + (e.shiftKey ? -1 : 1));
+      e.target.focus();
+    });
+    ta.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'h')) { e.preventDefault(); openFind(e.key === 'h'); }
+      else if (e.key === 'Escape' && !fb.hidden) { e.preventDefault(); closeFind(); }
+    });
+    ta.addEventListener('input', () => { if (!fb.hidden) { findAll(); paint(); } });
     paint();
 
     return {

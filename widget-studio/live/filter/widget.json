@@ -1,6 +1,7 @@
 {
   "id": "filter",
   "name": "Filter",
+  "category": "Controls",
   "description": "Dropdowns that filter every widget on the same dataset",
   "version": 1,
   "kind": "filter",
