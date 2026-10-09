@@ -23,7 +23,7 @@
   table.schema td.src { width: 50%; overflow-wrap: anywhere; }
   table.schema td.nn { width: 50%; }
   table.schema input[type=text] { width: 100%; min-width: 120px; font-family: inherit; }
-  #preview .table-wrap { max-height: 480px; }
+  #preview .pgrid { height: 480px; }
   #dsName { width: 440px; }
   #rowCount { display: inline-block; min-width: 13ch; }
   /* Activity log: 5 lines visible, newest on top. */
@@ -33,6 +33,9 @@
   #schema select, #schema select option, #schema select option:checked { font-weight: 400; }
   #schema select.bad { border-color: #f08c00; outline: 1px solid #f08c00; }
   .warn-box { color: var(--warn); font-size: 13px; }
+  .imode { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 0 0 8px; }
+  .imode label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .imode .muted { font-size: 12px; }
   /* No page scroll bars (the page still scrolls with the wheel); only the tables show bars. */
   html, body, .main { scrollbar-width: none; }
   html::-webkit-scrollbar, body::-webkit-scrollbar, .main::-webkit-scrollbar { display: none; }
@@ -51,6 +54,11 @@
           <div class="row"><button id="pick">Browse</button><button id="fromPath" class="ghost">From Path</button></div>
           <input id="file" type="file" multiple hidden accept=".csv,.tsv,.txt,.parquet,.sqlite,.sqlite3,.db">
           <div class="drop" id="drop">Drop CSV, Parquet or SQLite files here</div>
+          <div class="imode" id="imode">
+            <label title="Browse, drop and From Path put a copy of the file in the project's data/raw folder"><input type="radio" name="imode" value="copy"> Copy raw files to project</label>
+            <label title="From Path reads the file where it is (nothing is copied); Update reads it there again"><input type="radio" name="imode" value="link"> Link to raw file's location</label>
+            <div class="muted" id="imodeHint" hidden>Link works with From Path. Browse and drop always copy (the browser does not tell the app where a file is).</div>
+          </div>
           <div class="list" id="sources"></div>
         </section>
         <section>
@@ -70,10 +78,10 @@
             <div style="width:25px"></div>
             <div class="stats"><div class="stat"><label>Rows</label><b id="rowCount">-</b></div><div class="stat"><label>Columns</label><b id="colCount">-</b></div></div>
           </div>
-          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)">Stage</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
+          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)">Stage</button><button id="delDs" class="danger" hidden>Delete</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
           <div class="progress"><i id="bar"></i></div>
           <div class="log" id="log"></div>
-          <h2 class="hw">Preview (first 100 rows only)</h2>
+          <h2 class="hw">Preview</h2>
           <div id="preview"></div>
         </div>
       </section>
@@ -99,6 +107,10 @@
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
 <script src="../js/import/external-source.js"></script>
+<script src="../js/widgets/apex-render.js"></script>
+<script src="../js/widgets/apex-options.js"></script>
+<script src="../js/widgets/apex-widget.js"></script>
+<script src="../js/widgets/preview-grid.js"></script>
 <script>
 const { $, esc } = UI;
 // Plain-English hint shown next to each type in the Change Type list.
@@ -120,19 +132,36 @@ const dsSlug = s => s.toUpperCase().replace(/\.[^.]+$/, '').replace(/[^A-Z0-9]+/
 // Raw source files live in data/raw: uploaded/dropped here, or copied in by hand. The list is re-read every
 // 3 s, so files dropped into the folder outside the app show up on their own.
 const RAW = () => `${ctx.dir}/data/raw`;
+// Copy (default) or Link, saved as cfg.import.mode. Copy: From Path copies the file into data/raw (Browse and drop always
+// upload a copy). Link: From Path reads the file where it is, and its full path is saved for Update.
+const mode = () => ctx.cfg.import?.mode === 'link' ? 'link' : 'copy';
+function showMode() {
+  document.querySelectorAll('[name=imode]').forEach(r => r.checked = r.value === mode());
+  $('imodeHint').hidden = mode() !== 'link';
+}
+$('imode').onchange = UI.guard(async ev => {
+  if (ev.target.name !== 'imode') return;
+  ctx.cfg = await ctx.reload(); ctx.cfg.import = { ...(ctx.cfg.import || {}), mode: ev.target.value }; await Projects.save(ctx.cfg);
+  showMode(); ctx.log(ev.target.value === 'link' ? 'From Path will link to files where they are (nothing copied).' : 'From Path will copy files into data/raw.');
+});
 let rawSig = null;
 async function listSources(force = true) {
   let files = [];
   try { files = (await DNFS.list(RAW())).filter(f => !f.dir); } catch {}
   const sig = files.map(f => `${f.name}|${f.size}|${f.modified}`).join('\n');
-  if (!force && sig === rawSig) return;
+  if (!force && sig === rawSig) return files;
   rawSig = sig;
   $('sources').hidden = !files.length;
   $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${cur?.path === f.path ? 'sel' : ''}" title="${esc(f.path)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small>${UI.bytes(f.size)}</small></div>`).join('');
+  return files;
 }
+const staged = cfg => (cfg.datasets || []).filter(d => d.source && d.source.kind !== 'pipeline').sort((a, b) => a.name.localeCompare(b.name));
 async function listDatasets() {
   const cfg = await ctx.reload();
-  $('datasets').innerHTML = (cfg.datasets || []).map(d => `<div data-ds="${esc(d.name)}" title="${esc(d.path)}"><span>${esc(d.name)}</span></div>`).join('') || '<div class="muted">None yet.</div>';
+  // Imported datasets only (transform outputs live in Transform), A to Z.
+  const list = staged(cfg);
+  $('datasets').innerHTML = list.map(d => `<div data-ds="${esc(d.name)}" class="${cur?.ds === d.name ? 'sel' : ''}" title="${esc(d.path)}"><span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows</small></div>`).join('') || '<div class="muted">None yet.</div>';
+  return list;
 }
 
 // ---- upload ----
@@ -143,6 +172,9 @@ async function upload(files) {
     ctx.log(`Uploaded ${f.name}`, 'ok');
   }
   await listSources();
+  // Just imported: show it right away (the last one when several were dropped).
+  const last = [...files].reverse().find(f => Engine.kind(f.name));
+  if (last) { const path = `${RAW()}/${last.name}`; await openReader({ path, label: last.name }, () => reader(path)); }
 }
 $('pick').onclick = () => $('file').click();
 $('file').onchange = UI.guard(async () => { await upload([...$('file').files]); $('file').value = ''; });
@@ -156,23 +188,45 @@ $('sources').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-p]'); if (!el) return;
   const path = el.dataset.p;
   if (!Engine.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet or SQLite.', 'err');
+  // Already staged from this file: open that dataset (its saved choices, Update) instead of a new Stage.
+  const d = staged(await ctx.reload()).find(x => x.source?.path === path);
+  if (d) return openDataset(d);
   await openReader({ path, label: path.split('/').pop() }, () => reader(path));
 });
+// A staged dataset: its source again (data/raw copy, or the linked path) with the column choices it was staged with.
+async function openDataset(d) {
+  const s = d.source || {}, c = { ds: d.name, apply: d, table: s.table || '', label: (s.path || s.origin || d.name).split(/[\\/]/).pop(), from: s.from || null };
+  try {
+    if (s.path) await openReader({ ...c, path: s.path }, () => reader(s.path));
+    else await openReader({ ...c, path: null, ext: { src: s.origin, size: s.size, modified: s.modified } }, () => reader(s.origin));
+  } catch (e) {
+    live(null); $('editor').hidden = true; $('empty').hidden = false;
+    $('empty').textContent = `${d.name} cannot be shown: its source ${s.path || s.origin} cannot be read. Import the file again (Browse or From Path) and Stage it as ${d.name}.`;
+    throw new Error(`${d.name}: its source ${s.path || s.origin} cannot be read (${String(e.message).split('\n')[0]}).`);
+  }
+}
 // A source the engine reads in place (project path, or a full local/network path): { kind, tables, sql(table) }.
 async function reader(src) {
   const o = await Engine.open(src);
   return { kind: o.kind, tables: o.tables?.length ? o.tables : [''], sql: t => Engine.src(src, t) };
 }
 // Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
-async function openReader(c, open) {
+async function openReader(c, open) {   // c.table / c.ds + c.apply (a staged dataset: its saved column choices)
   $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Stage</b> to convert this raw source (.csv, .sqlite or .parquet) into a Parquet dataset optimized for use in this project.`;
   $('empty').hidden = true; $('editor').hidden = false; live('Reading source…');
   const r = await open();
   cur = { ...c, reader: r };
   $('tableLbl').hidden = r.kind !== 'sqlite';
   $('table').innerHTML = r.tables.map(t => `<option>${esc(t)}</option>`).join('');
-  await listSources();
-  await loadTable(r.tables[0]);
+  if (c.table && r.tables.includes(c.table)) $('table').value = c.table;
+  // Delete: the staged dataset shown, or a raw file in data/raw (a linked file outside the project is never deleted).
+  $('delDs').hidden = !c.ds && !c.path;
+  $('delDs').title = c.ds ? `Delete the staged dataset ${c.ds} and its Parquet files` : `Delete the raw file ${c.label} from data/raw`;
+  // A staged dataset: the button re-runs its import (same name, its saved choices or any made now) instead of a new Stage.
+  $('import').textContent = c.ds ? 'Update' : 'Stage';
+  $('import').title = c.ds ? `Read the source again and replace ${c.ds} with the column choices above` : 'Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)';
+  await listSources(); await listDatasets();
+  await loadTable(c.table && r.tables.includes(c.table) ? c.table : r.tables[0]);
 }
 
 // ---- import from a path outside the project (local or network drive) ----
@@ -217,8 +271,17 @@ $('extGo').onclick = UI.guard(async () => {
     extMsg('Checking source…');
     const info = await X.probe(src, { onWait }).catch(e => extFail(e, src));
     extMsg(`Found ${name}: ${UI.bytes(info.size)}, modified ${UI.date(info.modified)}.`, 'ok');
-    // Read where it is (the engine reads the file in place); nothing is copied into the project.
-    await openReader({ path: null, label: name, ext: { src, size: info.size, modified: info.modified } }, () => reader(src));
+    if (mode() === 'copy') {
+      // Copy into data/raw; the original location is kept (source.from) so Update can copy a newer version again.
+      const to = `${RAW()}/${name}`;
+      extMsg(`Copying ${name} into the project…`);
+      await X.copy(src, to, (done, total) => extMsg(`Copying ${name}: ${UI.bytes(done)} of ${UI.bytes(total)}`), { onWait }).catch(e => extFail(e, src));
+      ctx.log(`Copied ${src} → ${to} (${UI.bytes(info.size)})`, 'ok');
+      await openReader({ path: to, label: name, from: { src, size: info.size, modified: info.modified } }, () => reader(to));
+    } else {
+      // Linked: read where it is (the engine reads the file in place); nothing is copied into the project.
+      await openReader({ path: null, label: name, ext: { src, size: info.size, modified: info.modified } }, () => reader(src));
+    }
     extMsg('Ready: set columns and Stage.', 'ok');
     $('pathDlg').close();
   } finally { $('extGo').disabled = false; }
@@ -235,9 +298,17 @@ async function loadTable(table) {
   // splitting the whole file for a parallel scan (the row count below does that).
   const [cols, p] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), Engine.query(`SELECT * FROM ${src} LIMIT 100`, { workers: 1 })]);
   cur.cols = cols.map(c => { const n = c.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || c.name; return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
+  // A staged dataset: the keep / type / name choices it was staged with (matched by source field name).
+  const saved = cur.apply?.source?.columns;
+  if (saved) {
+    const by = new Map(saved.map(x => [x.name, x]));
+    for (const c of cur.cols) { const x = by.get(c.name); if (x) Object.assign(c, { keep: x.keep, newName: x.newName, newType: x.newType }); else c.keep = false; }
+  }
+  if (cur.apply) $('dsName').value = cur.apply.name;
   renderSchema();
   $('colCount').textContent = cols.length; $('rowCount').textContent = '…';
-  UI.dataTable($('preview'), p.cols, p.rows);
+  // The grid asks for the next 100 rows as the reader nears the end.
+  PreviewGrid.show($('preview'), p.cols, p.rows, { more: async at => (await Engine.query(`SELECT * FROM ${src} LIMIT 100 OFFSET ${at}`, { workers: 1 })).rows }).catch(e => UI.toast(e.message, 'err'));
   // Row count: the engine splits the work across its workers (Parquet row groups); no % is known, so the bar runs busy.
   live(null); const st = ctx.step('Counting rows…'); $('bar').parentElement.classList.add('busy');
   // Rows shows "Calculating" with 1-4 dots cycling every 500 ms.
@@ -340,7 +411,7 @@ async function runImport(direct) {
   }
   const folder = 'staged', dest = `${ctx.dir}/data/${folder}/${name}`;
   const cfg = await ctx.reload();
-  if (cfg.datasets?.some(d => d.name === name) && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;
+  if (cfg.datasets?.some(d => d.name === name) && cur.ds !== name && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;   // Update on a staged dataset replaces it without asking
   const t0 = performance.now(), bar = p => $('bar').style.width = `${Math.round(p)}%`;
   $('import').disabled = true; bar(5);
   try {
@@ -367,35 +438,75 @@ async function runImport(direct) {
     const st = cur.ext ? { size: cur.ext.size, modified: cur.ext.modified } : await DNFS.stat(cur.path);
     await Projects.upsertDataset(ctx.folder, {
       name, path: w.path, parts, stage: folder, direct, rows, bytes: w.bytes, columns, version: w.version, imported: new Date().toISOString(),
-      source: { path: cur.ext ? null : cur.path, origin: cur.ext?.src || null, table: cur.table || null, kind: cur.reader.kind, select, size: st.size, modified: st.modified },
+      // Everything Update needs to do this again: where the file is (copied into data/raw, or linked), where a copy came
+      // from, and every column choice (keep, new type, new name) as well as the SELECT built from them.
+      source: { mode: cur.ext ? 'link' : 'copy', path: cur.ext ? null : cur.path, origin: cur.ext?.src || null, from: cur.from || null,
+        table: cur.table || null, kind: cur.reader.kind, select, direct: !!direct, size: st.size, modified: st.modified,
+        columns: cur.cols.map(c => ({ name: c.name, type: c.type, keep: direct ? true : c.keep, newName: direct ? c.name : c.newName, newType: direct ? c.type : c.newType })) },
     });
     await Projects.touchModule(ctx.folder, 'import');
     ctx.log(`${direct ? 'Imported' : 'Staged'} ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
     UI.toast(`${direct ? 'Imported' : 'Staged'} ${name}`, 'ok');
+    cur.ds = name; cur.apply = (await ctx.reload()).datasets.find(d => d.name === name); $('delDs').hidden = false; $('import').textContent = 'Update';
     bar(100);
     await listDatasets();
   } finally { live(null); $('import').disabled = false; setTimeout(() => bar(0), 1200); }
 }
 $('import').onclick = UI.guard(() => runImport(false));
 
-// ---- staged dataset preview / delete ----
+// ---- staged datasets: click = open it again (schema with its saved choices, preview); Delete Dataset removes it ----
 $('datasets').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-ds]'); if (!el) return;
   const d = (await ctx.reload()).datasets.find(x => x.name === el.dataset.ds);
-  const v = await UI.dialog(d.name, `<div class="muted">${esc(d.path)} · ${UI.num(d.rows)} rows · imported ${UI.date(d.imported)}</div><div class="mono" style="max-height:260px;overflow:auto">${d.columns.map(c => `${esc(c.name)} <span class="muted">${esc(c.type)}</span>`).join('<br>')}</div>`,
-    [{ label: 'Delete dataset', value: 'del', kind: 'danger' }, { label: 'Close', value: null, kind: 'ghost' }]);
-  if (v === 'del' && await UI.confirm(`Delete dataset "${d.name}" and its Parquet ${d.parts ? 'parts' : 'file'}?`, { danger: true, ok: 'Delete' })) {
-    await DNFS.remove(d.path, { recursive: !/\.parquet$/.test(d.path) }).catch(() => {});
-    await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(x => x.name !== d.name) });
-    ctx.log(`Deleted dataset ${d.name}`); await listDatasets();
-  }
+  if (d) await openDataset(d);
 });
+$('delDs').onclick = UI.guard(async () => {
+  if (!cur?.ds && cur?.path) return delRaw(cur.path);
+  const d = (await ctx.reload()).datasets.find(x => x.name === cur?.ds); if (!d) return;
+  if (!await UI.confirm(`Delete dataset "${d.name}" and its Parquet ${d.parts ? 'parts' : 'file'}?`, { danger: true, ok: 'Delete' })) return;
+  await DNFS.remove(d.path, { recursive: !/\.parquet$/.test(d.path) }).catch(() => {});
+  await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(x => x.name !== d.name) });
+  ctx.log(`Deleted dataset ${d.name}`);
+  cur = null; $('editor').hidden = true; $('empty').hidden = false;
+  await listDatasets(); tried.clear(); await autoOpen();
+});
+// A raw file in data/raw (staged datasets made from it keep their Parquet data; Update then needs the file again).
+async function delRaw(path) {
+  const name = path.split('/').pop(), users = staged(await ctx.reload()).filter(d => d.source?.path === path).map(d => d.name);
+  if (!await UI.confirm(`Delete the raw file ${name} from data/raw?${users.length ? ` ${users.join(', ')} ${users.length > 1 ? 'were' : 'was'} staged from it: the staged data stays, but Update cannot read this file again.` : ''}`, { danger: true, ok: 'Delete' })) return;
+  await DNFS.remove(path);
+  ctx.log(`Deleted raw file ${name}`, 'ok');
+  cur = null; $('editor').hidden = true; $('empty').hidden = false;
+  await listSources(); tried.clear(); await autoOpen();
+}
+// Nothing shown yet: the first staged dataset (A to Z); with none, the first raw file. Runs on load, after a delete,
+// and when a file shows up in data/raw while nothing is shown.
+let opening = false;
+const tried = new Set();   // auto-open tries each dataset / file once (a source that cannot be read does not retry every 3 s)
+async function autoOpen() {
+  if (cur || opening || !ctx) return;
+  opening = true;
+  try {
+    let files = []; try { files = (await DNFS.list(RAW())).filter(f => !f.dir && Engine.kind(f.name)); } catch {}
+    const next = [...staged(await ctx.reload()).map(d => ({ key: 'ds:' + d.name, d })), ...files.map(f => ({ key: 'raw:' + f.path, f }))].filter(x => !tried.has(x.key));
+    for (const x of next) {
+      tried.add(x.key);
+      try {
+        if (x.d) await openDataset(x.d); else await openReader({ path: x.f.path, label: x.f.name }, () => reader(x.f.path));
+        return;
+      } catch (e) { UI.toast(e.message, 'err'); cur = null; }
+    }
+  } finally { opening = false; }
+}
 
 (async () => {
   try {
     ctx = await ModulePage.init('import', 'Import Data');
+    showMode();
     await listSources(); await listDatasets();
-    setInterval(() => listSources(false).catch(() => {}), 3000);
+    // The list is re-read every 3 s: a file that shows up while nothing is shown opens on its own.
+    setInterval(() => listSources(false).then(() => autoOpen()).catch(() => {}), 3000);
+    await autoOpen();
   } catch (e) { UI.toast(e.message, 'err'); $('empty').textContent = e.message; }
 })();
 </script>

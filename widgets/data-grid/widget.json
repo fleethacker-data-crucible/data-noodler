@@ -1,10 +1,12 @@
 {
   "id": "data-grid",
   "name": "Data Grid",
-  "description": "Table of the picked fields: sort, filter, search, export, pages, selection",
-  "version": 1,
+  "description": "Table of the picked fields: sort, filter, search, resize, export",
+  "version": 2,
   "kind": "apexgrid",
   "spec": "spec.json",
+  "style": "style.css",
+  "renderer": "grid.js",
   "inputs": [
     {
       "key": "fields",
@@ -13,196 +15,11 @@
     }
   ],
   "options": [
-    {
-      "path": "columnDefaults.sort",
-      "label": "Sortable columns",
-      "group": "Columns",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "columnDefaults.filter",
-      "label": "Column filters",
-      "group": "Columns",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "columnDefaults.resizable",
-      "label": "Resizable columns",
-      "group": "Columns",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "columnReordering",
-      "label": "Drag to reorder columns",
-      "group": "Columns",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "columnSeparator",
-      "label": "Column separators",
-      "group": "Columns",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "columnMenu",
-      "label": "Column menu",
-      "group": "Columns",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "coordinateHints",
-      "label": "Coordinate hints (A, B, C / 1, 2, 3)",
-      "group": "Columns",
-      "type": "boolean",
-      "default": false,
-      "show": true
-    },
-    {
-      "path": "sortConfiguration.multiple",
-      "label": "Sort by several columns",
-      "group": "Sorting",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "sortConfiguration.triState",
-      "label": "Third click clears the sort",
-      "group": "Sorting",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "showQuickFilter",
-      "label": "Quick filter (search box)",
-      "group": "Toolbar",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "showExport",
-      "label": "Export button (CSV)",
-      "group": "Toolbar",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "exportFilename",
-      "label": "Export file name",
-      "group": "Toolbar",
-      "type": "text",
-      "default": "data",
-      "show": true
-    },
-    {
-      "path": "pagination.enabled",
-      "label": "Pages instead of scrolling",
-      "group": "Pagination",
-      "type": "boolean",
-      "default": false,
-      "show": true
-    },
-    {
-      "path": "pagination.pageSize",
-      "label": "Rows per page",
-      "group": "Pagination",
-      "type": "number",
-      "default": 25,
-      "show": true,
-      "min": 5,
-      "max": 1000,
-      "step": 5
-    },
-    {
-      "path": "selection.enabled",
-      "label": "Row selection",
-      "group": "Selection",
-      "type": "boolean",
-      "default": false,
-      "show": true
-    },
-    {
-      "path": "selection.mode",
-      "label": "Selection mode",
-      "group": "Selection",
-      "type": "select",
-      "default": "multiple",
-      "show": true,
-      "choices": [
-        "multiple",
-        "single"
-      ]
-    },
-    {
-      "path": "selection.showCheckboxColumn",
-      "label": "Checkbox column",
-      "group": "Selection",
-      "type": "boolean",
-      "default": true,
-      "show": true
-    },
-    {
-      "path": "editing.enabled",
-      "label": "Editing (in the grid only, data is not changed)",
-      "group": "Editing",
-      "type": "boolean",
-      "default": false,
-      "show": true
-    },
-    {
-      "path": "editing.mode",
-      "label": "Edit mode",
-      "group": "Editing",
-      "type": "select",
-      "default": "cell",
-      "show": true,
-      "choices": [
-        "cell",
-        "row"
-      ]
-    },
-    {
-      "path": "editing.trigger",
-      "label": "Start editing on",
-      "group": "Editing",
-      "type": "select",
-      "default": "doubleClick",
-      "show": true,
-      "choices": [
-        "doubleClick",
-        "click"
-      ]
-    },
-    {
-      "path": "rowPinning.enabled",
-      "label": "Row pinning",
-      "group": "Rows",
-      "type": "boolean",
-      "default": false,
-      "show": true
-    },
-    {
-      "path": "rowReordering.enabled",
-      "label": "Drag to reorder rows",
-      "group": "Rows",
-      "type": "boolean",
-      "default": false,
-      "show": true
-    }
+    { "path": "columnDefaults.sort", "label": "Sortable columns", "group": "Columns", "type": "boolean", "default": true, "show": true },
+    { "path": "columnDefaults.filter", "label": "Column filters", "group": "Columns", "type": "boolean", "default": true, "show": true },
+    { "path": "columnDefaults.resizable", "label": "Resizable columns", "group": "Columns", "type": "boolean", "default": true, "show": true },
+    { "path": "showQuickFilter", "label": "Search box", "group": "Toolbar", "type": "boolean", "default": true, "show": true },
+    { "path": "showExport", "label": "Export button", "group": "Toolbar", "type": "boolean", "default": true, "show": true },
+    { "path": "exportFilename", "label": "Export file name", "group": "Toolbar", "type": "text", "default": "data", "show": true }
   ]
 }

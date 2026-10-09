@@ -5,6 +5,7 @@
   "version": 1,
   "kind": "apexcharts",
   "spec": "spec.json",
+  "style": "style.css",
   "inputs": [
     {
       "label": "Category",

@@ -1,6 +1,6 @@
 // ApexCharts / ApexGrid / ApexTree drawing for widget packages (used by ApexWidget.render). Global: ApexRender.
-// Needs js/vendor/apexcharts.min.js, apextree.min.js and the ApexGrid module (js/widgets/apex-grid-loader.js); a missing
-// library only breaks the widgets of that kind.
+// Needs js/vendor/apexcharts.min.js and apextree.min.js; a missing library only breaks the widgets of that kind. Data Grids
+// are drawn by their own package renderer (widgets/<id>/grid.js), not by Apex.
 //
 // spec.json = the library's own options (paste a demo's options object), plus "$kind" and "data" (the inputs).
 //   Without a dataset (sample preview) the spec is drawn as-is, with its own series / labels / categories
@@ -13,7 +13,7 @@
 //     scatter / bubble                       [x, y, (z)] = measures in order; 1st dimension = one series per value
 //     candlestick / boxPlot                  x = 1st dimension, y = all measures in order
 //     rangeBar                               x = 1st dimension, y = [1st, 2nd measure]; 2nd dimension = series
-//   grid: columns = the picked fields (role 'fields'); spec = <apex-grid> properties + "columnDefaults" + "style" (CSS vars)
+//   grid: columns = the picked fields (role 'fields'); spec = showQuickFilter / showExport / exportFilename + "columnDefaults"
 //   tree: levels = dimensions in order, node value = 1st measure; spec = ApexTree options + "rootName"
 const ApexRender = (() => {
   const isObj = o => o && typeof o === 'object' && !Array.isArray(o);
@@ -94,63 +94,60 @@ const ApexRender = (() => {
     return t;
   }
 
-  // ---- ApexGrid ----
-  const gridVars = th => ({ '--ag-font': th.font, '--ag-grid-bg': th.panel, '--ag-surface': th.panel, '--ag-surface-alt': th.panel2, '--ag-surface-elevated': th.panel2,
-    '--ag-text': th.text, '--ag-text-body': th.text, '--ag-text-muted': th.muted, '--ag-text-subtle': th.text2, '--ag-border': th.border, '--ag-hairline': th.border,
-    '--ag-header-separator': th.border, '--header-background': th.panel2, '--ag-row-hover': th.sel, '--ag-brand': th.blue, '--ag-grid-shadow': 'none', '--ag-shadow-card': 'none' });
-  // No scroll bars inside the grid (the app's rule): the mouse wheel scrolls. Injected into every shadow root of the grid.
-  const NOBAR = ':host,*{scrollbar-width:none}:host::-webkit-scrollbar,*::-webkit-scrollbar{display:none}'
-    // Sticky header rows: solid (the panel colour) and above the rows, so scrolled rows never show through them.
-    + 'apex-grid-header-row,apex-grid-group-header-row,apex-filter-row{background:var(--ag-surface-elevated)!important;z-index:20!important}';
-  function hideBars(root) {
-    if (!root || root.querySelector?.(':scope > style[data-nobar]')) return;
-    const st = document.createElement('style'); st.textContent = NOBAR; st.dataset.nobar = '1'; root.append(st);
-    root.querySelectorAll('*').forEach(e => e.shadowRoot && hideBars(e.shadowRoot));
+  // ---- Data Grid: drawn by the widget's own renderer (widgets/<id>/grid.js, widget.json "renderer"; global DNGrid),
+  // loaded once per window. No ApexGrid. Its look is the widget's style.css only.
+  const loads = new WeakMap();   // window -> Map(src -> promise)
+  function loadRenderer(doc, wid, file) {
+    const win = doc.defaultView;
+    let m = loads.get(win); if (!m) loads.set(win, m = new Map());
+    const src = `/widgets/${encodeURIComponent(wid || 'data-grid')}/${file || 'grid.js'}`;
+    if (!m.has(src)) m.set(src, new Promise((res, rej) => {
+      const s = Object.assign(doc.createElement('script'), { src, onload: res, onerror: () => rej(new Error(`Could not load the grid renderer ${src}.`)) });
+      doc.head.append(s);
+    }));
+    return m.get(src);
   }
-  // remote(g, bar): GridRemote.attach (rows come from the engine, 100 at a time) + the bar above the grid (search, readout, Export).
-  async function grid(box, s, rows, names, columns, th, remote) {
-    await Promise.race([window.ApexGridReady, new Promise((_, no) => setTimeout(() => no(new Error('ApexGrid is not loaded: put apex-grid in js/vendor/.')), 3000))]);
-    const { columnDefaults = {}, style = {}, ...props } = strip(s), g = document.createElement('apex-grid');
-    for (const [k, v] of Object.entries({ ...gridVars(th), ...style })) g.style.setProperty(k, v);
-    g.style.height = '100%'; g.style.display = 'block';
-    Object.assign(g, props);
-    const typeOf = n => { const c = columns.find(x => x.name === n); return c ? (/INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i.test(c.type) ? 'number' : /BOOL/i.test(c.type) ? 'boolean' : 'string') : typeof rows[0]?.[n] === 'number' ? 'number' : 'string'; };
-    g.columns = names.map(n => ({ key: n, headerText: n, type: typeOf(n), ...columnDefaults }));
-    if (remote) {
-      // Our own bar above the grid (app look, not Apex): search box (when the spec shows one) + the row under the mouse.
-      const bar = document.createElement('div'); bar.className = 'gbar';
-      // Export (when the spec shows it): our button at the right end; its menu raises 'grid-export' { format } on the box.
-      bar.innerHTML = `${g.showQuickFilter !== false ? '<input class="search" type="search" placeholder="Search">' : ''}<span class="grow muted"></span>`
-        + '<span class="spacer"></span>'
-        + (g.showExport ? `<div class="addwrap gexp"><button class="ghost small">Export ▾</button><div class="addmenu">${['.csv', '.parquet', '.sqlite']
-          .map(f => `<div data-fmt="${f.slice(1)}">${f}</div>`).join('')}</div></div>` : '');
-      g.showQuickFilter = false; g.showExport = false;
-      const ex = bar.querySelector('.gexp');
-      if (ex) {
-        const menu = ex.querySelector('.addmenu');
-        ex.querySelector('button').onclick = e => { e.stopPropagation(); document.querySelectorAll('.addmenu.open').forEach(m => m !== menu && m.classList.remove('open')); menu.classList.toggle('open'); };
-        menu.onclick = e => { const f = e.target.closest('[data-fmt]')?.dataset.fmt; if (!f) return; menu.classList.remove('open'); box.dispatchEvent(new CustomEvent('grid-export', { bubbles: true, detail: { format: f } })); };
-        addEventListener('click', () => menu.classList.remove('open'));
-      }
-      box.style.display = 'flex'; box.style.flexDirection = 'column'; g.style.flex = '1'; g.style.minHeight = '0';
-      box.append(bar);
-      remote(g, bar);
-    } else g.data = rows;
-    box.append(g);
-    await g.updateComplete; hideBars(g.shadowRoot); setTimeout(() => hideBars(g.shadowRoot), 300);   // late-rendered parts too
-    return g;
+  // Pop-out (every Data Grid): the same grid in its own window (html/grid-pop.html), which reads what to draw from
+  // window.DNGridPops[id] here (spec, rows or the engine pager, columns) and draws it with its own scripts.
+  // While it is popped out, the grid here is hidden (a note says where it is) and the page gets 'grid-popout'
+  // { open: true } on the box (Transform gives the SQL editor the room); it comes back when that window closes.
+  const pops = new WeakMap();   // box -> pop-out window
+  function popOut(d, box) {
+    const was = box && pops.get(box);
+    if (was && !was.closed) return was.focus();
+    const id = Math.random().toString(36).slice(2);
+    (window.DNGridPops ||= {})[id] = d;
+    const w = window.open(`${location.pathname.includes('/html/') ? '' : 'html/'}grid-pop.html?id=${id}`, `dn-grid-${id}`, 'popup,width=1100,height=700');   // window.: a page may have its own global named open
+    if (!w) return window.UI?.toast('The browser blocked the pop-out window. Allow pop-ups for this site.', 'err');
+    w.focus();
+    if (!box) return;
+    pops.set(box, w);
+    const note = Object.assign(document.createElement('div'), { className: 'dg-popped', textContent: 'This table is open in its own window. Close that window to bring it back here.' });
+    box.style.display = 'none'; box.after(note);
+    const host = box.parentElement;   // stays on the page even if a new grid replaces this one
+    const say = open => (box.isConnected ? box : host)?.dispatchEvent(new CustomEvent('grid-popout', { bubbles: true, detail: { open, win: w } }));
+    say(true);
+    const watch = setInterval(() => {
+      if (!w.closed && box.isConnected) return;
+      clearInterval(watch); pops.delete(box); note.remove(); box.style.display = ''; delete window.DNGridPops[id];
+      say(false);
+    }, 400);
+  }
+  async function grid(box, s, rows, names, columns, remote, popped, wid, renderer, more, total) {
+    await loadRenderer(box.ownerDocument, wid, renderer);
+    const { columnDefaults = {}, style: _s, ...props } = strip(s);
+    const title = () => box.closest('.wd')?.querySelector('.wh b')?.textContent || box.ownerDocument.title.split(' · ')[0] || 'Data Grid';   // widget title, else the page (Transform, Import)
+    return box.ownerDocument.defaultView.DNGrid.create(box, { names, columns, rows, remote, more, total, props, columnDefaults, popped,
+      onPop: cur => popOut({ s, rows: cur?.rows || rows, names, columns, remote, more, total, wid, title: title() }, box) });
   }
 
   // el: an empty box; rows keyed by input key (grid: by column name). live = rows come from a dataset (else the spec's own data).
-  async function render(kind, box, s, ins, rows, W, H, th, { live, names = [], columns = [], prev = null, remote = null }) {
+  async function render(kind, box, s, ins, rows, W, H, th, { live, names = [], columns = [], prev = null, remote = null, more = null, total = null, popped = false, wid = '', renderer = '' }) {
+    if (kind === 'apexgrid') return grid(box, s, rows, names, columns, remote, popped, wid, renderer, more, total);
     await document.fonts?.load(`11px ${th.font.split(',')[0]}`).catch(() => {});   // Exo 2 loaded before Apex measures label widths
     if (kind === 'apexcharts') return chart(box, s, ins, rows, W, H, th, live, prev);
     if (kind === 'apextree') return tree(box, s, ins, rows, W, H, th, live);
-    return grid(box, s, rows, names, columns, th, remote);
   }
   function dispose(inst) { try { inst?.destroy?.(); } catch {} }
   return { render, dispose };
 })();
-
-// ApexGrid is an ES module: js/widgets/apex-grid-loader.js resolves this once <apex-grid> is registered.
-window.ApexGridReady ||= new Promise(res => addEventListener('apexgrid-ready', res, { once: true }));

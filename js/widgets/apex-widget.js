@@ -160,12 +160,30 @@ const ApexWidget = (() => {
     return out;
   }
 
-  // ---- theme: everything follows css/theme.css unless the spec / an option sets it ----
-  function theme() {
-    const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
-    const n = parseInt((v('--bg') || '#fff').replace('#', '').padEnd(6, '0').slice(0, 6), 16), dark = (((n >> 16) & 255) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 128;
-    return { dark, bg: v('--bg'), panel: v('--panel'), panel2: v('--panel-2'), sel: v('--sel'), text: v('--text'), text2: v('--text-2'), muted: v('--muted'), border: v('--border'), blue: v('--blue'),
-      font: "'Exo 2', system-ui, sans-serif", colors: [1, 2, 3, 4, 5, 6, 7, 8].map(i => v(`--c${i}`)).filter(Boolean) };
+  // ---- style: a widget's ONLY style is its own sheet, widgets/<id>/style.css (widget.json "style"). ----
+  // The part before "/* ===== SHADOW ===== */" goes into the page once per widget package, scoped by the class
+  // dn-w-<id> on the box the widget is drawn in; the rest goes into the widget's shadow roots (Data Grid).
+  // Chart / tree colours are --w-* variables set in that sheet (read by theme(el)); nothing else styles a widget.
+  const SPLIT = /\/\*\s*=====\s*SHADOW\s*=====[^*]*\*\//;
+  const cssParts = css => { const [page, shadow = ''] = String(css || '').split(SPLIT); return { page, shadow }; };
+  const cls = id => `dn-w-${String(id).replace(/[^A-Za-z0-9_-]/g, '_')}`;
+  function useStyle(m, el, doc = el?.ownerDocument || document) {
+    if (!m) return;
+    // ".WIDGET" in the sheet = this package's box, so a sheet copied to a new widget folder works there unchanged.
+    const sid = `dn-w-style-${cls(m.id)}`, page = cssParts(m.styleCss).page.replace(/\.WIDGET\b/g, '.' + cls(m.id));
+    let st = doc.getElementById(sid);
+    if (!st) { st = Object.assign(doc.createElement('style'), { id: sid }); doc.head.append(st); }
+    if (st.textContent !== page) st.textContent = page;
+    if (!el) return;
+    [...el.classList].filter(c => c.startsWith('dn-w-') && c !== cls(m.id)).forEach(c => el.classList.remove(c));   // box reused by another package
+    el.classList.add('dn-widget', cls(m.id));
+  }
+  // Values for the chart / tree libraries, from the widget's --w-* variables on el (its style sheet).
+  function theme(el) {
+    const cs = getComputedStyle(el || document.documentElement), v = n => cs.getPropertyValue(`--w-${n}`).trim();
+    const n = parseInt((v('bg') || '#fff').replace('#', '').padEnd(6, '0').slice(0, 6), 16), dark = (((n >> 16) & 255) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 128;
+    return { dark, bg: v('bg'), panel: v('panel'), panel2: v('panel-2'), sel: v('sel'), text: v('text'), text2: v('text-2'), muted: v('muted'), border: v('border'), blue: v('accent'),
+      font: v('font') || "'Exo 2', system-ui, sans-serif", colors: [1, 2, 3, 4, 5, 6, 7, 8].map(i => v(`c${i}`)).filter(Boolean) };
   }
   // Spec + chosen options (null / blank colour = theme default).
   function applied(m, baseSpec, w) {
@@ -179,7 +197,7 @@ const ApexWidget = (() => {
   function dispose(el) { if (el?._inst) { ApexRender.dispose(el._inst); el._inst = null; } }
   // rows: objects from the query, or rows keyed by input key when opts.sample. columns: [{ name, type }] (dates, grid types).
   // remote: Data Grid rows come from the engine page by page (js/widgets/grid-remote.js), rows is then empty.
-  async function render(el, m, spec, w, rows, { sample = false, columns = [], remote = null } = {}) {
+  async function render(el, m, spec, w, rows, { sample = false, columns = [], remote = null, more = null, total = null } = {}) {
     const [W, H] = size(el), data = sample ? rows : shape(m, w, rows, columns);
     const s = applied(m, spec, w), type = `${m.kind}:${s.chart?.type || ''}`;
     const f = fieldsOf(m), names = sample ? Object.keys(data[0] || {}) : f ? binding(m, w, f).cols || [] : [];
@@ -189,11 +207,12 @@ const ApexWidget = (() => {
       const box = document.createElement('div'); box.style.cssText = 'width:100%;height:100%;overflow:hidden'; el.append(box);
     }
     el._type = type;
-    el._inst = await ApexRender.render(m.kind, el.firstElementChild, s, inputsOf(m), data, W, H, theme(), { live: !sample, names, columns, prev: reuse ? el._inst : null, remote });
+    useStyle(m, el);
+    el._inst = await ApexRender.render(m.kind, el.firstElementChild, s, inputsOf(m), data, W, H, theme(el), { live: !sample, names, columns, prev: reuse ? el._inst : null, remote, more, total, wid: m.id, renderer: m.renderer });
     return el._inst;
   }
 
-  return { AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, hasTop, ready, query, objects, shape, render, dispose, theme, getAt, setAt, binding, sortOf, topOf };
+  return { AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, hasTop, ready, query, objects, shape, render, dispose, theme, useStyle, cssParts, getAt, setAt, binding, sortOf, topOf };
 })();
 
 // Packages in the global widgets/ folder: a folder with a valid widget.json is a widget.
@@ -210,6 +229,8 @@ const WidgetRegistry = (() => {
         if (!valid(m)) continue;
         m.id = e.name;   // the folder name is the id
         m.specJson = await DNFS.readJSON(`${ROOT}/${e.name}/${m.spec || 'spec.json'}`);
+        // The widget's own style sheet (widget.json "style"): its whole look, the same wherever it is drawn.
+        if (m.style) m.styleCss = await DNFS.readText(`${ROOT}/${e.name}/${m.style}`).catch(() => '');
         out.push(m);
       } catch { /* not a widget package */ }
     }
@@ -219,8 +240,14 @@ const WidgetRegistry = (() => {
   const get = async id => (await list()).find(m => m.id === id);
   const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'widget';
   async function save(manifest, spec) {
-    const { specJson, code: _c, ...m } = manifest;
+    const { specJson, styleCss: _s, code: _c, ...m } = manifest;
     m.spec = 'spec.json'; m.version = (+m.version || 0) + 1; m.updated = new Date().toISOString();
+    // Every widget has its own style sheet (its only style): a new one starts from a widget of the same kind.
+    if (!m.style || !(await DNFS.exists(`${ROOT}/${m.id}/${m.style}`))) {
+      const like = (await list()).find(x => x.kind === m.kind && x.styleCss && x.id !== m.id);
+      m.style = 'style.css';
+      await DNFS.write(`${ROOT}/${m.id}/style.css`, like?.styleCss || `/* ${m.name || m.id}: the ONE place this widget's look is set. .WIDGET = its box. */\n\n/* ===== PAGE ===== */\n`);
+    }
     await DNFS.writeJSON(`${ROOT}/${m.id}/spec.json`, spec);
     await DNFS.remove(`${ROOT}/${m.id}/render.js`).catch(() => {});
     await DNFS.writeJSON(`${ROOT}/${m.id}/widget.json`, m);

@@ -27,6 +27,7 @@ const ModulePage = {
           el.prepend(d);
         }
         ProjectLog.write(folder, module, msg, level === 'ok' ? 'info' : level === 'warn' ? 'warn' : level);
+        if (level === 'error' || level === 'err' || level === 'warn') UI.toast(msg, level);   // problems also drop a notification
       },
       // Work in progress: a live line at the top of the log, timer last ("msg… 1.23 s"), ticking every 100 ms.
       // s.set(msg) changes the text; s.done(msg?, level) logs it with the time "(1.23 s)" and removes the live line.
@@ -37,7 +38,9 @@ const ModulePage = {
         paint(); const tick = setInterval(paint, 100);
         return {
           set(m) { msg = m; paint(); },
-          done(m = msg.replace(/…$/, ''), level = 'ok') { clearInterval(tick); d.remove(); ctx.log(`${m} (${UI.ms(performance.now() - t0)})`, level); },
+          done(m = msg.replace(/…$/, ''), level = 'ok') {
+            clearInterval(tick); d.remove(); ctx.log(`${m} (${UI.ms(performance.now() - t0)})`, level);
+          },
           fail(m) { this.done(m, 'error'); },
         };
       },

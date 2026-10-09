@@ -7,12 +7,33 @@ const UI = (() => {
   const $ = id => document.getElementById(id);
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  // Notifications, every window (look: css/theme.css .toast, as in the Server Control panel): the newest drops in at the
+  // top, older ones move down. kind: 'ok' green, 'warn' orange, 'err' / 'error' red, anything else white (info). 5 s or X.
   let toasts;
-  function toast(msg, kind = '', ms = 3500) {
-    toasts ||= document.body.appendChild(Object.assign(document.createElement('div'), { className: 'toasts' }));
-    const t = Object.assign(document.createElement('div'), { className: `toast ${kind}`, textContent: msg });
-    toasts.append(t);
-    setTimeout(() => t.remove(), kind === 'err' ? ms * 2 : ms);
+  // Notifications are always the top layer: a manual popover sits in the browser's top layer (above open dialogs, which
+  // no z-index can beat), and is shown again whenever a notification appears or any dialog / popover opens later.
+  function raise() {
+    if (!toasts?.isConnected || !toasts.showPopover) return;
+    toasts.popover = 'manual';
+    try { if (toasts.matches(':popover-open')) toasts.hidePopover(); toasts.showPopover(); } catch {}
+  }
+  new MutationObserver(ms => { if (toasts?.childElementCount && ms.some(m => m.target !== toasts && m.target.hasAttribute?.('open'))) raise(); })
+    .observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['open'] });
+  document.addEventListener('toggle', e => { if (e.target !== toasts && e.newState === 'open' && toasts?.childElementCount) raise(); }, true);   // popovers
+  function toast(msg, kind = '', ms = 5000) {
+    if (kind === 'error') kind = 'err';
+    // One problem, one notification: a failed step logs "X failed: <reason>" and its handler then shows "<reason>".
+    const now = Date.now(), m = String(msg);
+    if (toasts?.isConnected && [...toasts.children].some(t => now - t._at < 3000 && t._kind === kind && (t._msg.includes(m) || m.includes(t._msg)))) return;
+    if (!toasts?.isConnected) toasts = document.body.appendChild(Object.assign(document.createElement('div'), { className: 'toasts' }));
+    // Always on top: a manual popover lives in the browser's top layer (above open dialogs, which no z-index can beat);
+    // shown again on every notification so it is the newest top-layer item, above any dialog opened since.
+    raise();
+    const t = Object.assign(document.createElement('div'), { _at: now, _kind: kind, _msg: m }); t.className = `toast ${kind}`;
+    t.innerHTML = `<span>${esc(msg)}</span><button class="x" title="Dismiss">&times;</button>`;
+    t.querySelector('.x').onclick = () => t.remove();
+    toasts.prepend(t);
+    setTimeout(() => t.remove(), ms);
   }
 
   // A modal <dialog>. body = HTML string; buttons = [{ label, value, kind }]. Resolves with the clicked value (null on Esc).

@@ -7,9 +7,13 @@
 <script src="../js/core/theme.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
 <style>
-  .list div { display: flex; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); }
-  .list div span:first-child { flex: 1; }
+  #pubs th.sel, #pubs td.sel { width: 1%; text-align: center; }
   .opts { display: grid; gap: 6px; }
+  .tgts { display: grid; gap: 10px; }
+  .tgt { display: flex; align-items: flex-start; gap: 8px; }
+  .tgt label { flex: 1; display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .tgt label small { display: block; color: var(--muted); }
+  .tgt button { padding: 2px 10px; }
 </style>
 </head>
 <body>
@@ -20,10 +24,11 @@
   <div class="main stack">
     <div class="grid2">
       <section class="box stack">
-        <h3>Dashboard as a web page</h3>
-        <div class="muted">One self-contained HTML file with the current results built in: it opens anywhere, without the server or the data.</div>
-        <label class="field">Name<input id="dName" type="text" value="dashboard"></label>
-        <button id="pubDash">Publish dashboard</button>
+        <h3>Dashboard</h3>
+        <div class="muted">The current results in each ticked format, saved in the project's publish folder.</div>
+        <label class="field">Dashboard Name<input id="dName" type="text" spellcheck="false"></label>
+        <div class="tgts" id="tgts"></div>
+        <div class="row"><button id="pubDash">Publish</button></div>
       </section>
       <section class="box stack">
         <h3>Datasets</h3>
@@ -33,12 +38,14 @@
         <button id="pubData">Export selected</button>
       </section>
     </div>
-    <h2>Published</h2>
-    <div class="list" id="pubs"></div>
+    <h2 style="margin-top:20px">Published</h2>
+    <div class="row"><button id="openSel" disabled>Open Selected</button><button id="delSel" class="danger" hidden>Delete Selected</button></div>
+    <div id="pubs"></div>
     <h2>Activity</h2>
     <div class="log" id="log"></div>
   </div>
 </div>
+
 
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/engine-client.js"></script>
@@ -46,82 +53,130 @@
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/vendor/apexcharts.min.js"></script>
-<script src="../js/vendor/apextree.min.js"></script>
-<script type="module" src="../js/widgets/apex-grid-loader.js"></script>
-<script src="../js/widgets/apex-render.js"></script>
-<script src="../js/widgets/apex-widget.js"></script>
+<script src="../js/publish/publisher.js"></script>
 <script>
 const { $, esc } = UI;
 let ctx;
-const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').replace(/(\d{8})(\d{6})/, '$1-$2');
-const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export';
 
+// ---- Published table: every dashboard file in <project>/publish (one row per file). Who / when comes from
+// publish/published.json ({ "<file name>": { by, at } }, written by Publish); files without an entry show their file time.
+const MANIFEST = () => Publisher.MANIFEST(ctx);
+const EXT = { html: 'Web App (.html)', jpg: 'Image (.jpg)', png: 'Image (.png)', webp: 'Image (.webp)', pdf: 'PDF (.pdf)', pptx: 'PowerPoint Slide' };
 async function listPubs() {
   let items = [];
-  try { items = await DNFS.list(`${ctx.dir}/publish`, { recursive: true }); } catch {}
-  const files = items.filter(f => !f.dir).sort((a, b) => b.modified.localeCompare(a.modified));
-  $('pubs').innerHTML = files.map(f => `<div><span class="mono">${esc(f.path.replace(`${ctx.dir}/publish/`, ''))}</span><span class="muted">${UI.bytes(f.size)} · ${UI.date(f.modified)}</span>${f.name.endsWith('.html') ? `<a class="btn" href="/${esc(f.path)}" target="_blank">Open</a>` : ''}<button class="danger small" data-del="${esc(f.path)}">Delete</button></div>`).join('') || '<div class="muted">Nothing published yet.</div>';
+  try { items = await DNFS.list(`${ctx.dir}/publish`); } catch {}
+  const man = await DNFS.readJSONOr(MANIFEST(), {});
+  const p2 = n => String(n).padStart(2, '0');
+  const rows = items.filter(f => !f.dir && EXT[f.name.split('.').pop().toLowerCase()]).map(f => {
+    const m = man[f.name] || {}, d = new Date(m.at || f.modified);
+    return { f, type: EXT[f.name.split('.').pop().toLowerCase()], by: m.by || '', d,
+      date: `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`, time: `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` };
+  }).sort((a, b) => b.d - a.d || a.f.name.localeCompare(b.f.name));
+  $('pubs').innerHTML = rows.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th class="sel"><input type="checkbox" id="pubAll" title="Select all"></th><th>File Name</th><th>Type</th><th>Published By</th><th>Date</th><th>Time</th></tr></thead><tbody>${
+    rows.map(r => `<tr><td class="sel"><input type="checkbox" data-p="${esc(r.f.path)}"></td><td class="mono">${esc(r.f.name)}</td><td>${esc(r.type)}</td><td>${esc(r.by)}</td><td>${r.date}</td><td>${r.time}</td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="muted">Nothing published yet.</div>';
+  pubSel();
 }
-$('pubs').onclick = UI.guard(async ev => {
-  const p = ev.target.dataset.del; if (!p) return;
-  if (!await UI.confirm(`Delete ${p.split('/').pop()}?`, { danger: true, ok: 'Delete' })) return;
-  await DNFS.remove(p); ctx.log(`Deleted published file ${p}`); listPubs();
-});
+const picked = () => [...$('pubs').querySelectorAll('tbody input:checked')].map(c => c.dataset.p);
+const pubSel = () => { const n = picked().length; $('openSel').disabled = !n; $('delSel').hidden = !n; };
+const openFile = async path => {
+  const res = await fetch(`/api/openfile?${new URLSearchParams({ path })}`, { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } });
+  if (res.status === 404) throw new Error('The server is out of date: restart it (Server Control) to enable Open.');
+  const r = await res.json().catch(() => ({ ok: false, error: `server answered ${res.status}` }));
+  if (!r.ok) throw new Error(`Open ${path.split('/').pop()}: ${r.error}`);
+};
+async function delFiles(paths) {
+  if (!await UI.confirm(paths.length === 1 ? `Delete ${paths[0].split('/').pop()}?` : `Delete ${paths.length} published files?`, { danger: true, ok: 'Delete' })) return;
+  const man = await DNFS.readJSONOr(MANIFEST(), {});
+  for (const p of paths) { await DNFS.remove(p); delete man[p.split('/').pop()]; ctx.log(`Deleted published file ${p}`); }
+  await DNFS.writeJSON(MANIFEST(), man);
+  listPubs();
+}
+$('pubs').onchange = ev => { if (ev.target.id === 'pubAll') for (const c of $('pubs').querySelectorAll('tbody input')) c.checked = ev.target.checked; pubSel(); };
+$('openSel').onclick = UI.guard(async () => { for (const p of picked()) await openFile(p); });
+$('delSel').onclick = UI.guard(async () => { const p = picked(); if (p.length) await delFiles(p); });
 
-// ---- dashboard page: results computed now, embedded as JSON; renderer, theme and helpers inlined ----
+// Publishing itself (dashboard formats, dataset exports) is shared with Update: js/publish/publisher.js.
+const { nameStamp, STAMP, fixName, TARGETS, IMG_FMTS } = Publisher;
+const imgSettings = () => Publisher.imgSettings(ctx.cfg);
+let nameT;
+// Applies the name rules to a text box as it is typed in (also used by Image Settings' File Name); returns the value.
+function forceName(o) {
+  let p = o.selectionStart, v = fixName(o.value);
+  if (!STAMP.test(v)) { const s = nameStamp(), rest = v.replace(/^[\d_]*/, ''); p = Math.max(s.length, p + s.length - (v.length - rest.length)); v = s + rest; }
+  if (v !== o.value) { o.value = v; o.setSelectionRange(p, p); }
+  return v;
+}
+$('dName').oninput = () => {
+  const v = forceName($('dName'));
+  clearTimeout(nameT); nameT = setTimeout(UI.guard(async () => { ctx.cfg.publish = { ...(ctx.cfg.publish || {}), name: v.replace(STAMP, '') }; await Projects.save(ctx.cfg); }), 600);
+};
+const initName = () => { $('dName').value = nameStamp() + fixName(ctx.cfg.publish?.name || ''); };
+
+// ---- dashboard: every ticked format, drawn now (js/publish/publisher.js) ----
 $('pubDash').onclick = UI.guard(async () => {
-  const dash = await DNFS.readJSONOr(`${ctx.dir}/dashboard/dashboard.json`, null);
-  if (!dash) throw new Error('No dashboard yet. Build one in the Dashboard module first.');
-  if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
   $('pubDash').disabled = true;
-  try {
-    // Each widget is drawn here (Apex) at its dashboard size and embedded as static SVG: the page needs no JavaScript.
-    const pkgs = new Map((await WidgetRegistry.list(true)).map(m => [m.id, m]));
-    const COLS = dash.cols || 48, ROWS = dash.rows || 27, CELL = 30, cards = [];
-    const host = Object.assign(document.createElement('div'), { style: 'position:fixed;left:-99999px;top:0' }); document.body.append(host);
-    try {
-      for (const w of dash.widgets) {
-        const m = pkgs.get(w.pkg), d = ctx.cfg.datasets.find(x => x.name === w.dataset);
-        let body;
-        if (!m) body = `<div class="note err">Widget package ${esc(w.pkg)} not found</div>`;
-        else if (!ApexWidget.ready(m, w)) continue;   // not set up yet: left out
-        else if (!d) body = `<div class="note err">Dataset ${esc(w.dataset)} not found</div>`;
-        else {
-          const r = await Engine.call('query', { query: ApexWidget.query(m, w), views: Engine.views([d]) });
-          const el = Object.assign(document.createElement('div'), { style: `width:${w.w * CELL - 16}px;height:${w.h * CELL - 44}px` }); host.append(el);
-          try { await ApexWidget.render(el, m, m.specJson, w, ApexWidget.objects(r), { columns: d.columns || [] }); body = el.innerHTML; }
-          catch (e) { body = `<div class="note err">${esc(String(e.message || e).split('\n')[0])}</div>`; }
-        }
-        cards.push(`<div class="card" style="left:${w.x / COLS * 100}%;top:${w.y / ROWS * 100}%;width:${w.w / COLS * 100}%;height:${w.h / ROWS * 100}%"><h3>${esc(w.title || m?.name || '')}</h3><div class="body">${body}</div></div>`);
-      }
-    } finally { host.remove(); }
-    if (!cards.length) throw new Error('No widget is set up yet (dataset + data inputs).');
-    const css = await (await fetch('/css/theme.css')).text();
-    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(ctx.cfg.name)} · Dashboard</title>
-<style>${css.replace(/@font-face[^}]+}/g, '')}
-.board{position:relative;width:min(100%,calc((100vh - 120px) * 16 / 9));aspect-ratio:16/9;margin:0 auto}
-.card{position:absolute;box-sizing:border-box;padding:4px;display:flex}
-.card>*{min-width:0}
-.card{flex-direction:column}
-.card h3{margin:0;padding:6px 10px;font-size:13px;font-weight:600;background:var(--panel);border:1px solid var(--border);border-bottom:0;border-radius:4px 4px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .body{flex:1;min-height:0;background:var(--panel);border:1px solid var(--border);border-radius:0 0 4px 4px;padding:6px 8px;overflow:hidden}
-.card .body>svg,.card .body>figure>svg:last-child{width:100%;height:100%}
-.card .body>figure{margin:0;height:100%;display:flex;flex-direction:column}
-.card .body>figure>svg:last-child{flex:1;min-height:0}
-.note{height:100%;display:grid;place-items:center;color:var(--muted)}</style></head>
-<body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>${esc(ctx.cfg.name)}</h1><div class="sub">Dashboard published ${esc(new Date().toLocaleString())}${ctx.cfg.classification ? ` (classification: ${esc(ctx.cfg.classification)})` : ''}</div></div></div></header>
-<div class="main"><div class="board">${cards.join('\n')}</div></div></div></body></html>`;
-    const name = slug($('dName').value), path = `${ctx.dir}/publish/${name}-${stamp()}.html`;
-    await DNFS.writeText(path, html);
-    await Projects.touchModule(ctx.folder, 'publish');
-    ctx.log(`Published dashboard → ${path} (${UI.bytes(html.length)})`, 'ok'); UI.toast('Dashboard published', 'ok');
-    await listPubs();
-  } finally { $('pubDash').disabled = false; }
+  const st = ctx.step('Publishing the dashboard…');
+  try { await Publisher.dashboard(ctx, { name: $('dName').value }); st.done('Dashboard published'); }
+  catch (e) { st.fail(`Publish failed: ${e.message}`); throw e; }
+  finally { $('pubDash').disabled = false; }
+  UI.toast('Dashboard published', 'ok');
+  await listPubs();
 });
+// ---- Formats, saved in the project config as cfg.publish = { name, targets: [ids] }; all go to <project>/publish ----
+const showSettings = () => { for (const c of $('tgts').querySelectorAll('input')) $('tgts').querySelector(`[data-set="${c.value}"]`)?.toggleAttribute('hidden', !c.checked); };
+// Image settings, saved as cfg.publish.image = { name (after the stamp), formats: ['jpg'|'png'|'webp'], res: ['default'|'WxH'] }.
+async function imageDialog() {
+  const s = imgSettings(), dash = await DNFS.readJSONOr(`${ctx.dir}/dashboard/dashboard.json`, {});
+  const DW = (dash.cols || 48) * 30, DH = (dash.rows || 27) * 30;
+  const ck = (name, v, label, on) => `<label class="row" style="gap:8px"><input type="checkbox" name="${name}" value="${v}"${on ? ' checked' : ''}> ${label}</label>`;
+  const body = `<label class="field">File Name<span class="row" style="flex-wrap:nowrap"><input id="imgName" type="text" spellcheck="false" style="flex:1"><span id="imgExt" class="muted mono"></span></span></label>
+    <div class="field">File Format${IMG_FMTS.map(f => ck('fmt', f, '.' + f, s.formats.includes(f))).join('')}</div>
+    <div class="field">Resolutions${ck('res', 'default', `Default (${DW} × ${DH}, the dashboard's size)`, s.res.includes('default'))}</div>`;
+  const pend = UI.dialog('Image Settings', body, [{ label: 'Cancel', value: null, kind: 'ghost' }, { label: 'Save', value: f => ({
+    name: f.querySelector('#imgName').value.replace(STAMP, '').replace(/_+$/, ''),
+    formats: [...f.querySelectorAll('[name=fmt]:checked')].map(c => c.value), res: [...f.querySelectorAll('[name=res]:checked')].map(c => c.value) }) }]);
+  const d = [...document.querySelectorAll('dialog')].pop(), inp = d.querySelector('#imgName');
+  const ext = () => { d.querySelector('#imgExt').textContent = [...d.querySelectorAll('[name=fmt]:checked')].map(c => '.' + c.value).join(' ') || '(no format)'; };
+  inp.value = nameStamp() + fixName(s.name || ctx.cfg.publish?.name || ''); inp.oninput = () => forceName(inp); d.addEventListener('change', ext); ext();
+  const v = await pend;
+  if (!v) return;
+  if (!v.formats.length) throw new Error('Tick at least one image format.');
+  if (!v.res.length) throw new Error('Tick at least one resolution.');
+  ctx.cfg.publish = { ...(ctx.cfg.publish || {}), image: v }; await Projects.save(ctx.cfg);
+  ctx.log(`Image settings: ${v.formats.map(f => '.' + f).join(', ')} · ${v.res.join(', ')}`, 'ok');
+}
+// Format list on the page (between the name and the buttons); ticking saves right away.
+function renderTargets() {
+  // Older projects ticked jpg / png / webp separately: fold them into the one Image option (and its formats).
+  const old = (ctx.cfg.publish?.targets || []).filter(t => IMG_FMTS.includes(t));
+  if (old.length) ctx.cfg.publish = { ...ctx.cfg.publish, targets: [...ctx.cfg.publish.targets.filter(t => !IMG_FMTS.includes(t)), 'image'], image: { ...imgSettings(), formats: old } };
+  const on = new Set(ctx.cfg.publish?.targets || []);
+  $('tgts').innerHTML = TARGETS.map(t => `<div class="tgt"><label><input type="checkbox" value="${t.id}"${on.has(t.id) ? ' checked' : ''}><span>${esc(t.label)}<small>${esc(t.desc)}</small></span></label>${t.img ? `<button class="ghost" data-set="${t.id}">Settings</button>` : ''}</div>`).join('');
+  showSettings();
+}
+$('tgts').onchange = UI.guard(async () => {
+  showSettings();
+  ctx.cfg.publish = { ...(ctx.cfg.publish || {}), targets: [...$('tgts').querySelectorAll('input:checked')].map(c => c.value) };
+  await Projects.save(ctx.cfg);
+});
+$('tgts').onclick = UI.guard(async ev => { if (ev.target.closest('[data-set]')) await imageDialog(); });
 
 // ---- dataset exports ----
 $('pubData').onclick = UI.guard(async () => {
+  const names = [...document.querySelectorAll('#dsOpts input:checked')].map(c => c.value);
+  if (!names.length) throw new Error('Tick at least one dataset.');
+  const fmt = $('fmt').value;
+  // Remembered so Update exports the same datasets again.
+  ctx.cfg.publish = { ...(ctx.cfg.publish || {}), data: { names, fmt } }; await Projects.save(ctx.cfg);
+  $('pubData').disabled = true;
+  const st = ctx.step(`Exporting ${names.length} dataset(s) as ${fmt.toUpperCase()}…`);
+  try { await Publisher.data(ctx, { names, fmt }); st.done('Export finished'); }
+  catch (e) { st.fail(`Export failed: ${e.message}`); throw e; }
+  finally { $('pubData').disabled = false; }
+  UI.toast('Export finished', 'ok'); await listPubs();
+});
+(async () => {
   const names = [...document.querySelectorAll('#dsOpts input:checked')].map(c => c.value);
   if (!names.length) throw new Error('Tick at least one dataset.');
   const fmt = $('fmt').value, dir = `${ctx.dir}/publish/data-${stamp()}`;
@@ -141,7 +196,9 @@ $('pubData').onclick = UI.guard(async () => {
 (async () => {
   try {
     ctx = await ModulePage.init('publish', 'Publish');
-    $('dsOpts').innerHTML = (ctx.cfg.datasets || []).map(d => `<label class="row"><input type="checkbox" value="${esc(d.name)}"> ${esc(d.name)} <span class="muted">${UI.rows(d.rows)} rows · ${UI.bytes(d.bytes)}</span></label>`).join('') || '<span class="muted">No datasets yet.</span>';
+    const was = new Set(ctx.cfg.publish?.data?.names || []); if (ctx.cfg.publish?.data?.fmt) $('fmt').value = ctx.cfg.publish.data.fmt;   // last export choices
+    $('dsOpts').innerHTML = (ctx.cfg.datasets || []).map(d => `<label class="row"><input type="checkbox" value="${esc(d.name)}"${was.has(d.name) ? ' checked' : ''}> ${esc(d.name)} <span class="muted">${UI.rows(d.rows)} rows · ${UI.bytes(d.bytes)}</span></label>`).join('') || '<span class="muted">No datasets yet.</span>';
+    renderTargets(); initName();
     await listPubs();
   } catch (e) { UI.toast(e.message, 'err'); }
 })();

@@ -1,0 +1,82 @@
+/* Data Grid widget: the ONE place its look is set. Every Data Grid (Dashboard, drill-down, Import / Transform
+   previews, pop-outs) is drawn by grid.js in this folder and styled only here, so they all look exactly the same.
+   .WIDGET = the box the widget is drawn in (class dn-w-<folder name>). Colours come from the app theme variables. */
+
+/* ===== PAGE ===== */
+
+.WIDGET {
+  --dg-row-h: 34px;
+  --dg-font: 'Exo 2', system-ui, sans-serif;
+}
+.WIDGET > .dn-grid-box { display: flex; flex-direction: column; font-family: var(--dg-font); }
+
+/* ---- bar above the grid: search box, row readout, Pop-out, Export ---- */
+.WIDGET .gbar { display: flex; align-items: center; gap: 10px; padding: 0 0 6px; flex: none; }
+.WIDGET .gbar .search { width: 240px; }
+.WIDGET .gbar .grow { font-size: 12px; white-space: nowrap; color: var(--muted); }
+.WIDGET .gbar .spacer { flex: 1; }
+.WIDGET .gbar .addwrap { position: relative; }
+
+/* ---- the grid: one table in one native scroller (no scroll bars: the wheel scrolls) ---- */
+.WIDGET .dg {
+  flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  scrollbar-width: none;
+}
+.WIDGET .dg::-webkit-scrollbar { display: none; }
+.WIDGET .dg-t { table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; color: var(--text); min-width: 100%; }
+
+/* Header: sticky, panel colour, capitals, one line. */
+.WIDGET .dg-t thead th {
+  position: sticky; top: 0; z-index: 2; height: 36px; box-sizing: border-box;
+  padding: 0 10px; background: var(--panel); color: var(--text);
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; text-align: left;
+  border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  user-select: none; cursor: default;
+}
+.WIDGET .dg-t thead th:hover { background: var(--panel-2); }
+.WIDGET .dg-t thead th .ht { overflow: hidden; text-overflow: ellipsis; }
+/* Sorted / filtered columns: a small grey mark after the name (no accent colour). */
+.WIDGET .dg-t thead th.sorted-asc .ht::after { content: " \2191"; color: var(--muted); }
+.WIDGET .dg-t thead th.sorted-desc .ht::after { content: " \2193"; color: var(--muted); }
+.WIDGET .dg-t thead th.filtered .ht::before { content: "\25CF "; color: var(--muted); font-size: 9px; vertical-align: 1px; }
+/* Column resize handle: the header's right edge (drag; double-click = autosize). */
+.WIDGET .dg-t thead th .rz { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; }
+.WIDGET .dg-t thead th .rz::after { content: ""; position: absolute; top: 25%; bottom: 25%; right: 0; width: 1px; background: var(--border); }
+.WIDGET .dg-t thead th .rz:hover::after, .WIDGET .dg-t thead th .rz.on::after { top: 0; bottom: 0; width: 2px; background: var(--muted); }
+
+/* Rows: page colour, one line each, a border line under every row (full table width). */
+.WIDGET .dg-t tbody td {
+  height: var(--dg-row-h); box-sizing: border-box; padding: 0 10px;
+  border-bottom: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.WIDGET .dg-t tbody tr:hover td { background: var(--panel-2); }
+.WIDGET .dg-t td.num, .WIDGET .dg-t th.num { text-align: right; }
+.WIDGET .dg-t td.null { color: var(--muted); }
+.WIDGET .dg-t tr.pad td { height: auto; padding: 0; border: 0; background: none; }
+.WIDGET .dg-t tr.none td { color: var(--muted); text-align: left; position: sticky; left: 0; border: 0; }
+
+/* While the grid is popped out (its own window): a note in its place. */
+.WIDGET .dg-popped { padding: 14px 4px; color: var(--muted); font-size: 13px; }
+
+/* ---- menus: the right-click column menu and the Export drop-down share this exact look ---- */
+.WIDGET .gctx, .WIDGET .gbar .addmenu {
+  z-index: 1000; min-width: 200px; box-sizing: border-box;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 4px;
+  box-shadow: 0 6px 20px #0006; font-family: var(--dg-font); font-size: 13px; font-weight: 400; color: var(--text);
+  text-transform: none; letter-spacing: normal;
+}
+.WIDGET .gctx { position: fixed; }
+.WIDGET .gctx[hidden] { display: none; }
+.WIDGET .gbar .addmenu { position: absolute; right: 0; left: auto; top: calc(100% + 4px); display: none; min-width: 120px; }
+.WIDGET .gbar .addmenu.open { display: block; }
+.WIDGET .gctx > div, .WIDGET .gbar .addmenu > div { padding: 5px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.WIDGET .gctx > div:hover, .WIDGET .gbar .addmenu > div:hover { background: var(--sel); }
+.WIDGET .gctx hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; }
+.WIDGET .gctx > div.off { color: var(--muted); cursor: default; }
+.WIDGET .gctx > div.off:hover { background: none; }
+/* Filter right in the menu: condition + value. */
+.WIDGET .gctx > div.gflt { display: flex; flex-direction: column; gap: 6px; padding: 4px 6px 6px; cursor: default; }
+.WIDGET .gctx > div.gflt:hover { background: none; }
+.WIDGET .gctx .gflt select, .WIDGET .gctx .gflt input { width: 100%; box-sizing: border-box; }
+.WIDGET .gctx .gflt input:disabled { opacity: .45; }

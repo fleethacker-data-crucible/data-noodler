@@ -7,7 +7,6 @@ const Windows = (() => {
     { id: 'pipeline', label: 'Transform', page: 'transform.html', initials: 'PL', enabled: true },
     { id: 'dashboard', label: 'Dashboard', page: 'dashboard.html', initials: 'DA', enabled: true },
     { id: 'publish', label: 'Publish', page: 'publish.html', initials: 'PU', enabled: true },
-    { id: 'update', label: 'Update', page: 'update.html', initials: 'UP', enabled: true },
   ];
   // Window features: 95% of the available height, 16:10 width (capped to the screen), centred.
   function features() {

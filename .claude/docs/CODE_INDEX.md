@@ -61,11 +61,13 @@ files (`js/...` for pages, `engine/<Area>/...cs` for the engine). Exceptions: `.
 | `js/pipeline/steps.js` | `PipelineSteps`: step → SQL (pipelines are now `sql` steps; older form steps are converted on load). |
 | `js/pipeline/sql-editor.js` | `SqlEditor`: SQL / JSON (`lang`) code editor (line numbers, colours, Tab/Shift+Tab, auto-indent, SQL completion). CSS in theme.css. |
 | `js/pipeline/runner.js` | `PipelineRunner`: `load` (pipeline.json v2: queries + active + output; v1 steps converted), `run` = `Engine.write` of the active query to `data/source/<CLEAN_name>/`. |
-| `widgets/<id>/widget.json` (+ `spec.json`) | Global widget packages (none shipped: authored by hand or with AI). `spec.$kind` = apexcharts / apexgrid / apextree. |
+| `js/publish/publisher.js` | `Publisher`: dashboard publishing (Web App, PDF, PowerPoint, per-chart images) and dataset exports; shared by Publish and Update. Saved choices: `cfg.publish` (`targets`, `image`, `name`, `data: { names, fmt }`). |
+| `js/update/project-update.js` | `ProjectUpdate.run(folder)` (Project Manager: Update button + workflow in each expanded project): Import (changed sources, same columns), Transform (active query), Dashboard (clears widget caches), Publish (saved choices), Archive (snapshot); result in `cfg.modules.update` (`ok`, `steps`). |
+| `widgets/<id>/widget.json` (+ `spec.json`, `style.css`) | Global widget packages. `spec.$kind` = apexcharts / apexgrid / apextree. `style.css` (widget.json "style") is the widget's ONLY style: PAGE part scoped by `.WIDGET` (= class dn-w-<id>), `/* ===== SHADOW ===== */` part for shadow roots, `--w-*` vars feed chart colours (ApexWidget.useStyle / theme(el)). |
 | `js/widgets/apex-widget.js` | `ApexWidget` (all widget kinds: inputs from spec.data or defaults per Apex chart type, option detection, query, row shaping, theme, render via ApexRender, sample data) and `WidgetRegistry` (widgets/ folder). |
 | `js/widgets/apex-render.js` | `ApexRender`: ApexCharts (rows -> series / labels / categories by chart type), ApexTree (dimensions = levels), ApexGrid (picked fields); theme defaults merged under the spec. |
 | `js/widgets/apex-options.js` | `ApexOptions`: catalog of ApexCharts options in groups (per chart type) `groupOf(path)` groups widget options in the Dashboard settings. |
-| `js/widgets/apex-grid-loader.js` | ES module: imports the vendored ApexGrid (`js/vendor/apex-grid/`) and registers `<apex-grid>`; resolves `ApexGridReady`. |
+| `widgets/data-grid/grid.js` | `DNGrid`: the Data Grid renderer (our own table, no ApexGrid): one native scroller, rows on screen only, sort / filter / search / resize / autosize, right-click column menu, Export, Pop-out; engine paging via `GridRemote` (grid.provider). Loaded by ApexRender from widget.json "renderer". |
 | `js/vendor/apexcharts.min.js`, `apextree.min.js`, `apex-grid/` | Vendored libraries (offline; no CDN at runtime). |
 | `js/widgets/widget-settings.js` | `WidgetSettings.render` / `tree`: widget settings built from a manifest (Dashboard side panel + Pop-out Settings). |
 | `js/widgets/color-picker.js` | `ColorPicker.swatch`: SV square, hue strip, hex, theme palette, recent colours. |
@@ -78,7 +80,7 @@ files (`js/...` for pages, `engine/<Area>/...cs` for the engine). Exceptions: `.
 | `html/app.html` | Redirect only (old shell links → the module page). |
 | `js/core/embed.js` | Global header on every page (logo initials, Data Noodler, module · project, Web Server (PowerShell) + Data Engine (C#) status, ONLINE/OFFLINE); `GlobalHeader.setInfo`. |
 | `tests/sql-cheatsheet.ps1` (+ `-cases.ps1`) | Engine SQL tests: every cheatsheet command in `ref-docs/`, edge cases, Parquet row groups. |
-| `html/project_manager.html` (app entry point, hard-coded `$entryPage` in server.ps1; red Server Control button → `/api/panel`), `import.html`, `transform.html`, `dashboard.html`, `publish.html`, `update.html`, `archives.html` | Modules. |
+| `html/project_manager.html` (app entry point, hard-coded `$entryPage` in server.ps1; red Server Control button → `/api/panel`), `import.html`, `transform.html`, `dashboard.html`, `publish.html`, `dashboard-grid.html` (Dashboard right-click > Data Grid drill-down window), `grid-pop.html` (any Data Grid's Pop-out button), `archives.html` | Modules. |
 | `html/engine-bench.html` | Worker-count benchmark, Auto, profile → `config/engine-profile.json`. |
 | `html/thread-bench.html` | Worker sweep per query (Parquet or engine in-memory table). |
 | `html/engine-test.html` | SQL console. |

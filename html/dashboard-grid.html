@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Data Grid</title>
+<script src="../js/core/theme.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); scrollbar-width: none; }
+  ::-webkit-scrollbar { display: none; }
+  .pop { display: flex; flex-direction: column; height: 100%; padding: 10px 12px; box-sizing: border-box; gap: 6px; }
+  .pop header { display: flex; align-items: baseline; gap: 10px; flex: none; }
+  .pop header h2 { margin: 0; font-size: 15px; }
+  .wb { flex: 1; min-height: 0; }
+  .note { height: 100%; display: grid; place-items: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="pop">
+  <header><h2 id="h">Data Grid</h2><small class="muted" id="meta"></small></header>
+  <div class="wb" id="body"><div class="note">Loading…</div></div>
+</div>
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/widgets/apex-render.js"></script>
+<script src="../js/widgets/apex-options.js"></script>
+<script src="../js/widgets/apex-widget.js"></script>
+<script src="../js/widgets/grid-remote.js"></script>
+<script>
+// Drill-down window (Dashboard: right-click a widget > Data Grid). Shows the rows under one widget: every column of its
+// dataset, narrowed by the widget's own WHERE and the Filter widgets, in the Data Grid package (rows from the engine,
+// 100 at a time). ?id=<widget id>; everything else comes from window.opener.DashBridge.drill(id).
+(async () => {
+  const body = document.getElementById('body'), meta = document.getElementById('meta');
+  try {
+    const id = new URLSearchParams(location.search).get('id'), B = window.opener && !window.opener.closed ? window.opener.DashBridge : null;
+    const s = B?.drill(id);
+    if (!s) throw new Error('Open this window from the Dashboard (right-click a widget > Data Grid).');
+    document.title = `${s.title} · Data Grid`; document.getElementById('h').textContent = s.title;
+    const m = (await WidgetRegistry.list(true)).find(x => x.kind === 'apexgrid');
+    if (!m) throw new Error('No Data Grid widget package (kind apexgrid) in widgets/.');
+    const columns = JSON.parse(JSON.stringify(s.columns)), cols = columns.map(c => c.name), views = JSON.parse(JSON.stringify(s.views));
+    const w = { id: 'drill', dataset: s.dataset, inputs: { fields: { cols } }, opts: { exportFilename: s.title } };
+    const remote = (g, bar) => GridRemote.attach(g, { dataset: s.dataset, views: () => views, cols, columns, where: s.where,
+      onCount: (total, loaded, st) => { meta.textContent = `${s.dataset} · ${total.toLocaleString()} rows${loaded < total ? ` · ${loaded.toLocaleString()} loaded` : ''} · ${UI.ms(st.wall)}`; } }, bar);
+    body.innerHTML = '';
+    await ApexWidget.render(body, m, m.specJson, w, [], { columns, remote });
+  } catch (e) { body.innerHTML = `<div class="note err">${UI.esc(String(e.message || e).split('\n')[0])}</div>`; }
+})();
+// Export menu (.csv / .parquet / .sqlite): same as the Data Grid widget (UI only for now).
+document.getElementById('body').addEventListener('grid-export', e => UI.toast(`Export to .${e.detail.format}: not built yet.`));
+</script>
+</body>
+</html>

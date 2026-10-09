@@ -35,8 +35,11 @@
   .canvas .hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 
   .wd { position: absolute; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-  .wd.sel { border-color: var(--blue); outline: 1px solid var(--blue); outline-offset: -2px; z-index: 10; }   /* editor only: the selected widget is drawn above overlapping ones */
-  .wd.moving { opacity: .85; z-index: 20; }
+  .wd.sel { border-color: var(--blue); outline: 1px solid var(--blue); outline-offset: -2px; }
+  .wd.moving { opacity: .85; }
+  /* Stacking: each widget's z-index is its w.z (saved); selecting one gives it the highest, so the whole widget (header,
+     body, edges, its menus) is drawn above every other. The canvas is its own stacking layer, so widget order never reaches the toolbar menus or dialogs. */
+  .canvas { isolation: isolate; }
   .wd .wh { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: move; user-select: none; border-bottom: 1px solid var(--border); }
   .wd .wh b { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .wd .wh small { color: var(--muted); font-size: 11px; white-space: nowrap; }
@@ -52,19 +55,7 @@
   .wd .rz[data-dir="ne"] { top: 0; right: 0; cursor: nesw-resize; } .wd .rz[data-dir="nw"] { top: 0; left: 0; cursor: nwse-resize; }
   .wd .rz[data-dir="se"] { bottom: 0; right: 0; cursor: nwse-resize; } .wd .rz[data-dir="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
   .wd:hover .rz[data-dir="se"] { background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); }
-  .wd .wb .apexcharts-canvas, .wd .wb .apexcharts-svg { overflow: hidden; }
-  /* Data Grid bar (app style): search box + the row under the mouse */
-  .wd .gbar { display: flex; align-items: center; gap: 10px; padding: 0 0 6px; flex: none; }
-  .wd .gbar .search { width: 240px; }
-  .wd .gbar .grow { font-size: 12px; white-space: nowrap; }
-  .wd .gbar .spacer { flex: 1; }
-  .wd .gbar .addmenu { left: auto; right: 0; min-width: 110px; }
-  /* Filter widget: one dropdown per field. */
-  .wd .flt { display: flex; flex-wrap: wrap; gap: 8px 12px; align-content: flex-start; height: 100%; overflow: hidden; cursor: default; }
-  .wd .flt label { display: flex; flex-direction: column; gap: 3px; min-width: 140px; flex: 1 1 160px; color: var(--text-2); font-size: 12px; }
-  .wd .flt select { width: 100%; }
-  .wd .flt .clr { align-self: flex-end; }
-  .ghostbox { position: absolute; border: 1px dashed var(--blue); border-radius: 4px; background: color-mix(in srgb, var(--blue) 10%, transparent); pointer-events: none; z-index: 5; }
+  .ghostbox { position: absolute; border: 1px dashed var(--blue); border-radius: 4px; background: color-mix(in srgb, var(--blue) 10%, transparent); pointer-events: none; z-index: 2147483000; }
 
 </style>
 </head>
@@ -87,6 +78,7 @@
   </header>
   <div class="addmenu ctxmenu" id="ctxmenu">
   <div data-act="settings">Widget Settings<small>Open the settings window for this widget</small></div>
+  <div data-act="grid">Data Grid<small>Open the rows under this widget in a Data Grid window</small></div>
   <div data-act="refresh">Refresh<small>Re-run this widget (ignores the cache)</small></div>
   <div data-act="delete" class="danger last">Delete widget<small>Remove it from the dashboard</small></div>
 </div>
@@ -103,7 +95,6 @@
 <script src="../js/widgets/color-picker.js"></script>
 <script src="../js/vendor/apexcharts.min.js"></script>
 <script src="../js/vendor/apextree.min.js"></script>
-<script type="module" src="../js/widgets/apex-grid-loader.js"></script>
 <script src="../js/widgets/apex-render.js"></script>
 <script src="../js/widgets/apex-options.js"></script>
 <script src="../js/widgets/apex-widget.js"></script>
@@ -222,6 +213,7 @@ const titleOf = w => w.title || pkgOf(w)?.name || w.pkg || 'Widget';
 // other filters. Picking a value re-runs every widget on the dataset.
 async function drawFilter(w, body, meta) {
   await ensureMem(w.dataset);
+  ApexWidget.useStyle(pkgOf(w), body);   // its look: widgets/<id>/style.css only
   const views = viewsOf(w.dataset), fields = (w.filters || []).filter(f => f.col);
   w.sel ||= {};
   if (!fields.length) { body.innerHTML = '<div class="note">Right-click > Widget Settings to add filter fields</div>'; meta.textContent = ''; return; }
@@ -260,6 +252,7 @@ function filtersChanged(f) { save(); dash.widgets.filter(x => x.dataset === f.da
 
 // ---- canvas ----
 function place(el, w) {
+  el.style.zIndex = w.z || 1;
   Object.assign(el.style, { left: `${w.x * G}px`, top: `${w.y * G}px`, width: `${w.w * G - 1}px`, height: `${w.h * G - 1}px` });
 }
 function widgetEl(w) {
@@ -307,7 +300,7 @@ $('canvas').addEventListener('pointerdown', ev => {
   const onMove = e => {
     const dx = Math.round((e.clientX - sx) / G), dy = Math.round((e.clientY - sy) / G);
     if (!moved && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 4) return;
-    if (!moved) { moved = true; el.classList.add('moving'); $('canvas').append(ghost); }
+    if (!moved) { moved = true; el.classList.add('moving'); toFront(w); $('canvas').append(ghost); }   // dragged = on top
     if (mode === 'move') {
       w.x = Math.max(0, Math.min(COLS - w.w, start.x + dx)); w.y = Math.max(0, Math.min(ROWS - w.h, start.y + dy));
       place(ghost, w); Object.assign(el.style, { left: `${start.x * G + e.clientX - sx}px`, top: `${start.y * G + e.clientY - sy}px` });
@@ -382,7 +375,8 @@ $('addmenu').onclick = UI.guard(async ev => {
   $('addmenu').classList.remove('open');
   const m = pkgs.get(pid), ds = readyDs();
   const w = { id: crypto.randomUUID().slice(0, 8), type: 'widget', pkg: m.id, title: '', dataset: ds.length === 1 ? ds[0].name : '',
-    x: 0, y: Math.max(0, ...dash.widgets.map(o => o.y + o.h)), w: SIZE[0], h: SIZE[1], inputs: {}, opts: {} };
+    // A new widget always opens in the middle of the grid (and on top: select() below).
+    x: Math.floor((COLS - SIZE[0]) / 2), y: Math.floor((ROWS - SIZE[1]) / 2), w: SIZE[0], h: SIZE[1], inputs: {}, opts: {} };
   clamp(w);
   dash.widgets.push(w); await saveNow();
   $('canvas').append(widgetEl(w)); fitCanvas(); draw(w);
@@ -404,8 +398,17 @@ function openPop() {
   try { pop?.resizeTo(W, H); pop?.moveTo(L, T); } catch {}
   if (!pop) UI.toast('The settings window was blocked by the browser. Allow pop-ups for this site.', 'err');
 }
+// Bring a widget to the front: the highest z of all (renumbered 1..n, saved with the dashboard).
+function toFront(w) {
+  if (!w) return;
+  const order = dash.widgets.filter(x => x !== w).sort((a, b) => (a.z || 0) - (b.z || 0));
+  if (dash.widgets.every(x => x === w || (x.z || 0) < (w.z || 0))) return;   // already on top
+  [...order, w].forEach((x, i) => { x.z = i + 1; const e = document.querySelector(`.wd[data-id="${x.id}"]`); if (e) e.style.zIndex = x.z; });
+  save();
+}
 function select(id) {
   selId = id;
+  toFront(byId(id));
   document.querySelectorAll('.wd').forEach(e => e.classList.toggle('sel', e.dataset.id === id));
   if (popped()) pop.DNSettings?.show();   // the settings window follows the selection once it is open (right click > Widget Settings)
 }
@@ -424,7 +427,19 @@ window.DashBridge = {
     changed(w);
   },
   del: w => delWidget(w),
+  // Data Grid window (html/dashboard-grid.html): the widget's dataset, columns and WHERE (its own + the Filter widgets).
+  drill(id) {
+    const w = byId(id), d = w && dsOf(w.dataset); if (!d) return null;
+    return { title: titleOf(w), dataset: w.dataset, columns: d.columns || [], where: isFilter(w) ? whereOf({ dataset: w.dataset }) : whereOf(w), views: viewsOf(w.dataset) };
+  },
 };
+// Right-click > Data Grid: the rows under the widget in their own window (one window per widget).
+const openDrill = UI.guard(async w => {
+  if (!w.dataset || !dsOf(w.dataset)) throw new Error('Pick a dataset for this widget first (Widget Settings).');
+  await ensureMem(w.dataset);
+  const W = 1200, H = 750, g = open(`dashboard-grid.html?id=${encodeURIComponent(w.id)}`, `dn-grid-${w.id}`, `popup,width=${W},height=${H}`);
+  if (!g) UI.toast('The Data Grid window was blocked by the browser. Allow pop-ups for this site.', 'err'); else g.focus();
+});
 // A setting changed: save, update the title, re-run the widget (debounced while typing).
 const rerun = UI.debounce(w => draw(w), 350), rerunAll = UI.debounce(w => filtersChanged(w), 350);
 function changed(w, query = true) {
@@ -461,6 +476,7 @@ $('ctxmenu').onclick = ev => {
   const act = ev.target.closest('[data-act]')?.dataset.act, w = byId(ctxId); if (!act || !w) return;
   $('ctxmenu').classList.remove('open');
   if (act === 'settings') { select(w.id); openPop(); pop?.DNSettings?.show(); }
+  else if (act === 'grid') openDrill(w);
   else if (act === 'refresh') isFilter(w) ? filtersChanged(w) : draw(w, true);
   else if (act === 'delete') delWidget(w);
 };

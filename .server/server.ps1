@@ -685,6 +685,31 @@ function Handle-Site($req, $res, $rel, $ctx) {
         Open-Panel; Send-Json $res @{ ok = $true }
         return $false
     }
+    # Publish module Open: a project file in its Windows app. .pptx / .pdf -> their default app, .jpg/.png -> Photos,
+    # .html/.webp -> the Settings browser (normal window). POST /api/openfile?path=<project-relative path>
+    if ($rel -eq 'api/openfile') {
+        if (-not (Test-FsRequest $req) -or $req.HttpMethod -ne 'POST') { $res.StatusCode = 403; return $false }
+        try {
+            $full = Resolve-ProjectPath ([string]$req.QueryString['path'])
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw 'File not found.' }
+            $ext = [IO.Path]::GetExtension($full).ToLowerInvariant()
+            switch ($ext) {
+                { $_ -in '.jpg', '.jpeg', '.png' } { Start-Process "ms-photos:viewer?fileName=$([Uri]::EscapeDataString($full))" }
+                { $_ -in '.html', '.webp' } {
+                    $exe = Find-Browser $settings.browser
+                    if (-not $exe) { throw "$($settings.browser) is not installed." }
+                    Start-Process $exe @(([Uri]$full).AbsoluteUri)
+                }
+                { $_ -in '.pptx', '.pdf' } { Start-Process -FilePath $full }
+                default { throw "Cannot open $ext files." }
+            }
+            Add-Log 'sys' "Opened $([string]$req.QueryString['path'])"
+            Send-Json $res @{ ok = $true }
+        } catch {
+            Send-Json $res @{ ok = $false; error = $_.Exception.Message }
+        }
+        return $false
+    }
     # Project Manager closing stops the server (4 s grace so a reload, which says hello, cancels it).
     if ($rel -eq 'api/bye' -or $rel -eq 'api/hello') {
         if (-not (Test-FsRequest $req) -or $req.HttpMethod -ne 'POST') { $res.StatusCode = 403; return $false }
@@ -695,7 +720,7 @@ function Handle-Site($req, $res, $rel, $ctx) {
     # App shell header status, polled every 5 s: not logged. Also the app's heartbeat (main loop).
     if ($rel -eq 'api/status') {
         if (Test-FsRequest $req) {
-            Send-Json $res @{ ok = $true; ps = "$($PSVersionTable.PSVersion)"; port = $settings.port; theme = $settings.theme; engine = [bool]$script:engine
+            Send-Json $res @{ ok = $true; ps = "$($PSVersionTable.PSVersion)"; port = $settings.port; theme = $settings.theme; engine = [bool]$script:engine; user = $env:USERNAME
                               uptime = [int]((Get-Date) - $script:siteStarted).TotalSeconds }
         } else { $res.StatusCode = 403 }
         return $false

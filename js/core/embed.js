@@ -90,14 +90,37 @@
     }
     return axis === 'y' ? document.scrollingElement : null;
   };
+  // Smooth wheel, every page: each notch glides to its target instead of jumping (Data Grids do the same themselves).
+  // Selects, text areas and anything marked data-native-wheel keep the browser's own wheel.
+  const EASE = 0.22, glides = new WeakMap();   // el -> { tx, ty, cx, cy, f }
+  const glideTo = (el, dx, dy) => {
+    let g = glides.get(el);
+    if (!g || !g.f) { g = { tx: el.scrollLeft, ty: el.scrollTop, cx: el.scrollLeft, cy: el.scrollTop, f: 0 }; glides.set(el, g); }
+    g.tx = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, g.tx + dx));
+    g.ty = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, g.ty + dy));
+    const step = () => {
+      g.cx += (g.tx - g.cx) * EASE; g.cy += (g.ty - g.cy) * EASE;
+      if (Math.abs(g.tx - g.cx) < 0.5 && Math.abs(g.ty - g.cy) < 0.5) { g.cx = g.tx; g.cy = g.ty; g.f = 0; }
+      el.scrollLeft = g.cx; el.scrollTop = g.cy;
+      if (g.f) g.f = requestAnimationFrame(step);
+    };
+    if (!g.f) g.f = requestAnimationFrame(step);
+  };
   addEventListener('wheel', e => {
-    if (e.ctrlKey) {
-      e.preventDefault();
-      scroller(e.target, 'y')?.scrollBy({ top: e.deltaY * 4 });
-    } else if (e.shiftKey) {
-      const t = e.target.closest?.('.table-wrap'); const el = t && scroller(e.target, 'x');
-      if (el) { e.preventDefault(); el.scrollBy({ left: e.deltaY || e.deltaX }); }
-    }
+    if (e.defaultPrevented || e.target.closest?.('select, textarea, [data-native-wheel]')) return;
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1;
+    let dx = e.deltaX * unit, dy = e.deltaY * unit;
+    if (e.ctrlKey) dy *= 4;                                  // Ctrl: 4x faster vertically (instead of zooming)
+    else if (e.shiftKey && !dx) { dx = dy; dy = 0; }         // Shift: sideways
+    if (e.ctrlKey) e.preventDefault();
+    const el = scroller(e.target, dx && !dy ? 'x' : 'y');
+    if (!el) return;
+    const g = glides.get(el), at = g?.f ? g : { tx: el.scrollLeft, ty: el.scrollTop };
+    const room = (dy > 0 ? at.ty < el.scrollHeight - el.clientHeight : dy < 0 ? at.ty > 0 : false)
+      || (dx > 0 ? at.tx < el.scrollWidth - el.clientWidth : dx < 0 ? at.tx > 0 : false);
+    if (!room) return;
+    e.preventDefault();
+    glideTo(el === document.scrollingElement ? document.scrollingElement : el, dx, dy);
   }, { passive: false });
 
   // Tooltips, every page: title="..." shows a themed, rounded tooltip instead of the browser's square one.
