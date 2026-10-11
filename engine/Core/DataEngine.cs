@@ -682,7 +682,7 @@ namespace NativeDataEngine
             d["workers"] = Pool.WorkerCount; d["maxWorkers"] = 64; d["cores"] = Environment.ProcessorCount; d["busy"] = Pool.Busy;
             d["is64"] = Environment.Is64BitProcess; d["clr"] = Environment.Version.ToString();
             Dictionary<string, object> m = new Dictionary<string, object>();
-            m["budget"] = Mem.Budget; m["reserved"] = Mem.Reserved; m["managed"] = Mem.Managed; m["availPhys"] = Mem.AvailPhys; m["totalPhys"] = Mem.TotalPhys; m["cached"] = CachedBytes; m["resident"] = Resident.Bytes; m["residentCap"] = Resident.Cap;
+            m["budget"] = Mem.Budget; m["reserved"] = Mem.Reserved; m["managed"] = Mem.Managed; m["availPhys"] = Mem.AvailPhys; m["totalPhys"] = Mem.TotalPhys; m["cached"] = CachedBytes; m["spills"] = Spill.Count; m["resident"] = Resident.Bytes; m["residentCap"] = Resident.Cap;
             m["process"] = Process.GetCurrentProcess().PrivateMemorySize64;
             d["memory"] = m;
             d["jobs"] = Jobs.Running; d["batchRows"] = Options.BatchRowCount; d["partBytes"] = Options.PartBytes;

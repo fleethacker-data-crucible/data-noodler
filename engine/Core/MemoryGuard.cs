@@ -65,9 +65,10 @@ namespace NativeDataEngine
     // A reservation that is released when disposed (end of a query or operator).
     public sealed class MemoryLease : IDisposable
     {
-        private readonly MemoryGuard g; private long held; private readonly string what;
+        private readonly MemoryGuard g; private long held; private readonly string what; private bool closed;
         public MemoryLease(MemoryGuard g, string what) { this.g = g; this.what = what; }
-        public void Add(long bytes) { g.Reserve(bytes, what); held += bytes; }
-        public void Dispose() { if (held != 0) { g.Release(held); held = 0; } }
+        // After Dispose, Add does nothing (work still finishing on a worker after its query gave up must not hold memory).
+        public void Add(long bytes) { lock (this) { if (closed) return; g.Reserve(bytes, what); held += bytes; } }
+        public void Dispose() { lock (this) { closed = true; if (held != 0) { g.Release(held); held = 0; } } }
     }
 }

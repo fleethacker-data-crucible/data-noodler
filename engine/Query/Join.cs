@@ -26,7 +26,8 @@ namespace NativeDataEngine
                 if (built) return;
                 lease = new MemoryLease(ctx.Mem, "Join");
                 ctx.OnEnd(lease);
-                rb = Collect.All(right, ctx, lease);
+                try { rb = Collect.All(right, ctx, lease); }
+                catch { lease.Dispose(); lease = null; rb = null; throw; }   // too big: the chain falls back to a partitioned join
                 int n = rb.Rows;
                 Matched = new bool[n];
                 next = new int[n];
@@ -84,6 +85,9 @@ namespace NativeDataEngine
         { this.h = h; this.lkeys = lkeys; this.residual = residual != null ? BCast.To(residual, DataType.Bool) : null; this.kind = kind; this.outS = outS; }
         public Schema Out { get { return outS; } }
         public HashJoin Hash { get { return h; } }
+        public List<BExpr> LeftKeys { get { return lkeys; } }
+        public string Kind { get { return kind; } }
+        public JoinProbe With(HashJoin other) { return new JoinProbe(other, lkeys, residual, kind, outS); }
         public void Build(ExecCtx ctx) { h.Build(ctx); }
 
         // Column pruning: returns the left columns needed, and prunes the right input.

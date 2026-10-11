@@ -33,22 +33,68 @@ namespace NativeDataEngine
         public void SpecRefs(HashSet<int> n) { foreach (WinSpec w in specs) { BExpr.RefsOf(w.Args, n); BExpr.RefsOf(w.Partition, n); foreach (SortKey k in w.Order) k.E.Refs(n); } }
         public WindowOp(Op child, List<WinSpec> specs, Schema s) { this.child = child; this.specs = specs; Schema = s; }
 
+        // In memory first. Too big for the memory budget, with one PARTITION BY shared by every window: rows are split by
+        // the partition keys into pieces on disk and each piece is computed in memory (whole partitions stay together).
         public override IEnumerable<Batch> Run(ExecCtx ctx)
         {
-            using (MemoryLease lease = new MemoryLease(ctx.Mem, "Window function"))
+            MemoryLease lease = new MemoryLease(ctx.Mem, "Window function");
+            Batch r = null;
+            try { r = Whole(Collect.All(child, ctx, lease), lease); }
+            catch (Exception e) { lease.Dispose(); if (!Spill.IsOom(e) || SharedPartition() == null) throw; }
+            try
             {
-                Batch all = Collect.All(child, ctx, lease);
-                int n = all.Rows;
-                Column[] outCols = new Column[all.Cols.Length + specs.Count];
-                Array.Copy(all.Cols, outCols, all.Cols.Length);
-                for (int w = 0; w < specs.Count; w++)
-                {
-                    outCols[all.Cols.Length + w] = Compute(specs[w], all);
-                    lease.Add(outCols[all.Cols.Length + w].Bytes);
-                }
-                Batch r = new Batch(Schema, outCols, n);
-                foreach (Batch piece in AggOp.Split(r, ctx)) yield return piece;
+                if (r != null) { foreach (Batch piece in AggOp.Split(r, ctx)) yield return piece; yield break; }
+                SpillDir dir = new SpillDir(ctx, "Window function");
+                try { foreach (Batch b in Spilled(ctx, child.Run(ctx), dir, 1)) yield return b; }
+                finally { dir.Dispose(); }
             }
+            finally { lease.Dispose(); }
+        }
+        Batch Whole(Batch all, MemoryLease lease)
+        {
+            Column[] outCols = new Column[all.Cols.Length + specs.Count];
+            Array.Copy(all.Cols, outCols, all.Cols.Length);
+            for (int w = 0; w < specs.Count; w++)
+            {
+                outCols[all.Cols.Length + w] = Compute(specs[w], all);
+                lease.Add(outCols[all.Cols.Length + w].Bytes);
+            }
+            return new Batch(Schema, outCols, all.Rows);
+        }
+        // The PARTITION BY every window uses (plain columns, the same for all), or null.
+        List<BExpr> SharedPartition()
+        {
+            string sig = null;
+            foreach (WinSpec w in specs)
+            {
+                if (w.Partition.Count == 0) return null;
+                System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                foreach (BExpr e in w.Partition) { BCol c = e as BCol; if (c == null) return null; sb.Append(c.Index).Append(','); }
+                if (sig == null) sig = sb.ToString(); else if (sig != sb.ToString()) return null;
+            }
+            return specs[0].Partition;
+        }
+        IEnumerable<Batch> Spilled(ExecCtx ctx, IEnumerable<Batch> input, SpillDir dir, int seed)
+        {
+            List<BExpr> pk = SharedPartition();
+            SpillFile[] parts = Spill.Partition(dir, child.Schema, input, b => Spill.Eval(pk, b), Spill.Partitions, seed, ctx);
+            try
+            {
+                foreach (SpillFile f in parts)
+                {
+                    if (f.Rows == 0) continue;
+                    Batch r = null; bool again = false;
+                    using (MemoryLease lease = new MemoryLease(ctx.Mem, "Window function"))
+                    {
+                        try { List<Batch> bs = new List<Batch>(); foreach (Batch b in f.Read()) { lease.Add(b.Bytes); bs.Add(b); } r = Whole(Batch.Concat(child.Schema, bs), lease); }
+                        catch (Exception e) { if (!Spill.IsOom(e) || seed >= 3) throw; again = true; }
+                    }
+                    if (again) { foreach (Batch b in Spilled(ctx, f.Read(), dir, seed + 1)) yield return b; }
+                    else foreach (Batch piece in AggOp.Split(r, ctx)) yield return piece;
+                    f.Dispose();
+                }
+            }
+            finally { foreach (SpillFile f in parts) f.Dispose(); }
         }
 
         // Rows are grouped into partitions by hash (KeyIndex: same equality as the comparisons here), each partition's

@@ -2,6 +2,17 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: Queries spill to disk instead of running out of memory
+
+- **GROUP BY, sorts, window functions, joins** work in memory first. When one would go over the engine memory budget it
+  runs again with its input cut into pieces on disk (`%TEMP%\data-noodler-spill\q-*`, deleted when the query ends):
+  GROUP BY / window (one shared PARTITION BY) / INNER and LEFT joins split rows by a hash of their keys into 64
+  partitions and do each partition in memory (a partition still too big splits again); a full sort writes sorted runs
+  and merges them. Disk only holds rows; all work happens in memory. Same answers (`tests/spill.ps1`: 7 queries at a
+  40 MB budget). Still in memory only: GROUP BY with no keys (e.g. one COUNT DISTINCT), RIGHT / FULL / CROSS joins,
+  windows with different PARTITION BYs.
+- `status` memory now reports `spills` (count since start).
+
 ## 2026-10-11: In-memory tables spill to disk; Purge Memory
 
 - **Cached tables spill:** `cache/load` keeps a table in RAM while it fits (below 70% of the engine budget, free RAM

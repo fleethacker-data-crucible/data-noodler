@@ -103,6 +103,9 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
   **Subqueries** (scalar, `EXISTS`, `IN (SELECT)`, `ANY/SOME/ALL`; correlated on equality conditions) are rewritten by
   `Planner.Unnest` into hidden helper joins (CROSS JOIN when uncorrelated, LEFT JOIN on the correlation keys), so they run
   in parallel like any join. Recursive CTEs run round by round (`RecursiveOp`, working table `WorkSource`).
+- **Spill** (`Query/Spill.cs`): GROUP BY, sort, window and INNER / LEFT join build sides run in memory; one that would
+  pass the memory budget re-runs with its input in pieces on disk (hash partitions by key, or sorted runs merged) and
+  works each piece in memory. Spill folders live in `%TEMP%\data-noodler-spill` and are deleted at query end.
 - **Scripts** (`Core/Script.cs`): several statements separated by `;` run against a per-request session (in-memory tables,
   views, indexes): `CREATE TABLE` (constraints: PRIMARY KEY / UNIQUE / NOT NULL / DEFAULT / CHECK / AUTO_INCREMENT, or `AS query`),
   `CREATE [OR REPLACE] VIEW`, `DROP TABLE/VIEW/INDEX`, `ALTER TABLE`, `INSERT` (VALUES / query / DEFAULT VALUES, `ON DUPLICATE KEY

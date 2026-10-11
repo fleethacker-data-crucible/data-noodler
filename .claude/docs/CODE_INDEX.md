@@ -61,6 +61,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `Query/Aggregates.cs` | `KeyIndex` (group keys), aggregate states, `AggTable` (partial + merge). |
 | `Query/Join.cs` | `HashJoin`, `JoinProbe`, `OuterJoinOp`. |
 | `Query/Window.cs` | Window functions. |
+| `Query/Spill.cs` | Spill to disk: hash partitions and sorted runs for GROUP BY, sort, window and join when memory runs out. |
 | `Query/Cast.cs` | Type conversion, common types. |
 | `Query/QuerySpec.cs` | Declarative widget query → SQL. |
 | `Parquet/*.cs` | `Thrift` (compact protocol), `Compression` (Snappy, GZIP), `Encoding` (RLE, DELTA_*), `ParquetWriter` (export), `ParquetReader` (Parquet sources / older datasets). |

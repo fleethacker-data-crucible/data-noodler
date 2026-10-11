@@ -165,9 +165,76 @@ namespace NativeDataEngine
             }
             return r;
         }
+        // A join whose build side does not fit in memory (INNER / LEFT on keys) runs partitioned: both sides are split by
+        // the join keys into pieces on disk, then each right piece is built in memory and its left piece probed against it.
+        int spillAt = -1;   // the join step that did not fit (kept, so a second run does not try memory again)
+        int PrepareOrSpill(ExecCtx ctx)
+        {
+            if (spillAt >= 0) return spillAt;
+            for (int k = 0; k < Steps.Count; k++)
+            {
+                JoinProbe j = Steps[k] as JoinProbe; if (j == null) continue;
+                try { j.Build(ctx); }
+                catch (Exception e)
+                {
+                    if (!Spill.IsOom(e) || j.LeftKeys.Count == 0 || !(j.Kind == "INNER" || j.Kind == "LEFT")) throw;
+                    return spillAt = k;
+                }
+            }
+            return -1;
+        }
+        IEnumerable<Batch> Prefix(ExecCtx ctx, int stop)
+        {
+            int n = Src.Units(ctx);
+            for (int u = 0; u < n; u++)
+                foreach (Batch b0 in Src.RunUnit(ctx, u))
+                {
+                    ctx.Ct.ThrowIfCancellationRequested();
+                    ctx.Rows(b0.Rows);
+                    Batch b = b0;
+                    for (int k = 0; k < stop && b != null && b.Rows > 0; k++) b = Steps[k].Apply(b, ctx);
+                    if (b != null && b.Rows > 0) yield return b;
+                }
+        }
+        IEnumerable<Batch> Partitioned(ExecCtx ctx, int at)
+        {
+            JoinProbe j = (JoinProbe)Steps[at]; HashJoin h = j.Hash;
+            SpillDir dir = new SpillDir(ctx, "Join");
+            Schema ls = at == 0 ? Src.Schema : Steps[at - 1].Out;
+            SpillFile[] right = Spill.Partition(dir, h.RightOp.Schema, h.RightOp.Run(ctx), b => Spill.Eval(h.RightKeys, b), Spill.Partitions, 1, ctx);
+            SpillFile[] left = null;
+            try
+            {
+                left = Spill.Partition(dir, ls, Prefix(ctx, at), b => Spill.Eval(j.LeftKeys, b), Spill.Partitions, 1, ctx);
+                for (int p = 0; p < Spill.Partitions; p++)
+                {
+                    if (left[p].Rows == 0) { right[p].Dispose(); continue; }
+                    List<Batch> rb = new List<Batch>(); foreach (Batch b in right[p].Read()) rb.Add(b);
+                    HashJoin sub = new HashJoin(new MemSource(h.RightOp.Schema, rb), h.RightKeys);
+                    JoinProbe probe = j.With(sub);
+                    try
+                    {
+                        foreach (Batch lb in left[p].Read())
+                        {
+                            Batch b = probe.Apply(lb, ctx);
+                            for (int k = at + 1; k < Steps.Count && b != null && b.Rows > 0; k++) b = Steps[k].Apply(b, ctx);
+                            if (b != null && b.Rows > 0) yield return b;
+                        }
+                    }
+                    finally { sub.Release(); right[p].Dispose(); left[p].Dispose(); }
+                }
+            }
+            finally
+            {
+                foreach (SpillFile f in right) f.Dispose();
+                if (left != null) foreach (SpillFile f in left) f.Dispose();
+                dir.Dispose();
+            }
+        }
         public override IEnumerable<Batch> Run(ExecCtx ctx)
         {
-            Prepare(ctx);
+            int spill = PrepareOrSpill(ctx);
+            if (spill >= 0) { foreach (Batch b in Partitioned(ctx, spill)) yield return b; yield break; }
             int n = Src.Units(ctx);
             if (n <= 1 || ctx.Parallel <= 1)
             {
@@ -188,7 +255,14 @@ namespace NativeDataEngine
         // Per-unit fold on the workers, results handed back in unit order.
         public IEnumerable<T> Fold<T>(ExecCtx ctx, Func<T> init, Action<T, Batch> add)
         {
-            Prepare(ctx);
+            if (PrepareOrSpill(ctx) >= 0)
+            {
+                // A join had to spill: fold the partitioned rows in one go.
+                T acc = init();
+                foreach (Batch b in Run(ctx)) add(acc, b);
+                yield return acc;
+                yield break;
+            }
             int n = Src.Units(ctx);
             Func<int, T> one = u =>
             {
@@ -229,18 +303,56 @@ namespace NativeDataEngine
                     yield break;
                 }
             }
-            using (AggTable total = new AggTable(groups, aggs, ctx.Mem))
+            // In memory first; a GROUP BY too big for the memory budget spills (hash partitions by the group keys).
+            Batch r = null; bool spill = false;
+            try { r = InMemory(ctx); }
+            catch (Exception e) { if (groups.Count == 0 || !Spill.IsOom(e)) throw; spill = true; }
+            if (spill)
             {
+                SpillDir dir = new SpillDir(ctx, "GROUP BY");
+                try { foreach (Batch b in Spilled(ctx, child.Run(ctx), dir, 1)) yield return b; }
+                finally { dir.Dispose(); }
+                yield break;
+            }
+            if (groups.Count > 0 && r.Rows == 0) yield break;
+            foreach (Batch piece in Split(r, ctx)) yield return piece;
+        }
+        Batch InMemory(ExecCtx ctx)
+        {
+            ChainOp chain = child as ChainOp;
+            List<AggTable> made = new List<AggTable>();   // every table made (also on workers), freed if this fails
+            Func<AggTable> mk = () => { AggTable t = new AggTable(groups, aggs, ctx.Mem); lock (made) made.Add(t); return t; };
+            try
+            {
+                AggTable total = mk();
                 if (chain != null && chain.Src.Units(ctx) > 1 && ctx.Parallel > 1)
                 {
-                    foreach (AggTable part in chain.Fold(ctx, () => new AggTable(groups, aggs, ctx.Mem), (t, b) => t.Add(b)))
+                    foreach (AggTable part in chain.Fold(ctx, mk, (t, b) => t.Add(b)))
                         using (part) total.Merge(part);
                 }
                 else foreach (Batch b in child.Run(ctx)) total.Add(b);
-                Batch r = total.Result(Schema);
-                if (groups.Count > 0 && r.Rows == 0) yield break;
-                foreach (Batch piece in Split(r, ctx)) yield return piece;
+                return total.Result(Schema);
             }
+            finally { lock (made) foreach (AggTable t in made) t.Dispose(); }
+        }
+        // Rows split by group key into partitions on disk; each partition is grouped in memory (split again if too big).
+        IEnumerable<Batch> Spilled(ExecCtx ctx, IEnumerable<Batch> input, SpillDir dir, int seed)
+        {
+            SpillFile[] parts = Spill.Partition(dir, child.Schema, input, b => Spill.Eval(groups, b), Spill.Partitions, seed, ctx);
+            try
+            {
+                foreach (SpillFile f in parts)
+                {
+                    if (f.Rows == 0) continue;
+                    Batch r = null; bool again = false;
+                    try { using (AggTable t = new AggTable(groups, aggs, ctx.Mem)) { foreach (Batch b in f.Read()) t.Add(b); r = t.Result(Schema); } }
+                    catch (Exception e) { if (!Spill.IsOom(e) || seed >= 3) throw; again = true; }
+                    if (again) { foreach (Batch b in Spilled(ctx, f.Read(), dir, seed + 1)) yield return b; }
+                    else foreach (Batch piece in Split(r, ctx)) yield return piece;
+                    f.Dispose();
+                }
+            }
+            finally { foreach (SpillFile f in parts) f.Dispose(); }
         }
         public static IEnumerable<Batch> Split(Batch r, ExecCtx ctx)
         {
@@ -323,16 +435,126 @@ namespace NativeDataEngine
                     yield return all;
                     yield break;
                 }
-                all = Collect.All(child, ctx, lease);
-                int[] idx = Order(all, keys, topN);
-                lease.Add(idx.Length * 4L);
+            }
+            // Full sort in memory first; too big for the memory budget -> sorted runs on disk, merged.
+            MemoryLease full = new MemoryLease(ctx.Mem, "Sorting");
+            Batch rows = null; int[] order = null;
+            try { rows = Collect.All(child, ctx, full); order = Order(rows, keys, topN); full.Add(order.Length * 4L); }
+            catch (Exception e) { full.Dispose(); rows = null; order = null; if (!Spill.IsOom(e)) throw; }
+            if (rows == null) { foreach (Batch b in External(ctx)) yield return b; yield break; }
+            try
+            {
                 int per = ctx.Engine != null ? ctx.Engine.Options.BatchRowCount : 100000;
-                for (int at = 0; at < idx.Length; at += per)
+                for (int at = 0; at < order.Length; at += per)
                 {
-                    int n = Math.Min(per, idx.Length - at);
-                    int[] part = new int[n]; Array.Copy(idx, at, part, 0, n);
-                    yield return all.Take(part, n);
+                    int n = Math.Min(per, order.Length - at);
+                    int[] part = new int[n]; Array.Copy(order, at, part, 0, n);
+                    yield return rows.Take(part, n);
                 }
+            }
+            finally { full.Dispose(); }
+        }
+
+        // External merge sort: runs of about an eighth of the budget are sorted in memory and written out; then every
+        // run is read back a batch at a time and merged (ties: earlier run first, so the sort stays stable).
+        IEnumerable<Batch> External(ExecCtx ctx)
+        {
+            SpillDir dir = new SpillDir(ctx, "Sort");
+            long runBytes = Math.Max(64L << 20, ctx.Mem.Budget / 8);
+            int per = ctx.Engine != null ? ctx.Engine.Options.BatchRowCount : 100000;
+            List<SpillFile> runs = new List<SpillFile>();
+            List<Batch> cur = new List<Batch>(); long bytes = 0;
+            Action flush = () =>
+            {
+                if (cur.Count == 0) return;
+                Batch all = Batch.Concat(child.Schema, cur); cur.Clear(); bytes = 0;
+                int[] o = Order(all, keys, -1);
+                SpillFile f = dir.File(child.Schema);
+                for (int at = 0; at < o.Length; at += per) { int n = Math.Min(per, o.Length - at); int[] part = new int[n]; Array.Copy(o, at, part, 0, n); f.Append(all.Take(part, n)); }
+                f.Finish(); runs.Add(f);
+            };
+            foreach (Batch b in child.Run(ctx)) { ctx.Ct.ThrowIfCancellationRequested(); cur.Add(b); bytes += b.Bytes; if (bytes >= runBytes) flush(); }
+            flush();
+            Cursor[] cs = new Cursor[runs.Count];
+            try
+            {
+                List<int> heap = new List<int>();
+                for (int r = 0; r < cs.Length; r++) { cs[r] = new Cursor(runs[r].Read().GetEnumerator(), keys, r); if (cs[r].Next()) Push(heap, cs, r); }
+                long left = topN >= 0 ? topN : long.MaxValue;
+                while (heap.Count > 0 && left > 0)
+                {
+                    int n = (int)Math.Min(per, left);
+                    Column[] outC = null; ColumnBuilder[] bld = null; int got = 0;
+                    while (got < n && heap.Count > 0)
+                    {
+                        Cursor c = cs[heap[0]];
+                        if (bld == null)
+                        {
+                            outC = new Column[Schema.Count]; bld = new ColumnBuilder[Schema.Count];
+                            for (int k = 0; k < bld.Length; k++) if (!Spill.IsPlaceholder(c.B.Cols[k])) bld[k] = new ColumnBuilder(Schema[k].Type, n);
+                        }
+                        for (int k = 0; k < bld.Length; k++) if (bld[k] != null) bld[k].Add(c.B.Cols[k], c.Pos);
+                        got++;
+                        if (++c.Pos >= c.B.Rows && !c.Next()) { Pop(heap, cs); continue; }
+                        Down(heap, cs, 0);
+                    }
+                    if (got == 0) break;
+                    for (int k = 0; k < outC.Length; k++)
+                    {
+                        if (bld[k] != null) { outC[k] = bld[k].ToColumn(); continue; }
+                        Column ph = new Column(DataType.Null, 0); ph.Type = Schema[k].Type; ph.Length = got; ph.Nulls = null; outC[k] = ph;
+                    }
+                    left -= got;
+                    yield return new Batch(Schema, outC, got);
+                }
+            }
+            finally { foreach (Cursor c in cs) if (c != null) c.Close(); foreach (SpillFile f in runs) f.Dispose(); dir.Dispose(); }
+        }
+        sealed class Cursor
+        {
+            readonly IEnumerator<Batch> it; readonly List<SortKey> keys; public readonly int Run;
+            public Batch B; public Column[] K; public int Pos;
+            public Cursor(IEnumerator<Batch> it, List<SortKey> keys, int run) { this.it = it; this.keys = keys; Run = run; }
+            public bool Next()
+            {
+                while (it.MoveNext())
+                {
+                    B = it.Current; if (B.Rows == 0) continue;
+                    K = new Column[keys.Count]; for (int k = 0; k < K.Length; k++) K[k] = keys[k].E.Eval(B);
+                    Pos = 0; return true;
+                }
+                B = null; it.Dispose(); return false;
+            }
+            public void Close() { it.Dispose(); }   // stopped early (LIMIT): close the run file
+        }
+        int CmpC(Cursor a, Cursor b)
+        {
+            for (int k = 0; k < keys.Count; k++)
+            {
+                Column x = a.K[k], y = b.K[k];
+                bool an = x.IsNull(a.Pos) || x.Type.Kind == Kind.Null, bn = y.IsNull(b.Pos) || y.Type.Kind == Kind.Null;
+                int r;
+                if (an || bn) { if (an && bn) continue; r = an ? 1 : -1; if (keys[k].NullsFirst) r = -r; return r; }
+                r = BCmp.Compare(x, a.Pos, y, b.Pos);
+                if (r != 0) return keys[k].Desc ? -r : r;
+            }
+            return a.Run.CompareTo(b.Run);
+        }
+        void Push(List<int> h, Cursor[] cs, int r)
+        {
+            h.Add(r); int i = h.Count - 1;
+            while (i > 0) { int p = (i - 1) / 2; if (CmpC(cs[h[i]], cs[h[p]]) >= 0) break; int t = h[i]; h[i] = h[p]; h[p] = t; i = p; }
+        }
+        void Pop(List<int> h, Cursor[] cs) { h[0] = h[h.Count - 1]; h.RemoveAt(h.Count - 1); if (h.Count > 0) Down(h, cs, 0); }
+        void Down(List<int> h, Cursor[] cs, int i)
+        {
+            while (true)
+            {
+                int l = 2 * i + 1, r = l + 1, m = i;
+                if (l < h.Count && CmpC(cs[h[l]], cs[h[m]]) < 0) m = l;
+                if (r < h.Count && CmpC(cs[h[r]], cs[h[m]]) < 0) m = r;
+                if (m == i) return;
+                int t = h[i]; h[i] = h[m]; h[m] = t; i = m;
             }
         }
     }
