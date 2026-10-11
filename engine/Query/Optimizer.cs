@@ -1,4 +1,4 @@
-// Column pruning: works out which source columns an operator tree really reads, so Parquet scans skip the rest.
+// Column pruning: works out which source columns an operator tree really reads, so Arrow / Parquet / CSV scans skip the rest.
 using System;
 using System.Collections.Generic;
 using System.Reflection;
@@ -61,6 +61,8 @@ namespace NativeDataEngine
         {
             ParquetSource ps = s as ParquetSource;
             if (ps != null) { ps.SetNeeded(need); return; }
+            ArrowSource ar = s as ArrowSource;
+            if (ar != null) { ar.SetNeeded(need); return; }
             CsvSource cs = s as CsvSource;
             if (cs != null) { cs.SetNeeded(need); return; }
             OpSource os = s as OpSource;

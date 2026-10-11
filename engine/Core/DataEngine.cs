@@ -1,5 +1,5 @@
-// The engine: one instance per server. Owns the worker pool, memory guard, jobs and cached tables.
-// Query / Describe / Write (partitioned Parquet dataset) / Export (csv, parquet, sqlite) / RunPipeline / OpenSource.
+// The engine: one instance per server. Owns the worker pool, memory guard, jobs, cached tables and resident datasets.
+// Query / Describe / Write (partitioned Arrow dataset) / Export (csv, parquet, sqlite) / RunPipeline / OpenSource.
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -26,6 +26,7 @@ namespace NativeDataEngine
         public readonly WorkerPool Pool;
         public readonly MemoryGuard Mem;
         public readonly JobManager Jobs = new JobManager();
+        public readonly ResidentDatasets Resident;
         public readonly string Root;
         readonly ConcurrentDictionary<string, MemTable> tables = new ConcurrentDictionary<string, MemTable>(StringComparer.OrdinalIgnoreCase);
         readonly DateTime started = DateTime.UtcNow;
@@ -38,6 +39,7 @@ namespace NativeDataEngine
             int workers = Math.Max(1, Math.Min(Math.Min(64, options.MaxWorkers), Environment.ProcessorCount));
             Pool = new WorkerPool(workers);
             Mem = new MemoryGuard(options);
+            Resident = new ResidentDatasets(this);
             EngineLog.Write("engine", "Native engine " + Version + ": " + workers + " workers (" + Environment.ProcessorCount + " cores), memory budget " + MemoryGuard.Mb(Mem.Budget) +
                 " of " + MemoryGuard.Mb(Mem.TotalPhys) + (Environment.Is64BitProcess ? "" : " (32-bit process: limited)"));
         }
@@ -87,14 +89,21 @@ namespace NativeDataEngine
             {
                 switch (f.Name)
                 {
-                    case "read_parquet": case "parquet_scan": case "read_dataset":
+                    case "read_parquet": case "parquet_scan": case "read_dataset": case "read_arrow": case "arrow_scan":
                         {
+                            // A dataset folder / file (Arrow or Parquet parts). A project dataset already in engine memory
+                            // is read from there; otherwise from disk, and it is loaded into memory in the background.
                             if (f.Args.Count < 1) throw new EngineException("FUNCTION_ARGS", f.Name + "() needs a file or folder.");
+                            List<string> names = Planner.StrList(f.Args[0], f.Name);
                             List<string> files = new List<string>();
-                            foreach (string s in Planner.StrList(f.Args[0], f.Name)) files.AddRange(e.ParquetFiles(s));
-                            ParquetSource ps = new ParquetSource(files);
-                            foreach (string x in files) { try { KnownRows += PqMeta.Open(x).Rows; } catch { } }
-                            return ps;
+                            foreach (string s in names) files.AddRange(e.ParquetFiles(s));
+                            foreach (string x in files) { try { KnownRows += DataFiles.Rows(x); } catch { } }
+                            if (names.Count == 1 && !PathGuard.IsExternal(names[0]) && names[0].IndexOf('*') < 0)
+                            {
+                                Source mem = e.Resident.TryGet(PathGuard.Project(e.Root, names[0], false), files, true);
+                                if (mem != null) return mem;
+                            }
+                            return DataFiles.Open(files);
                         }
                     case "read_csv": case "read_csv_auto": case "csv_scan":
                         {
@@ -125,14 +134,15 @@ namespace NativeDataEngine
             }
         }
 
+        // Data files (.arrow / .parquet) of a path: a file, a dataset folder, or a folder/*.ext pattern.
         public List<string> ParquetFiles(string p)
         {
             if (p.IndexOf('*') >= 0)
             {
                 string dir = Path.GetDirectoryName(p.Replace('/', '\\')), pat = Path.GetFileName(p);
                 string full = PathGuard.Source(Root, dir.Length == 0 ? "." : dir);
-                List<string> r = Directory.GetFiles(full, pat).Where(x => x.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase) || x.EndsWith(".pq", StringComparison.OrdinalIgnoreCase)).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
-                if (r.Count == 0) throw new EngineException("FILE_NOT_FOUND", "No Parquet files match " + p + ".", 404);
+                List<string> r = Directory.GetFiles(full, pat).Where(x => DataFiles.IsParquet(x) || DataFiles.IsArrow(x)).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+                if (r.Count == 0) throw new EngineException("FILE_NOT_FOUND", "No Arrow or Parquet files match " + p + ".", 404);
                 return r;
             }
             string f = PathGuard.IsExternal(p) ? Path.GetFullPath(p) : PathGuard.Project(Root, p, false);
@@ -292,11 +302,12 @@ namespace NativeDataEngine
             return WithWiden(() => { QueryStmt q; Catalog cat; Schema s = Plan(sql, views, out q, out cat).Op.Schema; cat.Dispose(); return s; });
         }
 
-        // ---------- write a dataset ----------
+        // ---------- write a dataset (Arrow IPC parts; Parquet parts when Options.DatasetFormat = "parquet") ----------
         public Dictionary<string, object> Write(Job j, string sql, Dictionary<string, string> views, string destRel, Dictionary<string, object> meta, int codec, int workers)
         {
             string dest = PathGuard.Project(Root, destRel, false);
             if (dest.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase)) dest = dest.Substring(0, dest.Length - 8);
+            else if (dest.EndsWith(".arrow", StringComparison.OrdinalIgnoreCase)) dest = dest.Substring(0, dest.Length - 6);
             return WithWiden(() =>
             {
                 QueryStmt q; Catalog cat;
@@ -304,14 +315,17 @@ namespace NativeDataEngine
                 Planned p = Plan(sql, views, out q, out cat, j.Cts.Token);
                 if (cat.SourceBytes > 0) j.BytesTotal = cat.SourceBytes; else if (cat.KnownRows > 0) j.RowsTotal = cat.KnownRows;
                 ExecCtx ctx = Ctx(j, workers, j.Cts.Token);
-                j.Stage = "Writing Parquet";
+                bool arrow = !string.Equals(Options.DatasetFormat, "parquet", StringComparison.OrdinalIgnoreCase);
+                j.Stage = arrow ? "Writing Arrow" : "Writing Parquet";
                 try
                 {
-                    using (DatasetWriter w = new DatasetWriter(Root, dest, p.Op.Schema, codec, Options.PartBytes, Options.PartRows))
+                    using (DatasetWriter w = new DatasetWriter(Root, dest, p.Op.Schema, arrow, codec, Options.PartBytes, Options.PartRows))
                     {
-                        Encode(p.Op, ctx, codec, w.Append);
+                        if (arrow) Encode<EncodedBatch>(p.Op, ctx, ArrowFileWriter.Encode, w.Append);
+                        else Encode<EncodedRowGroup>(p.Op, ctx, rg => ParquetFileWriter.Encode(rg, codec), w.Append);
                         j.Stage = "Saving";
                         Dictionary<string, object> m = w.Commit(meta);
+                        Resident.Forget(dest);
                         return m;
                     }
                 }
@@ -324,17 +338,17 @@ namespace NativeDataEngine
             return Jobs.Start("write", destRel, j => Write(j, sql, views, destRel, meta, codec, workers));
         }
 
-        // Rows -> row groups of BatchRowCount, encoded on the workers (bounded), appended in order.
-        void Encode(Op root, ExecCtx ctx, int codec, Action<EncodedRowGroup> append)
+        // Rows -> batches of BatchRowCount, encoded on the workers (bounded), appended in order.
+        void Encode<T>(Op root, ExecCtx ctx, Func<Batch, T> encode, Action<T> append)
         {
             int per = Options.BatchRowCount;
-            Queue<Work<EncodedRowGroup>> q = new Queue<Work<EncodedRowGroup>>();
+            Queue<Work<T>> q = new Queue<Work<T>>();
             int maxInflight = Math.Max(2, ctx.Parallel);
             List<Batch> pend = new List<Batch>(); int pendRows = 0;
             Schema s = root.Schema;
             Action<Batch> submit = rg =>
             {
-                q.Enqueue(Pool.Submit(() => ParquetFileWriter.Encode(rg, codec)));
+                q.Enqueue(Pool.Submit(() => encode(rg)));
                 while (q.Count >= maxInflight || (q.Count > 0 && !Mem.RoomForMore())) append(q.Dequeue().Wait(ctx.Ct));
             };
             foreach (Batch b0 in root.Run(ctx))
@@ -393,7 +407,7 @@ namespace NativeDataEngine
                     {
                         using (ParquetFileWriter w = new ParquetFileWriter(tmp, p.Op.Schema, Codec.Snappy))
                         {
-                            Encode(p.Op, ctx, Codec.Snappy, w.Append);
+                            Encode<EncodedRowGroup>(p.Op, ctx, rg => ParquetFileWriter.Encode(rg, Codec.Snappy), w.Append);
                             w.Close(); rows = w.Rows;
                         }
                     }
@@ -439,8 +453,8 @@ namespace NativeDataEngine
             }
             else
             {
-                ParquetSource ps = new ParquetSource(ParquetFiles(src));
-                r["kind"] = "parquet"; r["tables"] = new[] { "" };
+                Source ps = DataFiles.Open(ParquetFiles(src));
+                r["kind"] = ps is ArrowSource ? "arrow" : "parquet"; r["tables"] = new[] { "" };
                 s = ps.Schema; rows = ps.KnownRows(null);
             }
             r["columns"] = Cols(s);
@@ -632,7 +646,7 @@ namespace NativeDataEngine
             d["workers"] = Pool.WorkerCount; d["maxWorkers"] = 64; d["cores"] = Environment.ProcessorCount; d["busy"] = Pool.Busy;
             d["is64"] = Environment.Is64BitProcess; d["clr"] = Environment.Version.ToString();
             Dictionary<string, object> m = new Dictionary<string, object>();
-            m["budget"] = Mem.Budget; m["reserved"] = Mem.Reserved; m["managed"] = Mem.Managed; m["availPhys"] = Mem.AvailPhys; m["totalPhys"] = Mem.TotalPhys; m["cached"] = CachedBytes;
+            m["budget"] = Mem.Budget; m["reserved"] = Mem.Reserved; m["managed"] = Mem.Managed; m["availPhys"] = Mem.AvailPhys; m["totalPhys"] = Mem.TotalPhys; m["cached"] = CachedBytes; m["resident"] = Resident.Bytes; m["residentCap"] = Resident.Cap;
             m["process"] = Process.GetCurrentProcess().PrivateMemorySize64;
             d["memory"] = m;
             d["jobs"] = Jobs.Running; d["batchRows"] = Options.BatchRowCount; d["partBytes"] = Options.PartBytes;
@@ -644,6 +658,7 @@ namespace NativeDataEngine
         {
             Jobs.CancelAll();
             CacheDrop(null);
+            Resident.DropUnder(null);
             Pool.Dispose();
         }
     }

@@ -14,6 +14,8 @@ namespace NativeDataEngine
         public long PartBytes;                  // a part file also closes at this size
         public long PartRows;                   // rows per Parquet part file (global: 2M)
         public int MaxResultRows;               // rows returned to the browser per query
+        public string DatasetFormat;            // dataset parts on disk: "arrow" (working format) or "parquet"
+        public double ResidentFraction;        // share of the memory budget project datasets may hold in RAM (0 = off)
 
         public EngineOptions()
         {
@@ -24,6 +26,8 @@ namespace NativeDataEngine
             PartBytes = 2L * 1024 * 1024 * 1024;
             PartRows = 2000000;
             MaxResultRows = 200000;
+            ResidentFraction = 0.6;
+            DatasetFormat = "arrow";
         }
     }
 

@@ -1,4 +1,4 @@
-// Paths, logical datasets (a folder of part-NNNNNN.parquet + dataset.json) and atomic dataset writes.
+// Paths, logical datasets (a folder of part-NNNNNN.arrow + dataset.json; older datasets: .parquet parts) and atomic dataset writes.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -9,7 +9,7 @@ namespace NativeDataEngine
 {
     public static class PathGuard
     {
-        static readonly string[] DataExt = { ".csv", ".tsv", ".txt", ".parquet", ".pq", ".sqlite", ".sqlite3", ".db" };
+        static readonly string[] DataExt = { ".csv", ".tsv", ".txt", ".parquet", ".pq", ".arrow", ".feather", ".sqlite", ".sqlite3", ".db" };
 
         // Project-relative path -> full path. Same rules as the server's Resolve-ProjectPath:
         // no absolute paths, no "..", no ':' and no dot-folders (.server, .git, .trash), no links.
@@ -39,7 +39,7 @@ namespace NativeDataEngine
             if (IsExternal(p))
             {
                 string ext = Path.GetExtension(p).ToLowerInvariant();
-                if (Array.IndexOf(DataExt, ext) < 0) throw new EngineException("PATH_FORBIDDEN", "Only data files (csv, tsv, txt, parquet, sqlite, db) can be read from outside the project.", 403);
+                if (Array.IndexOf(DataExt, ext) < 0) throw new EngineException("PATH_FORBIDDEN", "Only data files (csv, tsv, txt, parquet, arrow, sqlite, db) can be read from outside the project.", 403);
                 return Path.GetFullPath(p);
             }
             return Project(root, p, false);
@@ -54,7 +54,7 @@ namespace NativeDataEngine
 
     public static class Datasets
     {
-        // Parquet files of a dataset: a .parquet file, or a folder (dataset.json / manifest.json order, else part files by name).
+        // Data files of a dataset: one .arrow / .parquet file, or a folder (dataset.json / manifest.json order, else part files by name).
         public static List<string> Files(string full)
         {
             if (File.Exists(full)) return new List<string> { full };
@@ -75,8 +75,9 @@ namespace NativeDataEngine
                 }
                 if (r.Count > 0) return r;
             }
-            List<string> files = Directory.GetFiles(full, "*.parquet").OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
-            if (files.Count == 0) throw new EngineException("DATASET_EMPTY", "No Parquet files in " + Path.GetFileName(full) + ".", 404);
+            List<string> files = Directory.GetFiles(full, "*.arrow").OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+            if (files.Count == 0) files = Directory.GetFiles(full, "*.parquet").OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+            if (files.Count == 0) throw new EngineException("DATASET_EMPTY", "No Arrow or Parquet files in " + Path.GetFileName(full) + ".", 404);
             return files;
         }
 
@@ -88,41 +89,52 @@ namespace NativeDataEngine
     }
 
     // Writes a dataset into a temp folder, then swaps it in (the previous version stays intact until the swap).
+    // Parts are Arrow IPC files (the working format, EngineOptions.DatasetFormat "arrow") or Parquet ("parquet").
     public sealed class DatasetWriter : IDisposable
     {
-        readonly string dest, tmp, root; readonly Schema schema; readonly int codec; readonly long partBytes, partRows;
+        readonly string dest, tmp, root; readonly Schema schema; readonly long partBytes, partRows; readonly bool arrow; readonly int codec;
         readonly List<Dictionary<string, object>> parts = new List<Dictionary<string, object>>();
-        ParquetFileWriter cur; int partNo; bool done;
+        ArrowFileWriter cur; ParquetFileWriter pcur; int partNo; bool done;
         public long Rows, Bytes;
 
-        public DatasetWriter(string root, string destFull, Schema schema, int codec, long partBytes, long partRows)
+        public DatasetWriter(string root, string destFull, Schema schema, bool arrow, int codec, long partBytes, long partRows)
         {
-            this.root = root; dest = destFull.TrimEnd('\\'); this.schema = schema; this.codec = codec; this.partBytes = partBytes; this.partRows = partRows;
+            this.root = root; dest = destFull.TrimEnd('\\'); this.schema = schema; this.arrow = arrow; this.codec = codec; this.partBytes = partBytes; this.partRows = partRows;
             tmp = dest + ".tmp-" + Guid.NewGuid().ToString("N").Substring(0, 8);
             Directory.CreateDirectory(tmp);
         }
 
-        public void Append(EncodedRowGroup g)
+        string PartPath() { return Path.Combine(tmp, "part-" + partNo.ToString("000000") + (arrow ? ".arrow" : ".parquet")); }
+        public void Append(EncodedBatch g)
         {
-            if (cur == null) cur = new ParquetFileWriter(Path.Combine(tmp, "part-" + partNo.ToString("000000") + ".parquet"), schema, codec);
+            if (cur == null) cur = new ArrowFileWriter(PartPath(), schema);
             cur.Append(g);
             Rows += g.Rows;
             if (cur.Length >= partBytes || (partRows > 0 && cur.Rows >= partRows)) ClosePart();
         }
+        public void Append(EncodedRowGroup g)
+        {
+            if (pcur == null) pcur = new ParquetFileWriter(PartPath(), schema, codec);
+            pcur.Append(g);
+            Rows += g.Rows;
+            if (pcur.Length >= partBytes || (partRows > 0 && pcur.Rows >= partRows)) ClosePart();
+        }
         void ClosePart()
         {
-            if (cur == null) return;
-            cur.Close();
-            long size = new FileInfo(cur.Path).Length; Bytes += size;
+            string path; long rows;
+            if (cur != null) { cur.Close(); path = cur.Path; rows = cur.Rows; cur = null; }
+            else if (pcur != null) { pcur.Close(); path = pcur.Path; rows = pcur.Rows; pcur = null; }
+            else return;
+            long size = new FileInfo(path).Length; Bytes += size;
             Dictionary<string, object> p = new Dictionary<string, object>();
-            p["file"] = Path.GetFileName(cur.Path); p["rows"] = cur.Rows; p["bytes"] = size;
-            parts.Add(p); cur = null; partNo++;
+            p["file"] = Path.GetFileName(path); p["rows"] = rows; p["bytes"] = size;
+            parts.Add(p); partNo++;
         }
 
         // meta: extra manifest fields (name, lineage, source...). Returns the manifest.
         public Dictionary<string, object> Commit(Dictionary<string, object> meta)
         {
-            if (cur == null && parts.Count == 0) cur = new ParquetFileWriter(Path.Combine(tmp, "part-000000.parquet"), schema, codec);   // empty dataset: one file with the schema
+            if (cur == null && pcur == null && parts.Count == 0) { if (arrow) cur = new ArrowFileWriter(PartPath(), schema); else pcur = new ParquetFileWriter(PartPath(), schema, codec); }   // empty dataset: one file with the schema
             ClosePart();
             Dictionary<string, object> old = Directory.Exists(dest) ? Datasets.Manifest(dest) : null;
             string now = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
@@ -134,7 +146,8 @@ namespace NativeDataEngine
             m["bytes"] = Bytes;
             m["createdUtc"] = old != null && Json.Str(old, "createdUtc") != null ? Json.Str(old, "createdUtc") : now;
             m["updatedUtc"] = now;
-            m["codec"] = Codec.Name(codec);
+            m["format"] = arrow ? "arrow" : "parquet";
+            m["codec"] = arrow ? "none" : Codec.Name(codec);
             List<Dictionary<string, object>> cols = new List<Dictionary<string, object>>();
             List<string> names = ParquetFileWriter.UniqueNames(schema);
             for (int c = 0; c < schema.Count; c++) { Dictionary<string, object> d = new Dictionary<string, object>(); d["name"] = names[c]; d["type"] = (schema[c].Type.Kind == Kind.Null ? DataType.Varchar : schema[c].Type).Name; cols.Add(d); }
@@ -150,10 +163,10 @@ namespace NativeDataEngine
             if (Directory.Exists(dest)) { Retry(() => Directory.Move(dest, oldDir)); moved = true; }
             try { Retry(() => Directory.Move(tmp, dest)); }
             catch { if (moved) Directory.Move(oldDir, dest); throw; }
-            PqMeta.Forget(dest);
+            DataFiles.Forget(dest);
             if (moved) TryDelete(oldDir);
-            string single = dest + ".parquet";
-            if (File.Exists(single)) { try { File.Delete(single); } catch { } }
+            foreach (string single in new[] { dest + ".parquet", dest + ".arrow" })
+                if (File.Exists(single)) { try { File.Delete(single); } catch { } }
             done = true;
             m["path"] = PathGuard.Rel(root, dest);
             List<string> files = new List<string>();
@@ -176,6 +189,7 @@ namespace NativeDataEngine
         {
             if (done) return;
             if (cur != null) cur.Dispose();
+            if (pcur != null) pcur.Dispose();
             TryDelete(tmp);   // failed or cancelled: the previous dataset is untouched
         }
     }
