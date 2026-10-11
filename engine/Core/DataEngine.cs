@@ -17,7 +17,8 @@ namespace NativeDataEngine
         public Schema Schema; public List<Batch> Batches = new List<Batch>(); public long Rows; public bool Truncated; public long Ms;
     }
 
-    public sealed class MemTable { public Schema Schema; public List<Batch> Batches; public long Bytes, Rows; public MemoryLease Lease; }
+    // An in-memory table; one too big for memory spills to an Arrow dataset on disk (Spill = its folder) and is read from its parts.
+    public sealed class MemTable { public Schema Schema; public List<Batch> Batches; public long Bytes, Rows; public MemoryLease Lease; public string Spill; public List<string> Files; }
 
     public sealed partial class DataEngine : IDisposable
     {
@@ -40,6 +41,7 @@ namespace NativeDataEngine
             Pool = new WorkerPool(workers);
             Mem = new MemoryGuard(options);
             Resident = new ResidentDatasets(this);
+            try { if (Directory.Exists(SpillRoot)) Directory.Delete(SpillRoot, true); } catch { }   // spills left by a previous run
             EngineLog.Write("engine", "Native engine " + Version + ": " + workers + " workers (" + Environment.ProcessorCount + " cores), memory budget " + MemoryGuard.Mb(Mem.Budget) +
                 " of " + MemoryGuard.Mb(Mem.TotalPhys) + (Environment.Is64BitProcess ? "" : " (32-bit process: limited)"));
         }
@@ -82,7 +84,7 @@ namespace NativeDataEngine
                     if (Session.Dropped.Contains(name)) return null;
                 }
                 MemTable t; if (!e.tables.TryGetValue(name, out t)) return null;
-                return new MemSource(t.Schema, t.Batches);
+                return t.Spill != null ? DataFiles.Open(t.Files) : new MemSource(t.Schema, t.Batches);
             }
             public void Dispose() { if (Session != null) { Session.Dispose(); Session = null; } }
             public Source TableFunction(FuncTable f, Planner p)
@@ -477,6 +479,10 @@ namespace NativeDataEngine
         }
 
         // ---------- in-memory tables (engine bench) ----------
+        // Held in RAM while it fits (below SpillFraction of the budget, enough free RAM); past that, what is held and the
+        // rest are written to an Arrow dataset under %TEMP%\data-noodler-spill and the table is read from its parts.
+        const double SpillFraction = 0.7;
+        public static string SpillRoot { get { return Path.Combine(Path.GetTempPath(), "data-noodler-spill"); } }
         public Dictionary<string, object> CacheLoad(string name, string sql, Dictionary<string, string> views, int workers)
         {
             CacheDrop(name);
@@ -487,28 +493,52 @@ namespace NativeDataEngine
                 Planned p = Plan(sql, views, out q, out cat);
                 ExecCtx ctx = Ctx(null, workers, CancellationToken.None);
                 MemTable m = new MemTable(); m.Schema = p.Op.Schema; m.Batches = new List<Batch>(); m.Lease = new MemoryLease(Mem, "Cached table");
-                try { foreach (Batch b in p.Op.Run(ctx)) { m.Lease.Add(b.Bytes); m.Batches.Add(b); m.Rows += b.Rows; m.Bytes += b.Bytes; } }
-                catch { m.Lease.Dispose(); throw; }
+                DatasetWriter w = null;
+                try
+                {
+                    foreach (Batch b in p.Op.Run(ctx))
+                    {
+                        m.Rows += b.Rows; m.Bytes += b.Bytes;
+                        if (w == null && (Mem.Reserved + b.Bytes > Mem.Budget * SpillFraction || Mem.AvailPhys < Mem.MinFree))
+                        {
+                            m.Spill = Path.Combine(SpillRoot, name + "-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                            w = new DatasetWriter(SpillRoot, m.Spill, m.Schema, true, 0, Options.PartBytes, 0);
+                            foreach (Batch h in m.Batches) w.Append(ArrowFileWriter.Encode(h));
+                            m.Batches.Clear(); m.Lease.Dispose();
+                            EngineLog.Write("engine", "Cached table " + name + " spills to disk (" + MemoryGuard.Mb(Mem.Budget) + " budget)");
+                        }
+                        if (w != null) w.Append(ArrowFileWriter.Encode(b));
+                        else { m.Lease.Add(b.Bytes); m.Batches.Add(b); }
+                    }
+                    if (w != null) { w.Commit(null); m.Files = Datasets.Files(m.Spill); w.Dispose(); w = null; }
+                }
+                catch { m.Lease.Dispose(); if (w != null) w.Dispose(); DropSpill(m); throw; }
                 finally { ctx.End(); cat.Dispose(); }
                 return m;
             });
             tables[name] = t;
             Dictionary<string, object> r = new Dictionary<string, object>();
-            r["name"] = name; r["rows"] = t.Rows; r["bytes"] = t.Bytes; r["ms"] = sw.ElapsedMilliseconds;
+            r["name"] = name; r["rows"] = t.Rows; r["bytes"] = t.Bytes; r["ms"] = sw.ElapsedMilliseconds; r["spilled"] = t.Spill != null;
             return r;
+        }
+        static void DropSpill(MemTable t)
+        {
+            if (t.Spill == null) return;
+            DataFiles.Forget(t.Spill);
+            try { if (Directory.Exists(t.Spill)) Directory.Delete(t.Spill, true); } catch { }
         }
         public int CacheDrop(string name)
         {
             int n = 0;
             foreach (string k in tables.Keys.ToList())
             {
-                if (name != null && !string.Equals(k, name, StringComparison.OrdinalIgnoreCase)) continue;
-                MemTable t; if (tables.TryRemove(k, out t)) { t.Lease.Dispose(); n++; }
+                if (!string.IsNullOrEmpty(name) && !string.Equals(k, name, StringComparison.OrdinalIgnoreCase)) continue;
+                MemTable t; if (tables.TryRemove(k, out t)) { t.Lease.Dispose(); DropSpill(t); n++; }
             }
             if (n > 0) GC.Collect();
             return n;
         }
-        public long CachedBytes { get { long b = 0; foreach (MemTable t in tables.Values) b += t.Bytes; return b; } }
+        public long CachedBytes { get { long b = 0; foreach (MemTable t in tables.Values) if (t.Spill == null) b += t.Bytes; return b; } }
 
         // ---------- pipeline ----------
         // spec: { datasets: {name: path}, nodes: [{id, name, sql, output, dest}], changed: [names] (optional), version }

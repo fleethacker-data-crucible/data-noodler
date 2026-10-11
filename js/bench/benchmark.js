@@ -12,6 +12,7 @@
   let running = false, stopped = false, curJob = null, runT0 = 0;
 
   const fmtRate = r => r >= 1e9 ? (r / 1e9).toFixed(2) + 'B' : r >= 1e6 ? (r / 1e6).toFixed(r >= 1e8 ? 0 : 1) + 'M' : r >= 1e3 ? (r / 1e3).toFixed(0) + 'k' : r.toFixed(0);
+  const fmtS = ms => (ms / 1000).toFixed(1) + ' s';   // live cards: always seconds, 1 decimal
   const fmtMs = ms => ms >= 10000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms).toLocaleString() + ' ms';
   const val = c => !c || c.err || !(c.ms >= 0) ? null : st.unit === 'ms' ? c.ms : c.rows / Math.max(c.ms, 0.01) * 1000;
   const show = c => c?.err ? c.err : c?.running ? 'running' : val(c) == null ? '' : st.unit === 'ms' ? fmtMs(c.ms) : fmtRate(val(c)) + '/s';
@@ -47,7 +48,7 @@
   function card(kind, ms, rows, note, final) {
     if (final) last[kind] = [ms, rows, note];
     const id = kind === 'read' ? 'Read' : kind === 'write' ? 'Write' : 'Query';
-    $('c' + id).textContent = ms == null ? '–' : st.unit === 'ms' ? fmtMs(ms) : rows ? fmtRate(rows / Math.max(ms, 0.01) * 1000) + '/s' : fmtMs(ms);
+    $('c' + id).textContent = ms == null ? '–' : st.unit === 'ms' ? fmtS(ms) : rows ? fmtRate(rows / Math.max(ms, 0.01) * 1000) + '/s' : fmtS(ms);
     $('s' + id).textContent = note || ' ';
   }
   setInterval(async () => {
@@ -56,7 +57,7 @@
       $('cMem').textContent = UI.bytes(r.engine);
       $('sMem').textContent = `system free ${UI.bytes(r.sysFree)} of ${UI.bytes(r.sysTotal)}`;
     } catch {}
-    if (running) $('cTime').textContent = fmtMs(performance.now() - runT0);
+    if (running) $('cTime').textContent = fmtS(performance.now() - runT0);
   }, 500);
 
   // ---- engine calls with live numbers ----
@@ -117,7 +118,7 @@
   $('run').onclick = UI.guard(async () => {
     if (running) return;
     running = true; stopped = false; runT0 = performance.now();
-    $('run').disabled = true; $('stop').disabled = false; ['report', 'clear', 'wipe'].forEach(id => $(id).disabled = true);
+    $('run').disabled = true; $('stop').disabled = false; ['report', 'clear', 'purge', 'wipe'].forEach(id => $(id).disabled = true);
     const total = st.sizes.length * st.batches.length * st.tests.length * st.threads.length; let done = 0;
     const prog = (label) => { $('cProg').textContent = `${done} / ${total}`; $('sProg').textContent = label; $('bar').style.width = `${(100 * done / total).toFixed(1)}%`; $('status').textContent = label; };
     const ctxBase = { call, job, stopped: () => stopped, say: t => prog(t) };
@@ -159,7 +160,7 @@
     } finally {
       live = null; running = false;
       await setBatch(DEFAULT_BATCH); await T.dropMem(call).catch(() => {});
-      $('stop').disabled = true; ['report', 'clear', 'wipe'].forEach(id => $(id).disabled = false); plan(); save();
+      $('stop').disabled = true; ['report', 'clear', 'purge', 'wipe'].forEach(id => $(id).disabled = false); plan(); save();
     }
   });
   $('stop').onclick = async () => { stopped = true; $('stop').disabled = true; $('status').textContent = 'Stopping…'; if (curJob) await Engine.cancel(curJob).catch(() => {}); };
@@ -167,6 +168,12 @@
 
   // ---- clear / wipe / report ----
   $('clear').onclick = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); });
+  $('purge').onclick = UI.guard(async () => {
+    if (running) throw new Error('Stop the run first.');
+    await T.dropMem(call);
+    const r = await call('memory/purge', {});
+    log(`Memory purged: ${r.tables} table(s), ${r.datasets} dataset(s) freed; engine holds ${UI.bytes(r.managed)}.`, 'ok'); UI.toast('Engine memory purged', 'ok');
+  });
   $('wipe').onclick = UI.guard(async () => {
     if (!await UI.confirm('Delete every file the tests made (test-data/bench/data)? Results and reports stay.', { danger: true, ok: 'Wipe' })) return;
     await T.dropMem(call);

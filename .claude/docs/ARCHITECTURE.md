@@ -147,7 +147,8 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
 | `POST export` | `{ sql, views, to, format: csv\|parquet\|sqlite, table }` → job → `{ path, rows, bytes }` |
 | `POST pipeline` | `{ datasets: {name: path}, nodes: [{ id, name, sql, output, dest }], changed, version }` → job |
 | `GET job?id=` / `POST job/cancel?id=` / `GET jobs` | job state, stage, progress, rows, result or error `{ code, message }` |
-| `POST cache/load` / `cache/drop` | in-memory tables (engine bench) |
+| `POST cache/load` / `cache/drop` | in-memory tables (Benchmark); one too big for 70% of the budget spills to an Arrow dataset in `%TEMP%\data-noodler-spill` |
+| `POST memory/purge` | drop cached tables + resident datasets, compacting GC |
 | `GET memory` / `POST memory/load` / `POST memory/drop` | resident datasets: list / `{ paths, wait }` load / `{ path }` drop |
 
 Errors: `{ ok: false, error, code }` with codes like `CSV_INVALID_QUOTE`, `PARQUET_CORRUPT`, `PARQUET_UNSUPPORTED_CODEC`,

@@ -2,6 +2,16 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: In-memory tables spill to disk; Purge Memory
+
+- **Cached tables spill:** `cache/load` keeps a table in RAM while it fits (below 70% of the engine budget, free RAM
+  above the floor); past that the table is written to an Arrow dataset under `%TEMP%\data-noodler-spill` and read from
+  its parts, so a 25M-row memory test no longer runs out of memory. Spills are deleted when the table is dropped and at
+  engine start.
+- **`memory/purge`** route + **Purge Memory** button on the Benchmark page: drops cached tables and resident datasets,
+  then a compacting GC.
+- **Benchmark cards:** live times always in seconds with one decimal.
+
 ## 2026-10-11: Data Grid and LIKE speed
 
 - **Data Grid, sorted:** rows are fetched 1,000 at a time and pages served from that, so scrolling a sorted grid runs

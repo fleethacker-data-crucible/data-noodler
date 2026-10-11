@@ -153,6 +153,15 @@ namespace NativeDataEngine
                         Dictionary<string, object> d = new Dictionary<string, object>(); d["jobs"] = l; return Ok(d);
                     }
                 case "cache/load": return Ok(e.CacheLoad(Need(req, "name"), Need(req, "sql"), Views(req), (int)Json.Long(req, "workers", 0)));
+                case "memory/purge":
+                    {
+                        // Frees engine memory: cached tables (and their spills), resident datasets, then a compacting GC.
+                        Dictionary<string, object> d = new Dictionary<string, object>();
+                        d["tables"] = e.CacheDrop(null); d["datasets"] = e.Resident.DropUnder(null);
+                        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+                        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+                        d["managed"] = GC.GetTotalMemory(false); return Ok(d);
+                    }
                 case "cache/drop": { Dictionary<string, object> d = new Dictionary<string, object>(); d["dropped"] = e.CacheDrop(Json.Str(req, "name")); return Ok(d); }
                 case "options":
                     {

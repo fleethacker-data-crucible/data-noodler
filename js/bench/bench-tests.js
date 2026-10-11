@@ -100,7 +100,7 @@ const BenchTests = (() => {
       return [m('rw-mem:read', 'Read (memory)', 'read', r.ms), m('rw-mem:write', 'Write (memory)', 'write', w.ms)];
     }
     if (id.startsWith('rw-')) {
-      await call('cache/drop', { name: 'bench_m' });   // room for the copy being read
+      await call('cache/drop', { name: 'bench_m' }); memFor = null;   // room for the copy being read (reloaded when needed)
       const r = await call('cache/load', { name: 'bench_r', sql: `SELECT * FROM ${src[fmt]}`, workers });
       try {
         const w = fmt === 'arrow' ? await job('write', { sql: 'SELECT * FROM bench_r', dest: `${D}/out/rw_arrow`, workers })

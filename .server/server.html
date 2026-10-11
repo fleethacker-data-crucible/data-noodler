@@ -226,6 +226,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
         <h2 class="actions-title dev-title">Dev Actions</h2>
         <div id="dev-actions" class="row sorted">
           <button id="modules" class="dev">Modules</button>
+          <button id="bench" class="dev" title="Open the Benchmark page (engine speed tests)">Benchmark</button>
         </div>
       </section>
     </aside>
@@ -464,6 +465,13 @@ $('pages').addEventListener('click', e => {
 $('open').onclick = async () => {
   if (!selPage) return msg('Pick a module first.', false);
   const r = await api('open', { page: selPage });
+  if (!r.ok) msg(r.error, false);
+};
+
+// Benchmark page (also in the Project Manager's Utilities menu).
+$('bench').onclick = async () => {
+  if (!state?.up) return msg('Start the site first.', false);
+  const r = await api('open', { page: 'html/benchmark.html' });
   if (!r.ok) msg(r.error, false);
 };
 
