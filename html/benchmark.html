@@ -36,7 +36,7 @@
   #results .table-wrap { max-height: calc(100vh - 420px); min-height: 160px; }
   #status { min-height: 18px; }
   .pick .dd-menu label.bad, .pick .dd-menu label.bad small { color: var(--err); }
-  #memDlg { min-width: 340px; } #memDlg h3 { margin: 0 0 8px; } #memDlg .progress { margin-top: 10px; }
+  #memDlg .body { gap: 10px; }
 </style>
 </head>
 <body>
@@ -77,7 +77,7 @@
     <div class="log" id="log"></div>
   </div>
 </div>
-<dialog id="memDlg"><h3>Pre-calculating memory limitations</h3><div id="memMsg" class="muted">Starting</div><div class="progress"><i id="memBar"></i></div></dialog>
+<dialog id="memDlg"><header>Pre-calculating memory limitations</header><div class="body"><div id="memMsg" class="muted">Starting</div><div class="progress"><i id="memBar"></i></div></div><footer></footer></dialog>
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/ui.js"></script>
 <script src="../js/core/menus.js"></script>
