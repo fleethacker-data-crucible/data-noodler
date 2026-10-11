@@ -37,6 +37,12 @@
   #status { min-height: 18px; }
   .pick .dd-menu label.bad, .pick .dd-menu label.bad small { color: var(--err); }
   #memDlg .body { gap: 10px; }
+  #genDlg { width: min(620px, 94vw); }
+  .gen { display: grid; gap: 8px; max-height: 50vh; overflow: auto; }
+  .gen .it { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; }
+  .gen .it .progress { grid-column: 1 / -1; }
+  .gen .it span { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .gen .it.done span { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -78,6 +84,7 @@
   </div>
 </div>
 <dialog id="memDlg"><header>Pre-calculating memory limitations</header><div class="body"><div id="memMsg" class="muted">Starting</div><div class="progress"><i id="memBar"></i></div></div><footer></footer></dialog>
+<dialog id="genDlg"><header>Generating test data</header><div class="body"><div id="genList" class="gen"></div><div class="muted" id="genMsg"></div></div><footer><button id="genClose" class="ghost" disabled>Close</button></footer></dialog>
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/ui.js"></script>
 <script src="../js/core/menus.js"></script>

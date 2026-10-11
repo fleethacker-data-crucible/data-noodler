@@ -168,21 +168,44 @@
 
   // ---- clear / wipe / report ----
   const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); });
+  // Generate Test Data: every checked size, all workers, in a popup listing each file with its progress.
   const doMake = UI.guard(async () => {
     if (running) throw new Error('Stop the run first.');
     if (!st.sizes.length) throw new Error('Check at least one size under Rows.');
     running = true; ['run', 'report', 'utils'].forEach(id => $(id).disabled = true); runT0 = performance.now();
+    const dlg = $('genDlg'), list = $('genList'); list.innerHTML = ''; $('genMsg').textContent = ''; $('genClose').disabled = true;
+    dlg.showModal();
+    let row = null, total = 0;
+    const finish = () => { if (row) { row.classList.add('done'); row.querySelector('i').style.width = '100%'; row.querySelector('span').textContent = 'done'; } };
+    const say = (t, rows) => {
+      finish(); log(t); total = rows || 0;
+      row = document.createElement('div'); row.className = 'it';
+      row.innerHTML = `<b>${esc(t.replace(/^Making /, ''))}</b><span>starting</span><div class="progress"><i></i></div>`;
+      list.append(row); row.scrollIntoView({ block: 'nearest' });
+    };
+    const genJob = async (op, body) => {
+      let j = await Engine.call(op, { ...body, workers: maxW }); curJob = j.jobId;
+      try {
+        while (j.state !== 'done') {
+          if (j.state === 'failed' || j.state === 'cancelled') throw new Error(j.error?.message || `Job ${j.state}`);
+          await new Promise(r => setTimeout(r, 150));
+          j = await Engine.call('job?id=' + encodeURIComponent(j.jobId), undefined, 'GET');
+          if (row) { const f = total ? Math.min(1, j.rowsProcessed / total) : (j.progress || 0); row.querySelector('i').style.width = `${(f * 100).toFixed(1)}%`; row.querySelector('span').textContent = `${UI.num(j.rowsProcessed)} rows · ${fmtS(j.elapsedMs)}`; }
+        }
+        return j;
+      } finally { curJob = null; }
+    };
     try {
-      for (let i = 0; i < st.sizes.length; i++) {
-        const n = st.sizes[i], say = t => { $('status').textContent = t; $('sProg').textContent = t; log(t); };
-        $('cProg').textContent = `${i} / ${st.sizes.length}`; $('bar').style.width = `${(100 * i / st.sizes.length).toFixed(1)}%`;
-        await setBatch(DEFAULT_BATCH);
-        await T.ensureData(n, say, job);
-      }
-      $('cProg').textContent = `${st.sizes.length} / ${st.sizes.length}`; $('bar').style.width = '100%';
-      log(`Test data ready for ${st.sizes.map(T.sizeLabel).join(', ')} rows (${fmtS(performance.now() - runT0)}).`, 'ok'); UI.toast('Test data ready', 'ok');
-    } finally { running = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
+      await setBatch(DEFAULT_BATCH);
+      for (const n of st.sizes) await T.ensureData(n, say, genJob);
+      finish();
+      if (!list.children.length) list.innerHTML = '<div class="muted">All test data is already there.</div>';
+      $('genMsg').textContent = `Test data ready for ${st.sizes.map(T.sizeLabel).join(', ')} rows (${fmtS(performance.now() - runT0)}).`;
+      log($('genMsg').textContent, 'ok');
+    } catch (e) { $('genMsg').textContent = `Failed: ${e.message}`; log(`Generate test data: ${e.message}`, 'err'); }
+    finally { $('genClose').disabled = false; running = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
   });
+  $('genClose').onclick = () => $('genDlg').close();
   const doPurge = UI.guard(async () => {
     if (running) throw new Error('Stop the run first.');
     await T.dropMem(call);
@@ -240,6 +263,8 @@
       const over = T.SIZES.filter(n => mem[n] && !mem[n].fits);
       if (over.length) log(`Will not fit in memory (spill to disk, slower): ${over.map(T.sizeLabel).join(', ')} rows.`, 'warn');
     }
+    // No test data at all: offer to generate it (for the checked sizes) once the pickers are up.
+    const noData = status && !(await Promise.all(T.SIZES.map(T.hasData))).some(Boolean);
     const threads = Array.from({ length: maxW }, (_, i) => i + 1);
     if (!st.threads.length) st.threads = [...new Set([1, 2, 4, maxW])].filter(t => t <= maxW);
     st.threads = st.threads.filter(t => t <= maxW);
@@ -251,5 +276,6 @@
     pick($('pBatches'), 'Rows per batch', T.BATCHES.map(v => ({ v, l: `${T.sizeLabel(v)} rows${v === DEFAULT_BATCH ? ' (default)' : ''}`, short: T.sizeLabel(v) })), 'batches');
     $('sub').textContent = status ? `${status.workers} workers on ${status.cores} logical cores · memory budget ${UI.bytes(status.memory?.budget || 0)} of ${UI.bytes(status.memory?.totalPhys || 0)} RAM` : $('sub').textContent;
     render(); plan();
+    if (noData && await UI.confirm(`There is no test data generated. Do you want to generate test data now? (${st.sizes.map(T.sizeLabel).join(', ')} rows: the sizes checked under Rows.)`, { ok: 'Yes', cancel: 'No' })) doMake();
   })();
 })();

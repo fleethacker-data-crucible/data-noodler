@@ -1,6 +1,6 @@
 // Shared UI helpers. Global: UI.
 //   UI.toast('Saved', 'ok')                      bottom-right message (kind: '', 'ok', 'err')
-//   await UI.confirm('Delete?', { danger: true }) true / false (styled dialog; the browser's confirm() is not used)
+//   await UI.confirm('Delete?', { danger: true, ok, cancel }) true / false (styled dialog; the browser's confirm() is not used)
 //   await UI.form('New project', fields)         { values } or null; fields = [{ name, label, type, value, options, required }]
 //   UI.dataTable(el, cols, rows)                 query results as a table
 const UI = (() => {
@@ -61,8 +61,8 @@ const UI = (() => {
       d.querySelector('input, select, textarea')?.focus();
     });
   }
-  const confirm = (msg, { danger = false, ok = 'OK' } = {}) =>
-    dialog('Confirm', `<div>${esc(msg)}</div>`, [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: ok, value: true, kind: danger ? 'danger' : '' }]);
+  const confirm = (msg, { danger = false, ok = 'OK', cancel = 'Cancel' } = {}) =>
+    dialog('Confirm', `<div>${esc(msg)}</div>`, [{ label: cancel, value: false, kind: 'ghost' }, { label: ok, value: true, kind: danger ? 'danger' : '' }]);
   const alert = (title, msg) => dialog(title, `<div>${esc(msg)}</div>`, [{ label: 'OK', value: true }]);
 
   function fieldHtml(f) {
