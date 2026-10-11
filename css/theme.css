@@ -102,9 +102,10 @@ button.small { height: 21px; padding: 0 8px 2px; font-size: 12px; }
    Items: <div data-act>Name<small>tip</small></div>; tips only while Shift is held (.tips). .off = not available yet,
    .danger = destructive (bold red, always last). Packages (charts / widgets) keep their own menus in their style.css. */
 .dd-wrap { position: relative; display: inline-flex; }
-.dd-menu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 4px; display: none; min-width: 150px; text-align: left; }
+.dd-menu { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 4px; display: none; min-width: 150px; width: max-content; text-align: left; }
 .dd-menu.open { display: block; }
-.dd-menu > div { padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+.dd-menu > div { padding: 5px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap; }   /* menus fit their longest item */
+.dd-menu.tips > div { white-space: normal; }
 .dd-menu > div:hover { background: var(--sel); }
 .dd-menu small { color: var(--muted); display: none; font-size: 11.5px; }
 .dd-menu.tips small { display: block; }
