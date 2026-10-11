@@ -314,7 +314,9 @@
       catch (e) { log(`Memory pre-calculation failed: ${e.message}`, 'err'); }
       finally { dlg.close(); }
       const over = T.SIZES.filter(n => mem[n] && !mem[n].fits);
-      if (over.length) log(`Will not fit in memory (spill to disk, slower): ${over.map(T.sizeLabel).join(', ')} rows.`, 'warn');
+      // One line per size that will not fit: what it needs, what fits, and which tests spill to disk there.
+      for (const n of over.slice().reverse())
+        log(`${T.sizeLabel(n)} rows will not fit in memory (needs ~${UI.bytes(mem[n].need)}, ${UI.bytes(mem[n].room)} fits): Read/Write (memory) and Heavy queries spill to disk at this size (slower). Imports, exports and file reads / writes stream and are not affected.`, 'warn');
     }
     // No test data at all: offer to generate it (for the checked sizes) once the pickers are up.
     const noData = status && !(await Promise.all(T.SIZES.map(T.hasData))).some(Boolean);
