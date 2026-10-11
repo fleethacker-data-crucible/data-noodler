@@ -217,7 +217,7 @@ namespace NativeDataEngine
                     for (int c = 0; c < b.Cols.Length; c++) { if (c > 0) sb.Append(','); Values.AppendJson(sb, b.Cols[c], i); }
                     sb.Append(']');
                 }
-            sb.Append("],\"rowCount\":").Append(r.Rows).Append(",\"truncated\":").Append(r.Truncated ? "true" : "false").Append(",\"ms\":").Append(r.Ms).Append('}');
+            sb.Append("],\"rowCount\":").Append(r.Rows).Append(",\"truncated\":").Append(r.Truncated ? "true" : "false").Append(",\"ms\":").Append(r.Ms.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)).Append('}');
             return sb.ToString();
         }
     }

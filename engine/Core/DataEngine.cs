@@ -14,7 +14,7 @@ namespace NativeDataEngine
 {
     public sealed class QueryResult
     {
-        public Schema Schema; public List<Batch> Batches = new List<Batch>(); public long Rows; public bool Truncated; public long Ms;
+        public Schema Schema; public List<Batch> Batches = new List<Batch>(); public long Rows; public bool Truncated; public double Ms;   // engine time, ms (fractions kept: fast queries take a few ms)
     }
 
     // An in-memory table; one too big for memory spills to an Arrow dataset on disk (Spill = its folder) and is read from its parts.
@@ -213,9 +213,9 @@ namespace NativeDataEngine
                 try
                 {
                     QueryResult r = new QueryResult(); r.Schema = p.Op.Schema;
-                    if (q.Describe) { r.Schema = DescribeSchema(p.Op.Schema, r); r.Ms = sw.ElapsedMilliseconds; return r; }
+                    if (q.Describe) { r.Schema = DescribeSchema(p.Op.Schema, r); r.Ms = Math.Round(sw.Elapsed.TotalMilliseconds, 3); return r; }
                     CollectRows(p, r, maxRows, workers, ct, job);
-                    r.Ms = sw.ElapsedMilliseconds;
+                    r.Ms = Math.Round(sw.Elapsed.TotalMilliseconds, 3);
                     return r;
                 }
                 finally { cat.Dispose(); }
@@ -275,7 +275,7 @@ namespace NativeDataEngine
                     finally { th.Join(); }
                     if (cntErr != null) throw cntErr;
                     n = total;
-                    r.Ms = sw.ElapsedMilliseconds;
+                    r.Ms = Math.Round(sw.Elapsed.TotalMilliseconds, 3);
                     return r;
                 }
                 finally { cat.Dispose(); }
@@ -524,7 +524,7 @@ namespace NativeDataEngine
             });
             tables[name] = t;
             Dictionary<string, object> r = new Dictionary<string, object>();
-            r["name"] = name; r["rows"] = t.Rows; r["bytes"] = t.Bytes; r["ms"] = sw.ElapsedMilliseconds; r["spilled"] = t.Spill != null;
+            r["name"] = name; r["rows"] = t.Rows; r["bytes"] = t.Bytes; r["ms"] = Math.Round(sw.Elapsed.TotalMilliseconds, 3); r["spilled"] = t.Spill != null;
             return r;
         }
         static void DropSpill(MemTable t)
