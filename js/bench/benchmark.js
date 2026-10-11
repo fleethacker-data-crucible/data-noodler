@@ -61,7 +61,8 @@
   }, 500);
 
   // ---- progress bar ----
-  // The bar = (steps done + the step running) / steps. Inside a step, part(a, b, rows, expectMs) marks the share [a, b]
+  // The bar shows the step running (a test or a file): it fills 0 -> 100% and starts again at 0 for the next one, and
+  // is back at 0 when everything is done (the Progress card counts the steps). Inside a step, part(a, b, rows, expectMs) marks the share [a, b]
   // being worked: an engine job moves it by its rows processed (out of rows); a call with no progress of its own
   // (queries, loads into memory) moves it by elapsed time against expectMs, easing toward b until it returns.
   const P = { on: false, done: 0, total: 1, a: 0, b: 1, rows: 0, expect: 1000, t0: 0, frac: null };
@@ -71,8 +72,9 @@
     if (!P.on) return;
     const f = P.frac != null ? P.frac : 0.95 * (1 - Math.exp(-(performance.now() - P.t0) / P.expect));
     const inner = P.a + (P.b - P.a) * Math.max(0, Math.min(1, f));
-    $('bar').style.width = `${(100 * Math.min(1, (P.done + inner) / P.total)).toFixed(1)}%`;
+    $('bar').style.width = `${(100 * Math.min(1, inner)).toFixed(1)}%`;
   }
+  function barOff() { P.on = false; $('bar').style.width = '0%'; }
   setInterval(paintBar, 100);
 
   // ---- engine calls with live numbers ----
@@ -180,7 +182,7 @@
       prog(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtMs(performance.now() - runT0)}.`);
       log(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtMs(performance.now() - runT0)}.`, stopped ? 'warn' : 'ok');
     } finally {
-      live = null; running = false; P.on = false;
+      live = null; running = false; barOff();
       await setBatch(DEFAULT_BATCH); await T.dropMem(call).catch(() => {});
       $('stop').disabled = true; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); save();
     }
@@ -248,11 +250,11 @@
       await setBatch(DEFAULT_BATCH);
       await T.makeItems(keys, say, genJob);
       if (step) log(`${label}: done`, 'ok');
-      steps(nSteps, nSteps); $('cProg').textContent = `${nSteps} / ${nSteps}`;
+      $('cProg').textContent = `${nSteps} / ${nSteps}`;
       const m = step ? `Test data ready (${fmtS(performance.now() - runT0)}).` : 'All picked test data is already there.';
       $('status').textContent = m; $('sProg').textContent = m; log(m, 'ok'); UI.toast(m, 'ok');
     } catch (e) { $('status').textContent = `Generate test data failed: ${e.message}`; log(`Generate test data: ${e.message}`, 'err'); }
-    finally { running = false; P.on = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
+    finally { running = false; barOff(); ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
   });
   const doPurge = UI.guard(async () => {
     if (running) throw new Error('Stop the run first.');
