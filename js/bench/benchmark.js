@@ -25,8 +25,10 @@
     const btn = host.querySelector('button'), menu = host.querySelector('.dd-menu');
     const paint = () => {
       const sel = st[key], all = items.every(i => sel.includes(i.v));
-      btn.textContent = `${title}: ${all ? 'All' : sel.length ? items.filter(i => sel.includes(i.v)).map(i => i.short || i.l).join(', ') : 'none'} ▾`;
-      btn.title = btn.textContent.replace(' ▾', '');
+      const names = items.filter(i => sel.includes(i.v)).map(i => i.short || i.l).join(', ');
+      // Tests: just how many are picked (the names would make the button very wide); the others list their picks.
+      btn.textContent = `${title}: ${key === 'tests' ? (all ? `All (${sel.length})` : sel.length) : all ? 'All' : sel.length ? names : 'none'} ▾`;
+      btn.title = names || 'none';
       menu.innerHTML = `<label class="all"><input type="checkbox" data-v="*" ${all ? 'checked' : ''}>${key === 'tests' ? 'Run All' : 'All'}</label>` +
         items.map(i => `<label class="${i.bad ? 'bad' : ''}" title="${esc(i.desc || '')}"><input type="checkbox" data-v="${esc(String(i.v))}" ${sel.includes(i.v) ? 'checked' : ''}><span>${esc(i.l)}${i.desc ? `<small>${esc(i.desc)}</small>` : ''}</span></label>`).join('');
       plan();
