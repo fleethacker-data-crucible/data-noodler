@@ -1,14 +1,14 @@
 // Benchmark tests (html/benchmark.html). Global: BenchTests.
-// Test data lives in test-data/bench/data/<rows>/ (gitignored; Wipe Test Data removes it):
+// Test data lives in temp/bench/data/<rows>/ (gitignored; Wipe Test Data removes it):
 //   base/          Arrow dataset: the generated sales table (16 columns: ids, dates, timestamps, numbers, a 10k-value
 //                  text key, a mostly-unique text column, low-cardinality text, a flag, NULLs)
 //   src.csv / src.parquet / src.sqlite   the same rows in each import format
 //   out/           what the tests write (overwritten each run)
-// test-data/bench/data/dim/  10,000-row store table for joins.
+// temp/bench/data/dim/  10,000-row store table for joins.
 // Every test runs with a worker limit (1 .. max) and returns metrics { id, label, kind: read|write|query, ms, rows }:
 // ms = the engine's own time (no HTTP), rows = rows the step works through.
 const BenchTests = (() => {
-  const DIR = 'test-data/bench', DATA = `${DIR}/data`;
+  const DIR = 'temp/bench', DATA = `${DIR}/data`;
   const SIZES = [100000, 1000000, 5000000, 10000000, 25000000];
   const BATCHES = [10000, 50000, 100000, 250000, 500000, 1000000];
   const sizeLabel = n => n >= 1e6 ? `${n / 1e6}M` : `${n / 1e3}k`;

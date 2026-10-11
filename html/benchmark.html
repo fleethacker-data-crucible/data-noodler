@@ -54,10 +54,11 @@
       <span class="sep"></span>
       <button id="run" title="Run the checked tests for every checked size, rows per batch and worker count">Run</button>
       <button id="stop" class="ghost" disabled title="Stop after cancelling the step that is running">Stop</button>
-      <button id="report" class="ghost" title="Save the results as a Markdown report in test-data/bench/reports/">Save Report</button>
+      <button id="report" class="ghost" title="Save the results as a Markdown report in temp/bench/reports/">Save Report</button>
       <button id="clear" class="ghost" title="Clear the results table (test data stays)">Clear Results</button>
+      <button id="make" class="ghost" title="Make the test data for every checked size now (temp/bench/data). Run also makes whatever is missing.">Create Test Data</button>
       <button id="purge" class="ghost" title="Free engine memory: cached tables, loaded datasets, garbage collection">Purge Memory</button>
-      <button id="wipe" class="danger" title="Delete every file the tests made (test-data/bench/data). Results and reports stay.">Wipe Test Data</button>
+      <button id="wipe" class="danger" title="Delete every file the tests made (temp/bench/data). Results and reports stay.">Wipe Test Data</button>
     </div>
     <div class="cards">
       <div class="card read"><label>Read</label><b id="cRead">–</b><small id="sRead">&nbsp;</small></div>

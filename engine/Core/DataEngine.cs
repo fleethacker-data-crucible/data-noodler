@@ -41,6 +41,7 @@ namespace NativeDataEngine
             Pool = new WorkerPool(workers);
             Mem = new MemoryGuard(options);
             Resident = new ResidentDatasets(this);
+            SpillRoot = Path.Combine(string.IsNullOrEmpty(options.WorkspacePath) ? Path.Combine(Root, "temp") : Path.GetFullPath(options.WorkspacePath), "spill");
             try { if (Directory.Exists(SpillRoot)) Directory.Delete(SpillRoot, true); } catch { }   // spills left by a previous run
             EngineLog.Write("engine", "Native engine " + Version + ": " + workers + " workers (" + Environment.ProcessorCount + " cores), memory budget " + MemoryGuard.Mb(Mem.Budget) +
                 " of " + MemoryGuard.Mb(Mem.TotalPhys) + (Environment.Is64BitProcess ? "" : " (32-bit process: limited)"));
@@ -480,9 +481,9 @@ namespace NativeDataEngine
 
         // ---------- in-memory tables (engine bench) ----------
         // Held in RAM while it fits (below SpillFraction of the budget, enough free RAM); past that, what is held and the
-        // rest are written to an Arrow dataset under %TEMP%\data-noodler-spill and the table is read from its parts.
+        // rest are written to an Arrow dataset under temp\spill and the table is read from its parts.
         const double SpillFraction = 0.7;
-        public static string SpillRoot { get { return Path.Combine(Path.GetTempPath(), "data-noodler-spill"); } }
+        public static string SpillRoot { get; private set; }   // <root>\temp\spill (the app temp folder: safe to delete)
         public Dictionary<string, object> CacheLoad(string name, string sql, Dictionary<string, string> views, int workers)
         {
             CacheDrop(name);

@@ -105,7 +105,7 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
   in parallel like any join. Recursive CTEs run round by round (`RecursiveOp`, working table `WorkSource`).
 - **Spill** (`Query/Spill.cs`): GROUP BY, sort, window and INNER / LEFT join build sides run in memory; one that would
   pass the memory budget re-runs with its input in pieces on disk (hash partitions by key, or sorted runs merged) and
-  works each piece in memory. Spill folders live in `%TEMP%\data-noodler-spill` and are deleted at query end.
+  works each piece in memory. Spill folders live in `temp\spill` and are deleted at query end.
 - **Scripts** (`Core/Script.cs`): several statements separated by `;` run against a per-request session (in-memory tables,
   views, indexes): `CREATE TABLE` (constraints: PRIMARY KEY / UNIQUE / NOT NULL / DEFAULT / CHECK / AUTO_INCREMENT, or `AS query`),
   `CREATE [OR REPLACE] VIEW`, `DROP TABLE/VIEW/INDEX`, `ALTER TABLE`, `INSERT` (VALUES / query / DEFAULT VALUES, `ON DUPLICATE KEY
@@ -150,7 +150,7 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
 | `POST export` | `{ sql, views, to, format: csv\|parquet\|sqlite, table }` → job → `{ path, rows, bytes }` |
 | `POST pipeline` | `{ datasets: {name: path}, nodes: [{ id, name, sql, output, dest }], changed, version }` → job |
 | `GET job?id=` / `POST job/cancel?id=` / `GET jobs` | job state, stage, progress, rows, result or error `{ code, message }` |
-| `POST cache/load` / `cache/drop` | in-memory tables (Benchmark); one too big for 70% of the budget spills to an Arrow dataset in `%TEMP%\data-noodler-spill` |
+| `POST cache/load` / `cache/drop` | in-memory tables (Benchmark); one too big for 70% of the budget spills to an Arrow dataset in `temp\spill` |
 | `POST memory/purge` | drop cached tables + resident datasets, compacting GC |
 | `GET memory` / `POST memory/load` / `POST memory/drop` | resident datasets: list / `{ paths, wait }` load / `{ path }` drop |
 
@@ -217,7 +217,7 @@ data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLit
 - **Archives:** folder copies (datasets are folders).
 - **Benchmark** (`html/benchmark.html`, Project Manager > Utilities): imports, exports, reads / writes (memory, CSV, Parquet,
   Arrow, SQLite) and heavy queries for 100k-25M rows, any rows per batch (`POST /api/engine/options {batchRows}`) and 1 .. max
-  workers; live cards, results table, results saved in `test-data/bench/benchmark.json`, reports in `test-data/bench/reports/`.
+  workers; live cards, results table, results saved in `temp/bench/benchmark.json`, reports in `temp/bench/reports/`.
   `engine-test.html` = SQL console.
 
 **Light/dark mode:** one global setting, `settings.json` `theme`, chosen in the server panel; pages follow via `js/core/theme.js`.

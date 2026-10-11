@@ -1,5 +1,5 @@
 // Spill to disk. A blocking operator (GROUP BY, join build side, sort, window) works in memory first; when it would go
-// over the engine memory budget it runs again with its input cut into pieces on disk (%TEMP%\data-noodler-spill\q-*).
+// over the engine memory budget it runs again with its input cut into pieces on disk (temp\spill\q-*).
 // Disk only holds rows: every piece is read back into memory and worked there.
 //  - GROUP BY / window (PARTITION BY) / join: rows are split by a hash of their keys into partitions, so every key's
 //    rows are in one partition; each partition is then done in memory on its own (a partition still too big splits again).

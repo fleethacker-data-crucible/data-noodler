@@ -91,7 +91,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `js/pipeline/runner.js` | `PipelineRunner`: `load` (pipeline.json v2), `run` = `Engine.write` of the active query → `data/source/<CLEAN_name>/`. |
 | `js/publish/publisher.js` | `Publisher`: dashboard publishing (Web App, PDF, PowerPoint, images) and dataset exports; shared by Publish and Update. |
 | `js/update/project-update.js` | `ProjectUpdate.run(folder)`: Import (changed sources), Transform, Dashboard caches, Publish, Archive. |
-| `js/bench/bench-tests.js`, `js/bench/benchmark.js` | Benchmark page: test data (`test-data/bench/data/<rows>/`), the tests (`BenchTests.run`), and the page (check-box pickers, live cards, results table, saved results, Markdown report, Wipe Test Data). |
+| `js/bench/bench-tests.js`, `js/bench/benchmark.js` | Benchmark page: test data (`temp/bench/data/<rows>/`), the tests (`BenchTests.run`), and the page (check-box pickers, live cards, results table, saved results, Markdown report, Create / Wipe Test Data). |
 | `css/theme.css`, `assets/fonts/` | Universal theme (see `THEME_GUIDE.md`). |
 
 ### Charts, Data Grid, D3 Studio
