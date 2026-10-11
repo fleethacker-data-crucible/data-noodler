@@ -257,8 +257,8 @@ namespace NativeDataEngine
             if (c.Physical == ParquetTypes.INT64 && c.Type.Kind == Kind.Decimal && col.F != null) { double s = Math.Pow(10, c.Scale); double[] o = col.F; for (int i = 0; i < n; i++) o[row + i] = BitConverter.ToInt64(d, p + 8 * i) / s; return true; }
             if (c.Physical == ParquetTypes.BYTE_ARRAY && c.Type.Kind == Kind.String && col.S != null)
             {
-                string[] o = col.S;
-                for (int i = 0; i < n; i++) { int l = BitConverter.ToInt32(d, p); p += 4; o[row + i] = Encoding.UTF8.GetString(d, p, l); p += l; }
+                string[] o = col.S; TextIntern ti = new TextIntern();   // repeated values: one string each
+                for (int i = 0; i < n; i++) { int l = BitConverter.ToInt32(d, p); p += 4; o[row + i] = ti.Get(d, p, l); p += l; }
                 return true;
             }
             return false;
@@ -343,8 +343,8 @@ namespace NativeDataEngine
                             for (int i = 0; i < n; i++) { int l = BitConverter.ToInt32(d, p); p += 4; r[i] = BigEndianDecimal(d, p, l, c.Scale); p += l; }
                             return r;
                         }
-                        string[] s = new string[n];
-                        for (int i = 0; i < n; i++) { int l = BitConverter.ToInt32(d, p); p += 4; s[i] = Encoding.UTF8.GetString(d, p, l); p += l; }
+                        string[] s = new string[n]; TextIntern ti = new TextIntern();
+                        for (int i = 0; i < n; i++) { int l = BitConverter.ToInt32(d, p); p += 4; s[i] = ti.Get(d, p, l); p += l; }
                         return s;
                     }
                 case ParquetTypes.FIXED:

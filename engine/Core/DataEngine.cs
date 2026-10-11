@@ -441,7 +441,9 @@ namespace NativeDataEngine
         }
         static string CsvCell(string v, char d)
         {
-            if (v.IndexOf(d) < 0 && v.IndexOf('"') < 0 && v.IndexOf('\n') < 0 && v.IndexOf('\r') < 0) return v;
+            bool q = false;   // one pass decides quoting
+            for (int i = 0; i < v.Length && !q; i++) { char ch = v[i]; q = ch == d || ch == '"' || ch == '\n' || ch == '\r'; }
+            if (!q) return v;
             return "\"" + v.Replace("\"", "\"\"") + "\"";
         }
 

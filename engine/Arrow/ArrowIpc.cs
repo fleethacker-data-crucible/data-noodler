@@ -235,7 +235,8 @@ namespace NativeDataEngine
             {
                 DataType t = ArrowTypes.Stored(b.Schema[c].Type); types[c] = t;
                 Column col = b.Cols[c];
-                if (col.Type.Kind == Kind.Null || !(col.Type.UsesI == t.UsesI && col.Type.UsesF == t.UsesF && (col.S != null) == (t.Kind == Kind.String))) col = Cast.To(col, t, true);
+                bool lazy = col.IsLazyText && t.Kind == Kind.String && col.Offs.Length == n + 1 && col.Offs[0] == 0;   // UTF-8 already: copied as is
+                if (!lazy && (col.Type.Kind == Kind.Null || !(col.Type.UsesI == t.UsesI && col.Type.UsesF == t.UsesF && (col.S != null) == (t.Kind == Kind.String)))) col = Cast.To(col, t, true);
                 cols[c] = col;
                 size += Pad8(col.Nulls != null ? (n + 7) / 8 : 0);
                 switch (t.Kind)
@@ -246,6 +247,7 @@ namespace NativeDataEngine
                     case Kind.Decimal: size += Pad8(16L * n); break;
                     case Kind.String:
                         {
+                            if (lazy) { utf[c] = null; size += Pad8(4L * (n + 1)) + Pad8(col.Offs[n]); break; }
                             int[] len = new int[n]; long total = 0;
                             for (int i = 0; i < n; i++) { string s = col.IsNull(i) ? null : col.S[i]; if (s != null) { len[i] = Encoding.UTF8.GetByteCount(s); total += len[i]; } }
                             if (total > int.MaxValue) throw new EngineException("ARROW_TOO_LARGE", "Text column \"" + b.Schema[c].Name + "\" holds more than 2 GB in one batch.");
@@ -318,6 +320,12 @@ namespace NativeDataEngine
                         }
                     case Kind.String:
                         {
+                            if (utf[c] == null)
+                            {
+                                Buffer.BlockCopy(col.Offs, 0, body, p, 4 * (n + 1));
+                                Buffer.BlockCopy(col.Utf8, 0, body, p + (int)Pad8(4L * (n + 1)), col.Offs[n]);
+                                buf(4L * (n + 1)); buf(col.Offs[n]); break;
+                            }
                             int[] len = utf[c]; int dataAt = p + (int)Pad8(4L * (n + 1)); int o = 0;
                             for (int i = 0; i <= n; i++)
                             {

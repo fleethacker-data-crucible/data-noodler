@@ -2,6 +2,17 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: Fast paths for every type (text output, NULL text, Parquet text, in-memory text)
+
+- **Text of values** (CSV / SQLite export, Data Grid, JSON): dates, timestamps, DECIMAL and DOUBLE are written by hand
+  instead of .NET formatting: same characters (10M random values checked against the old code, 0 different), about 6x
+  faster. CSV export 5M rows 1.2M -> 1.78M rows/s.
+- **CSV with nullstr:** fields go through the fast parsers too (they used the slow path for every field), and NULL
+  text no longer decides column types (a number column with 'NA' was read as text; now numbers).
+- **Parquet without dictionaries:** repeated text is shared (one string per value, not per row).
+- **Arrow write from memory:** text kept as UTF-8 bytes (resident datasets) is copied as is, not decoded and re-encoded.
+- **CSV export:** one pass per value decides quoting.
+
 ## 2026-10-11: Faster imports and exports
 
 - **CSV read:** timestamps (yyyy-MM-dd HH:mm:ss[.f], space or T) and true / false values parse straight from the

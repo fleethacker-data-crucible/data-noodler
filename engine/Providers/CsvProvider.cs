@@ -218,7 +218,7 @@ namespace NativeDataEngine
         {
             FileInfo fi = new FileInfo(path);
             if (!fi.Exists) throw new EngineException("FILE_NOT_FOUND", "File not found: " + Path.GetFileName(path), 404);
-            string key = path + "|" + fi.Length + "|" + fi.LastWriteTimeUtc.Ticks + "|" + opt.Delimiter + opt.Header + opt.AllVarchar + "|" + string.Join(",", opt.Types.Keys);
+            string key = path + "|" + fi.Length + "|" + fi.LastWriteTimeUtc.Ticks + "|" + opt.Delimiter + opt.Header + opt.AllVarchar + "|" + opt.NullText + "|" + string.Join(",", opt.Types.Keys);
             CsvShape cached;
             if (opt.Types.Count == 0 && shapes.TryGetValue(key, out cached)) return cached;
             CsvShape s = new CsvShape(); s.Size = fi.Length; s.Modified = fi.LastWriteTimeUtc;
@@ -234,9 +234,9 @@ namespace NativeDataEngine
             int width = 0; foreach (List<string> row in sample) width = Math.Max(width, row.Count);
             List<string> first = sample.Count > 0 ? sample[0] : new List<string>();
             DataType[] types = new DataType[width];
-            for (int c = 0; c < width; c++) types[c] = Infer(sample, c, 1);
+            for (int c = 0; c < width; c++) types[c] = Infer(sample, c, 1, opt.NullText);
             DataType[] typesAll = new DataType[width];
-            for (int c = 0; c < width; c++) typesAll[c] = Infer(sample, c, 0);
+            for (int c = 0; c < width; c++) typesAll[c] = Infer(sample, c, 0, opt.NullText);
             if (opt.Header >= 0) s.Header = opt.Header == 1;
             else
             {
@@ -304,14 +304,15 @@ namespace NativeDataEngine
         // "007" stays text (codes, zip codes); "0", "0.5" are numbers.
         static bool LeadingZero(string v) { string s = v.Trim().TrimStart('-', '+'); return s.Length > 1 && s[0] == '0' && s[1] != '.'; }
 
-        static DataType Infer(List<List<string>> rows, int c, int from)
+        // Values equal to the NULL text (nullstr) are NULLs, so they do not decide the type.
+        static DataType Infer(List<List<string>> rows, int c, int from, string nullText)
         {
             DataType t = DataType.Null;
             for (int i = from; i < rows.Count; i++)
             {
                 if (c >= rows[i].Count) continue;
                 bool q; string v = CsvParser.Clean(rows[i][c], out q);
-                if (v.Length == 0) continue;
+                if (v.Length == 0 || (nullText.Length > 0 && v == nullText)) continue;
                 t = Merge(t, Infer1(v));
                 if (t.Kind == Kind.String) break;
             }
@@ -390,7 +391,7 @@ namespace NativeDataEngine
         void AddField(ColumnBuilder b, DataType t, CsvParser p, int c, TextIntern intern, ExecCtx ctx)
         {
             int st = p.Start[c], n = p.Len[c]; char[] a = p.Rec;
-            if (n > 0 && opt.NullText.Length == 0)
+            if (n > 0 && (opt.NullText.Length == 0 || !Same(a, st, n, opt.NullText)))
             {
                 switch (t.Kind)
                 {
@@ -405,6 +406,7 @@ namespace NativeDataEngine
             Add(b, t, p.Text(c), p.Quoted[c], c, ctx);
         }
 
+        static bool Same(char[] a, int st, int n, string x) { if (n != x.Length) return false; for (int k = 0; k < n; k++) if (a[st + k] != x[k]) return false; return true; }
         void Add(ColumnBuilder b, DataType t, string v, bool quoted, int c, ExecCtx ctx)
         {
             if (v.Length == 0 && !(quoted && t.Kind == Kind.String)) { if (t.Kind == Kind.String && opt.NullText != "") b.AddString(v); else b.AddNull(); return; }

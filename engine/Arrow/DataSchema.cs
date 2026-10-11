@@ -352,8 +352,30 @@ namespace NativeDataEngine
         public static long Days(DateTime d) { return (long)Math.Floor((d - Epoch).TotalDays); }
         public static long Micros(DateTime d) { return (d.Ticks - Epoch.Ticks) / 10; }
 
-        public static string DateText(long days) { return DateOf(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        // Text of dates / timestamps / numbers is built by hand (the same characters .NET's formatting gives, much faster:
+        // CSV and SQLite exports, the Data Grid and JSON output turn millions of values into text). The *Slow versions
+        // are the reference and the fallback.
+        public static string DateText(long days)
+        {
+            DateTime t = DateOf(days);
+            char[] c = new char[10]; Put4(c, 0, t.Year); c[4] = '-'; Put2(c, 5, t.Month); c[7] = '-'; Put2(c, 8, t.Day);
+            return new string(c);
+        }
         public static string TimeText(long micros)
+        {
+            DateTime t = TimeOf(micros);
+            long frac = ((micros % 1000000) + 1000000) % 1000000;
+            int fd = 0; if (frac != 0) { fd = 6; while (frac % 10 == 0) { frac /= 10; fd--; } }
+            char[] c = new char[19 + (fd > 0 ? fd + 1 : 0)];
+            Put4(c, 0, t.Year); c[4] = '-'; Put2(c, 5, t.Month); c[7] = '-'; Put2(c, 8, t.Day); c[10] = ' ';
+            Put2(c, 11, t.Hour); c[13] = ':'; Put2(c, 14, t.Minute); c[16] = ':'; Put2(c, 17, t.Second);
+            if (fd > 0) { c[19] = '.'; for (int k = fd - 1; k >= 0; k--) { c[20 + k] = (char)('0' + frac % 10); frac /= 10; } }
+            return new string(c);
+        }
+        static void Put2(char[] c, int at, int v) { c[at] = (char)('0' + v / 10); c[at + 1] = (char)('0' + v % 10); }
+        static void Put4(char[] c, int at, int v) { c[at] = (char)('0' + v / 1000); c[at + 1] = (char)('0' + v / 100 % 10); c[at + 2] = (char)('0' + v / 10 % 10); c[at + 3] = (char)('0' + v % 10); }
+        public static string DateTextSlow(long days) { return DateOf(days).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        public static string TimeTextSlow(long micros)
         {
             DateTime t = TimeOf(micros);
             long frac = ((micros % 1000000) + 1000000) % 1000000;
@@ -361,9 +383,48 @@ namespace NativeDataEngine
             if (frac != 0) s += "." + frac.ToString("000000", CultureInfo.InvariantCulture).TrimEnd('0');
             return s;
         }
+        // iv / 10^k as text with exactly k decimals ("-12.30", "0.05", "7").
+        static string Fixed(long iv, int k)
+        {
+            bool neg = iv < 0; ulong u = neg ? (ulong)(-iv) : (ulong)iv;
+            char[] c = new char[24]; int at = c.Length;
+            for (int i = 0; i < k; i++) { c[--at] = (char)('0' + (int)(u % 10)); u /= 10; }
+            if (k > 0) c[--at] = '.';
+            do { c[--at] = (char)('0' + (int)(u % 10)); u /= 10; } while (u > 0);
+            if (neg) c[--at] = '-';
+            return new string(c, at, c.Length - at);
+        }
+        // DECIMAL(p, s) text: Math.Round(v, s) shown with s decimals ("F" + s), built by hand when the rounded value has
+        // at most 15 digits (then "F" shows exactly those digits).
+        public static string DecimalText(double v, int scale)
+        {
+            double r = Math.Round(v, scale);
+            if (scale <= 15 && !double.IsNaN(r) && Math.Abs(r) * P10[scale] < 1e15)
+            {
+                long iv = (long)Math.Round(r * P10[scale]);
+                return iv == 0 ? Fixed(0, scale) : Fixed(iv, scale);
+            }
+            return r.ToString("F" + scale, CultureInfo.InvariantCulture);
+        }
         // Shortest text that reads back as exactly d: 15 digits when they do (checked with the engine's exact parser),
         // else "R". (.NET Framework's "R" checks with its own parse, which can be a bit off, and then prints 17 digits.)
+        // Fast path: a value with at most 15 digits and 0.0001 <= |d| < 1e15 (where G15 writes plain digits): the fewest
+        // decimals k whose value / 10^k is d again (the engine's parser makes exactly that division) is G15's text.
         public static string R(double d)
+        {
+            double a = Math.Abs(d);
+            if (a >= 1e-4 && a < 1e15)
+            {
+                for (int k = 0; k <= 15; k++)
+                {
+                    double m = Math.Round(d * P10[k]);
+                    if (Math.Abs(m) >= 1e15) break;
+                    if (m / P10[k] == d) return Fixed((long)m, k);
+                }
+            }
+            return RSlow(d);
+        }
+        public static string RSlow(double d)
         {
             string s = d.ToString("G15", CultureInfo.InvariantCulture);
             double back;
@@ -396,7 +457,7 @@ namespace NativeDataEngine
                 case Kind.Int: return c.I[i].ToString(CultureInfo.InvariantCulture);
                 case Kind.Date: return DateText(c.I[i]);
                 case Kind.Timestamp: return TimeText(c.I[i]);
-                case Kind.Decimal: return Math.Round(c.F[i], c.Type.Scale).ToString("F" + c.Type.Scale, CultureInfo.InvariantCulture);
+                case Kind.Decimal: return DecimalText(c.F[i], c.Type.Scale);
                 case Kind.Double: return Num(c.F[i]);
             }
             return null;
