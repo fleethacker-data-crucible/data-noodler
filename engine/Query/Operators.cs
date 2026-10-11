@@ -48,13 +48,30 @@ namespace NativeDataEngine
         public override IEnumerable<Batch> RunUnit(ExecCtx ctx, int unit) { return Inner.Run(ctx); }
     }
 
-    // In-memory batches (VALUES, cached tables, range()).
+    // In-memory batches (VALUES, cached / session tables, resident datasets).
+    // Resident datasets (resident = true): columns the query never reads are left out (placeholders, like a file scan),
+    // and text kept as Arrow bytes is handed over as a per-query copy so decoding never touches the shared batch.
     public sealed class MemSource : Source
     {
-        readonly List<Batch> batches;
-        public MemSource(Schema s, List<Batch> b) { Schema = s; batches = b; }
+        readonly List<Batch> batches; readonly bool resident;
+        HashSet<int> needed;
+        public MemSource(Schema s, List<Batch> b) : this(s, b, false) { }
+        public MemSource(Schema s, List<Batch> b, bool resident) { Schema = s; batches = b; this.resident = resident; }
+        public void SetNeeded(HashSet<int> cols) { if (resident) needed = cols; }
         public override int Units(ExecCtx ctx) { return batches.Count; }
-        public override IEnumerable<Batch> RunUnit(ExecCtx ctx, int unit) { yield return batches[unit]; }
+        public override IEnumerable<Batch> RunUnit(ExecCtx ctx, int unit)
+        {
+            Batch b = batches[unit];
+            if (!resident) { yield return b; yield break; }
+            Column[] cs = new Column[b.Cols.Length];
+            for (int c = 0; c < cs.Length; c++)
+            {
+                Column x = b.Cols[c];
+                if (needed != null && !needed.Contains(c)) { Column ph = new Column(DataType.Null, 0); ph.Type = x.Type; ph.Length = b.Rows; ph.Nulls = null; cs[c] = ph; }
+                else cs[c] = x.IsLazyText ? x.ShallowCopy() : x;
+            }
+            yield return new Batch(b.Schema, cs, b.Rows);
+        }
         public override long KnownRows(ExecCtx ctx) { long n = 0; foreach (Batch b in batches) n += b.Rows; return n; }
     }
 
@@ -254,7 +271,7 @@ namespace NativeDataEngine
         public void KeyRefs(HashSet<int> n) { foreach (SortKey k in keys) k.E.Refs(n); }
         public SortOp(Op child, List<SortKey> keys, long topN) { this.child = child; this.keys = keys; this.topN = topN; Schema = child.Schema; }
 
-        static int Cmp(Column[] kc, List<SortKey> keys, int a, int b)
+        internal static int Cmp(Column[] kc, List<SortKey> keys, int a, int b)
         {
             for (int k = 0; k < kc.Length; k++)
             {

@@ -26,6 +26,9 @@ $files['i_widen.csv'] = $wide.ToString()
 $big = New-Object Text.StringBuilder; [void]$big.Append("id,price,cat,day`n")
 for ($i = 0; $i -lt 800000; $i++) { [void]$big.Append("$i,$(($i * 7) % 10000 / 100.0),C$($i % 50),2024-$((($i % 12) + 1).ToString('00'))-$((($i % 28) + 1).ToString('00'))`n") }
 $files['j_big.csv'] = $big.ToString()
+$win = New-Object Text.StringBuilder; [void]$win.Append("id,g,h,v,s`n")
+for ($i = 0; $i -lt 30000; $i++) { $g = if ($i % 41 -eq 0) { '' } else { "G$($i % 37)" }; $v = if ($i % 23 -eq 0) { '' } else { "$(($i * 13) % 50)" }; [void]$win.Append("$i,$g,$($i % 3),$v,s$(($i * 7) % 11)`n") }
+$files['k_window.csv'] = $win.ToString()
 foreach ($k in $files.Keys) { [IO.File]::WriteAllText((Join-Path $dir $k), $files[$k], (New-Object Text.UTF8Encoding($false))) }
 
 $old = Join-Path $env:TEMP "dn-old-engine-$OldRef"

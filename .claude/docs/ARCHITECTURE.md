@@ -1,6 +1,6 @@
 # Data Noodler: How It Works
 
-What actually happens from launch to query. Updated 2026-10-05 for the native C# engine (replaced DuckDB-WASM).
+What actually happens from launch to query. Updated 2026-10-10 for the Arrow engine (Arrow IPC datasets, resident in-memory datasets).
 `CODE_INDEX.md` is the file map; this is the runtime story. Re-check line refs after edits.
 
 ## Ground rules
@@ -9,15 +9,17 @@ What actually happens from launch to query. Updated 2026-10-05 for the native C#
   server start by PowerShell 5.1 `Add-Type` (C# 5 syntax only), using .NET Framework assemblies and Windows' `winsqlite3.dll`.
 - **No installs, no admin.** Server is plain PowerShell + .NET `HttpListener`; browsers are the installed Edge/Chrome.
 - **Project-relative paths only.** The folder can move to any machine.
-- **`.trash/` is off-limits** unless explicitly asked (see `CLAUDE.md`). Retired DuckDB/sql.js files are in `.trash/duckdb-wasm-20261005/`.
+- **Arrow is the working format.** Datasets are Arrow IPC files on disk and are held in engine memory while in use;
+  Parquet / CSV / SQLite are written only on export (older Parquet datasets are still read).
+- **`projects/.trash/`** holds deleted projects (moved there by the server); it is closed to the file API.
 
 ## 1. Launch
 
 ```
-Start Data Noodler.lnk  (or start-server.cmd, which flashes one console)
+Data Noodler.lnk
   └─ conhost --headless powershell -WindowStyle Hidden -File .server/server.ps1
 ```
-`Start Data Noodler.lnk` holds absolute paths (recreate it if the folder moves). No VBS launchers.
+`Data Noodler.lnk` holds absolute paths: run `rebuild-shortcut.ps1` if the folder moves. No VBS launchers.
 
 `server.ps1` startup, top to bottom:
 1. `$root` = project folder (one up from `.server`), `$uiPort = 8079`, log file `.server/logs/Data_Noodler_Server_Logs_<time>.log`.
@@ -76,8 +78,8 @@ Ops: `list`, `stat`, `read`, `write`, `mkdir`, `delete`, `move`, `copy`.
 
 - `/api/import/probe?src=` (`.server/import-api.ps1`, `ExternalSource.probe`): exists/size/modified on a background
   runspace, 10 s warn / 30 s timeout, so a dead network drive can't freeze the server. Used by Import and Update.
-- The **engine reads the file in place** (read only): `read_csv('X:\…')`, `read_parquet('\\server\share\…')`. `PathGuard.Source`
-  allows full paths only for data files (csv/tsv/txt/parquet/pq/sqlite/sqlite3/db). Writes stay inside the project.
+- The **engine reads the file in place** (read only): `read_csv('X:\…')`, `read_dataset('\\server\share\…')`. `PathGuard.Source`
+  allows full paths only for data files (csv/tsv/txt/parquet/pq/arrow/feather/sqlite/sqlite3/db). Writes stay inside the project.
 - `/api/import/read` and `copy` still exist but the app no longer uses them.
 
 ## 5. Native engine (`engine/`, namespace `NativeDataEngine`)
@@ -87,10 +89,12 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
                                    │                                                          │
                                    ├─ Jobs (write / export / pipeline: id + progress + cancel) │
                                    ├─ MemoryGuard (budget, reservations, free-RAM floor)       │
-                                   └─ sources: ParquetSource (row groups), CsvSource, SqliteSource, RangeSource, MemSource
+                                   ├─ ResidentDatasets (project datasets in RAM)                │
+                                   └─ sources: MemSource (resident), ArrowSource (record batches), ParquetSource (row groups),
+                                      CsvSource, SqliteSource, RangeSource
 ```
 
-- **Columnar batches** (`engine/Arrow`): `Column` = typed array (`long[]` ints/dates/timestamps, `double[]` doubles/decimals,
+- **Columnar batches** (`engine/Arrow/DataSchema.cs`): `Column` = typed array (`long[]` ints/dates/timestamps, `double[]` doubles/decimals,
   `string[]`, `bool[]`) + null flags; `Batch` = columns + schema. Dates = days since 1970, timestamps = microseconds.
 - **SQL** (`Query/SqlParser.cs`): DuckDB-style subset: `WITH [RECURSIVE]` (+ `name(cols)`), `SELECT [DISTINCT]`, `VALUES`, `* EXCLUDE (…)`,
   joins (INNER/LEFT/RIGHT/FULL/CROSS, `ON` / `USING`), `WHERE`, `GROUP BY [ALL | ROLLUP | CUBE | GROUPING SETS]` (+ `GROUPING()`),
@@ -107,20 +111,28 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
   Datasets are read only: changing one works on a session copy. The result is the final `SELECT` (planned with the session
   catalog, streamed in parallel), else the last table created/changed. Tests: `tests/sql-cheatsheet.ps1` (every command in
   `ref-docs/*-sql-cheatsheet.md` + edge cases + Parquet row groups).
-  Table functions: `read_parquet(file | folder | [list])`, `read_csv(file, delim=, header=, …)`, `read_sqlite(file, table)`, `range(…)`.
+  Table functions: `read_dataset` = `read_arrow` = `read_parquet(file | folder | [list])` (Arrow or Parquet files), `read_csv(file, delim=, header=, …)`, `read_sqlite(file, table)`, `range(…)`.
   Functions: `Query/Functions.cs` (+ `choose`, `add_seconds`). Aggregates: `Query/Aggregates.cs`. Windows: `Query/Window.cs`.
 - **Views:** every request may pass `views: { name: sql }`; the pages pass the project's datasets
-  (`name → SELECT * FROM read_parquet('<dataset folder>')`) and pipeline steps.
+  (`name → SELECT * FROM read_dataset('<dataset folder>')`) and pipeline steps.
 - **Declarative queries** (`Query/QuerySpec.cs`): dashboard widgets send `{ dataset, groupBy, aggregate, where, sort, limit }`.
 - **Parallelism:** one engine, `min(engineWorkers ≤ 64, logical cores)` worker threads. A scan + its filters/projections/join probes
-  runs per Parquet row group on the workers; aggregates are built per row group and merged **in row-group order**, so
+  runs per unit (resident batch / Arrow record batch / Parquet row group) on the workers; aggregates are built per unit and merged **in unit order**, so
   answers are identical for any worker count. Join build sides are built on the coordinator thread; nested parallel work
   started from a worker runs inline (no pool deadlock). A query may limit its workers (`workers`, used by the benches).
-- **Column pruning** (`Query/Optimizer.cs`): only the Parquet columns a query reads are decoded.
+- **Column pruning** (`Query/Optimizer.cs`): only the columns a query reads are read from Arrow / Parquet / CSV files.
+- **Shared text** (`Arrow/TextIntern.cs`): repeated values read from Arrow, CSV or into memory are one string each, so a
+  column of 10k distinct values in 10M rows holds 10k strings (less memory, far less garbage-collector work).
+- **Top-N** (`ORDER BY … LIMIT n`, n ≤ 100k): each unit's best rows are found on the workers, then merged in unit order.
 - **Memory guard** (`Core/MemoryGuard.cs`): budget = `engineMemory` (default 50%) of physical RAM. Sort, hash join build, hash
   aggregate, window and cached tables reserve what they hold; over budget → `QUERY_OUT_OF_MEMORY` (HTTP 507) instead of
   paging the machine. Parallel readers stop starting new row groups while free RAM is below max(512 MB, 10%).
   No disk spilling yet: a sort/join/window must fit the budget.
+- **Resident datasets** (`Storage/ResidentDatasets.cs`): project datasets (`projects/<p>/data/source|staged/<name>/`) are
+  loaded into memory on all workers (in the background: when a module page opens a project, on the first read, or on
+  `memory/load`). A query reads the in-memory batches when the dataset's files (sizes + write times) still match, else
+  it reads the files and reloads in the background. They share `ResidentFraction` (60%) of the budget; the least
+  recently used is dropped to make room; a dataset larger than that stays on disk. A dataset write drops its entry.
 
 ### API (`/api/engine/*`, client `js/core/engine-client.js` = `Engine`)
 
@@ -136,6 +148,7 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
 | `POST pipeline` | `{ datasets: {name: path}, nodes: [{ id, name, sql, output, dest }], changed, version }` → job |
 | `GET job?id=` / `POST job/cancel?id=` / `GET jobs` | job state, stage, progress, rows, result or error `{ code, message }` |
 | `POST cache/load` / `cache/drop` | in-memory tables (engine bench) |
+| `GET memory` / `POST memory/load` / `POST memory/drop` | resident datasets: list / `{ paths, wait }` load / `{ path }` drop |
 
 Errors: `{ ok: false, error, code }` with codes like `CSV_INVALID_QUOTE`, `PARQUET_CORRUPT`, `PARQUET_UNSUPPORTED_CODEC`,
 `SQL_SYNTAX`, `COLUMN_NOT_FOUND`, `PIPELINE_CYCLE`, `QUERY_OUT_OF_MEMORY`, `PATH_FORBIDDEN`. Details go to the server log.
@@ -144,33 +157,43 @@ Errors: `{ ok: false, error, code }` with codes like `CSV_INVALID_QUOTE`, `PARQU
 
 ```
 data/staged/<name>/  or  data/source/<name>/
-  part-000000.parquet   Snappy, 100k-row row groups, new part every 2M rows (EngineOptions.PartRows)
-  dataset.json          { name, version, rowCount, bytes, columns, partitions: [{ file, rows, bytes }], codec,
+  part-000000.arrow     Arrow IPC file: one record batch per 100k rows, new part every 2M rows (EngineOptions.PartRows)
+  dataset.json          { name, version, format: "arrow", rowCount, bytes, columns, partitions: [{ file, rows, bytes }], codec,
                           createdUtc, updatedUtc, lineage?: { pipelineStep, pipelineVersion, upstream: [{ dataset, version }] } }
 ```
 
 - **Atomic writes** (`Storage/Datasets.cs` `DatasetWriter`): written into `<name>.tmp-xxxx/`, then the old folder is moved aside,
   the new one moved in, the old one deleted. A failed or cancelled write leaves the previous version untouched; `version` + 1.
-- **Parquet** (`engine/Parquet`): own Thrift compact codec, writer (PLAIN, dictionary for repeated text, RLE definition levels,
+- **Arrow IPC** (`engine/Arrow/ArrowIpc.cs`): own FlatBuffers writer/reader; `ARROW1` file = schema message + record batch
+  messages + footer. Types: Int8/16/32/64, Float64, Decimal128, Utf8, Bool, Date32, Timestamp(us), all nullable (validity
+  bitmaps); also reads unsigned ints, Float16/32, Date64, other timestamp units, LargeUtf8, Binary, Null. Uncompressed,
+  8-byte aligned: a batch reads back with block copies. Files are read with short-lived shared FileStreams (never kept
+  open or memory-mapped), so dataset folders can be swapped, archived or deleted at any time. pyarrow / DuckDB / Polars
+  can open them. `EngineOptions.DatasetFormat = "parquet"` writes Parquet parts instead (benchmarks).
+- **Parquet** (`engine/Parquet`, export and older datasets): own Thrift compact codec, writer (PLAIN, dictionary for repeated text, RLE definition levels,
   min/max stats) and reader (data pages v1/v2, PLAIN, dictionary, RLE, DELTA_*, BYTE_STREAM_SPLIT; Snappy, GZIP, none; flat
   schemas, nested columns skipped). **ZSTD/LZ4/Brotli files are rejected** (`PARQUET_UNSUPPORTED_CODEC`): re-import the source.
-- **CSV** (`Providers/CsvProvider.cs`): files over 16 MB are cut into byte ranges on record boundaries (one quote-aware byte
+- **CSV** (`Providers/CsvProvider.cs`): the parser fills one record buffer (no string per field); ints, decimals and
+  yyyy-MM-dd dates are parsed straight from it (exact: decimals are correctly rounded, the same parser as casts and SQL
+  literals). Files over 16 MB are cut into byte ranges on record boundaries (one quote-aware byte
   scan, cached per file version), parsed in parallel, in file order; unread columns are not converted (count is fast).
   Streaming state machine (quotes, embedded delimiters/newlines, BOM), delimiter + header
   detection, types from a 20k-row sample; a later value that does not fit widens that column and the query re-runs.
 - **SQLite** (`Providers/SqliteProvider.cs`): P/Invoke to `winsqlite3.dll`; import streams rows; export = one transaction + prepared INSERT.
 
-**Data flow (only Import reads CSV/SQLite; every dataset is Parquet):**
+**Data flow (only Import reads raw CSV / SQLite / Parquet / Arrow files; every dataset is Arrow):**
 
 ```
 data/raw/ or X:\… / \\server\share\…   (read in place)
-   │  Import: Engine.write({ sql: SELECT <columns> FROM read_csv/read_sqlite/read_parquet(...) })
+   │  Import: Engine.write({ sql: SELECT <columns> FROM read_csv/read_sqlite/read_dataset(...) })
    └─ Stage            column choices applied → data/staged/<name>/  (always; input for Pipeline)
 data/staged ──Transform (active SQL query / script)──→ data/source/CLEAN_<name>/
-data/source ──Dashboard / Publish
+data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLite)
 ```
 
 ## 7. App modules (`html/*.html`)
+
+- **Every module page** (`ModulePage.init`) starts loading the project's datasets into engine memory (`Engine.memory.preload`).
 
 - **Windows + global header:** every module opens in its own window (95% of screen height, 16:10 width, centred; `Windows.open`); site windows
   use the same size (`Open-App`), the server panel 1200×800. No app shell, no Back buttons. `js/core/embed.js` adds the same header to
@@ -179,11 +202,12 @@ data/source ──Dashboard / Publish
   progress) → checks columns/order/row count from the manifest → dataset record `{ path: folder, parts, version, … }`.
 - **Transform** (`html/transform.html`, module id `pipeline`): a list of named SQL queries (each one SELECT or a script) in
   `SqlEditor`; one is **active**. Preview Output / Preview Source = `Engine.preview` (top 100 + count). Build Output Dataset =
-  `PipelineRunner.run`: `Engine.write` of the active query → `data/source/<CLEAN_name>/` (Parquet parts, atomic). Saved in
+  `PipelineRunner.run`: `Engine.write` of the active query → `data/source/<CLEAN_name>/` (Arrow parts, atomic). Saved in
   `pipeline/pipeline.json` `{ version: 2, queries: [{ id, name, sql }], active, output }`; run history in `pipeline/runs.json`.
   (`Engine.pipeline` / `RunPipeline`, the old step DAG, is no longer used by the app.)
-- **Dashboard:** each widget = a widget package + declarative query (`ApexWidget.query`); cache key = query + dataset version, so a new dataset version
-  makes cached results stale.
+- **Dashboard:** each widget = a chart package + declarative query (`ApexWidget.query`); before its first query a dataset is
+  loaded into engine memory (`Engine.memory.load`, waits); result cache key = query + dataset version, so a new dataset
+  version makes cached results stale.
 - **Publish:** self-contained HTML (results embedded); dataset export to CSV / Parquet (single file) / SQLite via `Engine.exportTo`.
 - **Update:** compares source size/modified, re-imports changed sources, then re-runs **only** the pipeline outputs downstream of them.
 - **Archives:** folder copies (datasets are folders).

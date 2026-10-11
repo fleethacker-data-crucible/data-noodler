@@ -1,7 +1,8 @@
 // Shared strings for repeated text while reading a column (CSV fields, Arrow UTF-8 buffers, resident datasets).
 // A 10M-row column holding 10k distinct values then makes 10k strings instead of 10M: much less garbage and memory,
 // and the garbage collector has far fewer objects to walk (the same effect as Parquet's dictionary pages).
-// Mostly-distinct columns turn it off by themselves (after 4096 values with over half new), so they pay almost nothing.
+// Mostly-distinct columns turn it off by themselves (after 65536 values with over half new, or 262144 distinct), so
+// they pay little; a column cycling through up to tens of thousands of values keeps sharing.
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -10,7 +11,7 @@ namespace NativeDataEngine
 {
     public sealed class TextIntern
     {
-        const int MaxEntries = 1 << 16, Probe = 4096;
+        const int MaxEntries = 1 << 18, Probe = 1 << 16;
         int mask = 255, used, seen;
         int[] hash = new int[256];
         string[] vals = new string[256];

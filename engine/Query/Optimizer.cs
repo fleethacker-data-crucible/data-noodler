@@ -61,6 +61,8 @@ namespace NativeDataEngine
         {
             ParquetSource ps = s as ParquetSource;
             if (ps != null) { ps.SetNeeded(need); return; }
+            MemSource ms = s as MemSource;
+            if (ms != null) { ms.SetNeeded(need); return; }
             ArrowSource ar = s as ArrowSource;
             if (ar != null) { ar.SetNeeded(need); return; }
             CsvSource cs = s as CsvSource;

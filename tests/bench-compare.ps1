@@ -38,10 +38,10 @@ $configs = @(
   @{ label = 'OLD engine (Parquet, disk)'; root = $old; format = 'parquet'; memory = $false; file = 'old.json' },
   @{ label = 'NEW engine, Parquet on disk'; root = $root; format = 'parquet'; memory = $false; file = 'new-parquet.json' },
   @{ label = 'NEW engine, Arrow on disk'; root = $root; format = 'arrow'; memory = $false; file = 'new-arrow.json' },
-  @{ label = 'NEW engine, Arrow + memory'; root = $root; format = 'arrow'; memory = $true; file = 'new-arrow-mem.json' },
-  @{ label = 'NEW engine, Arrow + memory, Server GC'; root = $root; format = 'arrow'; memory = $true; file = 'new-arrow-mem-sgc.json'; gcServer = $true }
+  @{ label = 'NEW engine, Arrow + memory'; root = $root; format = 'arrow'; memory = $true; file = 'new-arrow-mem.json' }
 )
 # -Only old,new-parquet,...: run just those (by file name); the others are taken from earlier result files if present.
+$Only = @($Only | ForEach-Object { $_ -split "," } | Where-Object { $_ })   # -File passes "a,b" as one string
 $all = @()
 foreach ($c in $configs) {
   $out = Join-Path $work $c.file
@@ -52,8 +52,7 @@ foreach ($c in $configs) {
   Write-Host ''; Write-Host "=== $($c.label) ==="
   $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tests\bench-engine.ps1'), '-Root', $c.root, '-Format', $c.format, '-Csv', $csv, '-DimCsv', $dimCsv, '-Label', $c.label, '-Runs', $Runs, '-Out', $out)
   if ($c.memory) { $args += '-Memory' }
-  if ($c.gcServer) { $env:COMPlus_gcServer = '1' }   # .NET server GC: one heap and GC thread per core
-  try { & $ps @args } finally { Remove-Item Env:\COMPlus_gcServer -ErrorAction SilentlyContinue }
+  & $ps @args
   if ($LASTEXITCODE -ne 0) { throw "Benchmark failed: $($c.label)" }
   $all += (Get-Content $out -Raw | ConvertFrom-Json)
 }

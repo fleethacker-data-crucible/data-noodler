@@ -51,26 +51,65 @@ namespace NativeDataEngine
             }
         }
 
+        // Rows are grouped into partitions by hash (KeyIndex: same equality as the comparisons here), each partition's
+        // rows are sorted by the ORDER BY keys (ties: input order) and computed in parallel. Every row's result goes
+        // to its own position, so the answer is the same as one big sort by (partition, order) keys.
         static Column Compute(WinSpec s, Batch all)
         {
             int n = all.Rows;
-            List<SortKey> keys = new List<SortKey>();
-            foreach (BExpr p in s.Partition) { SortKey k = new SortKey(); k.E = p; keys.Add(k); }
-            keys.AddRange(s.Order);
-            int[] idx = keys.Count > 0 ? SortOp.Order(all, keys, -1) : Identity(n);
             Column[] pc = new Column[s.Partition.Count]; for (int k = 0; k < pc.Length; k++) pc[k] = s.Partition[k].Eval(all);
             Column[] oc = new Column[s.Order.Count]; for (int k = 0; k < oc.Length; k++) oc[k] = s.Order[k].E.Eval(all);
-            Column arg = s.Args.Count > 0 ? s.Args[0].Eval(all) : null;
+            Prep p = new Prep(s, all);
             Column res = new Column(s.Out, n);
-            int start = 0;
-            while (start < n)
+            res.Nulls = new bool[n];   // allocated up front: partitions write it from several threads
+            List<int[]> parts = new List<int[]>();
+            if (pc.Length == 0) parts.Add(Identity(n));
+            else
             {
-                int end = start + 1;
-                while (end < n && Same(pc, idx[start], idx[end])) end++;
-                Partition(s, idx, start, end, oc, arg, res, all);
-                start = end;
+                DataType[] types = new DataType[pc.Length]; for (int k = 0; k < pc.Length; k++) types[k] = pc[k].Type;
+                KeyIndex ki = new KeyIndex(types);
+                int[] g = ki.Assign(pc, n);
+                int[] size = new int[ki.Count]; for (int i = 0; i < n; i++) size[g[i]]++;
+                int[][] rows = new int[ki.Count][]; int[] fill = new int[ki.Count];
+                for (int k = 0; k < rows.Length; k++) rows[k] = new int[size[k]];
+                for (int i = 0; i < n; i++) rows[g[i]][fill[g[i]]++] = i;   // rows of each partition in input order
+                parts.AddRange(rows);
             }
+            Action<int> one = k =>
+            {
+                int[] idx = parts[k];
+                if (oc.Length > 0 && idx.Length > 1) Array.Sort(idx, (a, b) => SortOp.Cmp(oc, s.Order, a, b));
+                Partition(s, idx, 0, idx.Length, oc, p, res);
+            };
+            if (parts.Count > 1 && n > 20000) System.Threading.Tasks.Parallel.For(0, parts.Count, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, one);
+            else for (int k = 0; k < parts.Count; k++) one(k);
+            bool any = false; for (int i = 0; i < n && !any; i++) any = res.Nulls[i];
+            if (!any) res.Nulls = null;
             return res;
+        }
+        // What every partition needs, worked out once.
+        sealed class Prep
+        {
+            public Column Arg, Def, Val, Ext;
+            public Prep(WinSpec s, Batch all)
+            {
+                Arg = s.Args.Count > 0 ? s.Args[0].Eval(all) : null;
+                switch (s.Fn)
+                {
+                    case "lag": case "lead":
+                        Def = s.Args.Count > 2 ? Cast.To(s.Args[2].Eval(all), s.Out, true) : null;
+                        Val = Arg.Type.SameAs(s.Out) || (Arg.Type.UsesI && s.Out.UsesI) ? Arg : Cast.To(Arg, s.Out, true);
+                        break;
+                    case "first_value": case "last_value":
+                        Val = Arg.Type.SameAs(s.Out) || (Arg.Type.UsesI && s.Out.UsesI) ? Arg : Cast.To(Arg, s.Out, true);
+                        break;
+                    case "row_number": case "rank": case "dense_rank": case "percent_rank": case "cume_dist": case "ntile": break;
+                    default:
+                        Val = Arg == null ? null : (Arg.F != null || Arg.I != null ? Arg : Cast.To(Arg, s.Out.Kind == Kind.String ? DataType.Varchar : DataType.Double, true));
+                        if (s.Fn == "min" || s.Fn == "max") Ext = Val.Type.SameAs(s.Out) || (Val.Type.UsesI && s.Out.UsesI) ? Val : Cast.To(Val, s.Out, true);
+                        break;
+                }
+            }
         }
         static int[] Identity(int n) { int[] r = new int[n]; for (int i = 0; i < n; i++) r[i] = i; return r; }
         static bool Same(Column[] cs, int a, int b)
@@ -84,7 +123,7 @@ namespace NativeDataEngine
             return true;
         }
 
-        static void Partition(WinSpec s, int[] idx, int st, int en, Column[] oc, Column arg, Column res, Batch all)
+        static void Partition(WinSpec s, int[] idx, int st, int en, Column[] oc, Prep p, Column res)
         {
             int cnt = en - st;
             bool ordered = oc.Length > 0;
@@ -116,8 +155,7 @@ namespace NativeDataEngine
                 case "lag": case "lead":
                     {
                         int off = s.Args.Count > 1 ? (int)Convert.ToInt64(((BLit)s.Args[1]).Value) : 1;
-                        Column def = s.Args.Count > 2 ? Cast.To(s.Args[2].Eval(all), s.Out, true) : null;
-                        Column a = arg.Type.SameAs(s.Out) || (arg.Type.UsesI && s.Out.UsesI) ? arg : Cast.To(arg, s.Out, true);
+                        Column def = p.Def, a = p.Val;
                         for (int i = 0; i < cnt; i++)
                         {
                             int j = s.Fn == "lag" ? i - off : i + off, r = idx[st + i];
@@ -128,7 +166,7 @@ namespace NativeDataEngine
                     }
                 case "first_value": case "last_value":
                     {
-                        Column a = arg.Type.SameAs(s.Out) || (arg.Type.UsesI && s.Out.UsesI) ? arg : Cast.To(arg, s.Out, true);
+                        Column a = p.Val;
                         for (int i = 0; i < cnt; i++)
                         {
                             int r = idx[st + i];
@@ -139,9 +177,8 @@ namespace NativeDataEngine
                     }
             }
             // Aggregates: running over peers (ORDER BY) or whole partition.
-            Column v = arg == null ? null : (arg.F != null || arg.I != null ? arg : Cast.To(arg, s.Out.Kind == Kind.String ? DataType.Varchar : DataType.Double, true));
+            Column v = p.Val, vv = p.Ext;
             bool isMin = s.Fn == "min", isMax = s.Fn == "max";
-            Column vv = (isMin || isMax) ? (v.Type.SameAs(s.Out) || (v.Type.UsesI && s.Out.UsesI) ? v : Cast.To(v, s.Out, true)) : null;
             double sum = 0; long lsum = 0, count = 0; int best = -1;
             int pos = 0;
             while (pos < cnt)

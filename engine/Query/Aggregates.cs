@@ -317,7 +317,7 @@ namespace NativeDataEngine
             int cap = Math.Max(groups, has.Length * 2);
             Array.Resize(ref has, cap);
             if (best.I != null) Array.Resize(ref best.I, cap); if (best.F != null) Array.Resize(ref best.F, cap);
-            if (best.S != null) Array.Resize(ref best.S, cap); if (best.B != null) Array.Resize(ref best.B, cap);
+            if (best.S != null) { string[] s = best.S; Array.Resize(ref s, cap); best.S = s; } if (best.B != null) Array.Resize(ref best.B, cap);
             best.Length = cap;
         }
         void Offer(int gi, Column a, int i)

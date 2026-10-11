@@ -76,7 +76,7 @@ namespace NativeDataEngine
                 Entry x;
                 if (entries.TryGetValue(full, out x))
                 {
-                    if (x.Sig == sig) { x.LastUsed = ++clock; x.Hits++; return new MemSource(x.Schema, x.Batches); }
+                    if (x.Sig == sig) { x.LastUsed = ++clock; x.Hits++; return new MemSource(x.Schema, x.Batches, true); }
                     Drop(x);   // stale
                 }
             }
@@ -207,8 +207,11 @@ namespace NativeDataEngine
             }
         }
 
-        // Repeated text across the whole dataset becomes one shared string (the batch is fresh from the reader, so it is
-        // changed in place before anyone sees it). Returns the batch's memory with each distinct string counted once.
+        // Text for memory (the batch is fresh from the reader, so it is changed in place before anyone sees it):
+        //  - repeated text across the whole dataset becomes one shared string per distinct value;
+        //  - mostly-distinct text (the sharing turned itself off) is kept as Arrow bytes, decoded per query
+        //    (Column.LazyText): millions of strings held for hours would make every garbage collection slow.
+        // Returns the batch's memory, each distinct shared string counted once.
         static long Share(Batch b, TextIntern[] shared)
         {
             long bytes = 0;
@@ -216,15 +219,21 @@ namespace NativeDataEngine
             {
                 Column col = b.Cols[c];
                 if (col.S == null || shared[c] == null) { bytes += col.Bytes; continue; }
-                TextIntern t = shared[c]; string[] s = col.S;
-                bytes += 32 + 8L * col.Length + (col.Nulls != null ? col.Length : 0);
-                for (int i = 0; i < s.Length; i++)
+                TextIntern t = shared[c];
+                if (!t.Off)
                 {
-                    string v = s[i]; if (v == null) continue;
-                    int before = t.Distinct;
-                    s[i] = t.Get(v);
-                    if (t.Distinct > before || t.Off) bytes += 24 + 2L * v.Length;
+                    string[] s = col.S; long strBytes = 0;
+                    for (int i = 0; i < s.Length && !t.Off; i++)
+                    {
+                        string v = s[i]; if (v == null) continue;
+                        int before = t.Distinct;
+                        s[i] = t.Get(v);
+                        if (t.Distinct > before) strBytes += 24 + 2L * v.Length;
+                    }
+                    if (!t.Off) { bytes += 32 + 8L * col.Length + (col.Nulls != null ? col.Length : 0) + strBytes; continue; }
                 }
+                Column lazy = Column.LazyText(col);
+                b.Cols[c] = lazy; bytes += lazy.Bytes;
             }
             return bytes;
         }

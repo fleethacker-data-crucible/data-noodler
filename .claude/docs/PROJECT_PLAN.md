@@ -6,7 +6,7 @@ Data Noodler is a fully local, self-contained data analytics app. It runs in the
 
 - The entry point is the **Project Manager** page (`html/project_manager.html`, hard-coded entry point).
 - Each analytics project lives in its own folder, and every project folder has the same layout.
-- Work happens in modules, each opened in its own window: **Import Data → Pipeline → Dashboard → Publish → Update → Archives**.
+- Work happens in modules, each opened in its own window: **Import Data → Transform → Dashboard (+ D3 Studio) → Publish → Update → Archives**.
 
 ## Hard constraints
 
@@ -32,13 +32,14 @@ projects/
   <project-folder>/
     project-config.json     settings, status, classification, owner, datasets, module last runs
     data/
-      source/               original files as imported (csv, sqlite, parquet)
-      staged/               converted Parquet: the working format (imports + pipeline outputs)
+      raw/                  raw files copied in for Import (csv, sqlite, parquet, arrow)
+      staged/               Import output: Arrow datasets (part-NNNNNN.arrow + dataset.json), the working format
+      source/               Transform output: CLEAN_* Arrow datasets (Dashboard, D3 Studio, Publish read these)
       cache/                dashboard widget result caches (disposable)
-    pipeline/               pipeline.json (steps), runs.json (history)
+    pipeline/               pipeline.json (queries), runs.json (history)
     dashboard/              dashboard.json (widgets)
     publish/                published dashboards (self-contained HTML) and dataset exports
-    archives/               snapshots: config + staged data + pipeline + dashboard
+    archives/               snapshots: config + datasets + pipeline + dashboard
     logs/                   activity-YYYY-MM.log
   .trash/                   deleted projects (moved here by the server, recoverable from disk)
 ```
@@ -53,11 +54,12 @@ projects/
 
 - **Why:** the target PCs may not run DuckDB or WebAssembly. Plans: `01-native-windows-data-engine-plan.md`, `02-dashboard-project-module-plan.md`, `03-starter-code-map.md`.
 - **Where:** `engine/**/*.cs`, compiled by `.server/engine-loader.ps1`, one `DataEngine` per server, `/api/engine/*` (see ARCHITECTURE.md 5).
-- **Storage:** every dataset is a folder of `part-NNNNNN.parquet` (Snappy, 100k-row row groups, ~256 MB parts) + `dataset.json` (version, columns, partitions, lineage); writes go to a temp folder and are swapped in atomically.
-- **Reads:** CSV (streaming, type inference, widening), Parquet (Snappy/GZIP/none; ZSTD rejected: re-import), SQLite (`winsqlite3.dll`). Sources outside the project are read in place, read-only.
+- **Storage:** every dataset is a folder of `part-NNNNNN.arrow` (Arrow IPC, 100k-row record batches, 2M-row parts) + `dataset.json` (version, format, columns, partitions, lineage); writes go to a temp folder and are swapped in atomically. Parquet / CSV / SQLite are export formats; older Parquet datasets are still read.
+- **Memory:** a project's datasets are held resident in engine memory while it is open (up to 60% of the engine budget, least recently used dropped first); queries read RAM, and a dataset changed on disk is reloaded.
+- **Reads:** CSV (zero-copy field parser, type inference, widening), Arrow IPC, Parquet (Snappy/GZIP/none; ZSTD rejected: re-import), SQLite (`winsqlite3.dll`). Sources outside the project are read in place, read-only.
 - **Queries:** DuckDB-style SQL subset (joins, GROUP BY ALL, windows, CTEs, UNION) and declarative widget queries; parallel by row group on min(64, cores) workers; results are the same for any worker count.
 - **Memory guard:** budget = 50% of RAM (`engineMemory`); sort/join/group/window state is reserved against it and fails with `QUERY_OUT_OF_MEMORY` instead of filling RAM; readers pause when free RAM is low.
-- **Known limits:** no disk spilling yet (big sorts/joins must fit the budget), no Arrow IPC (JSON results, capped rows), no Excel; ~70-130k rows/s per worker-scaled query on wide data (GC-bound in .NET Framework).
+- **Known limits:** no disk spilling yet (big sorts/joins must fit the budget), results reach the browser as JSON (capped rows; Arrow IPC to the browser not built), no Excel. Speed per step: `ref-docs/arrow after action report.md` (`tests/bench-compare.ps1`).
 
 ## Phases
 
@@ -98,6 +100,14 @@ projects/
 
 ### Phase 7: Archives ✅ prototype
 - [x] Snapshots (server `copy` file API), compare with current, restore (auto-snapshot first), delete
+
+### Phase 8: Arrow engine ✅ (2026-10-10)
+- [x] Arrow IPC dataset format (own FlatBuffers reader / writer); Parquet only on export
+- [x] Resident datasets in engine memory, shared by every window, never stale
+- [x] Shared text values, zero-copy CSV parsing, exact number parsing, parallel top-N and CSV export
+- [x] Old vs new benchmark (`tests/bench-compare.ps1`) and CSV reader comparison (`tests/csv-compare.ps1`)
+- [ ] Spill to disk (Arrow IPC) for sorts / joins / windows larger than the budget
+- [ ] Arrow IPC results to the browser (Data Grid paging, big previews)
 
 ### Next: debugging and hardening
 - [ ] Run every module in real Chrome/Edge windows (the built-in test pane cannot open pop-ups)

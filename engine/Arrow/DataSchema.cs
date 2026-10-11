@@ -117,15 +117,61 @@ namespace NativeDataEngine
     }
 
     // One column of one batch. Nulls == null means "no nulls".
+    // Text may also be held as Arrow buffers (Utf8 bytes + Offs, row i = Utf8[Offs[i] .. Offs[i + 1])) with no strings
+    // made yet: resident datasets keep mostly-distinct text this way (one byte array instead of millions of objects for
+    // the garbage collector to walk). S then decodes on first use, into this Column object only (MemSource hands each
+    // query its own copy, so the resident column stays bytes).
     public sealed class Column
     {
         public DataType Type;
         public int Length;
         public long[] I;
         public double[] F;
-        public string[] S;
+        string[] s;
+        public byte[] Utf8; public int[] Offs;
+        public string[] S
+        {
+            get { if (s == null && Utf8 != null) s = DecodeUtf8(); return s; }
+            set { s = value; }
+        }
         public bool[] B;
         public bool[] Nulls;
+        public bool IsLazyText { get { return s == null && Utf8 != null; } }
+
+        string[] DecodeUtf8()
+        {
+            string[] o = new string[Length]; TextIntern shared = new TextIntern();
+            for (int i = 0; i < Length; i++)
+            {
+                if (Nulls != null && Nulls[i]) continue;
+                int a = Offs[i], n = Offs[i + 1] - a;
+                o[i] = n == 0 ? "" : shared.Get(Utf8, a, n);
+            }
+            return o;
+        }
+        // Text column -> Arrow buffers, strings dropped (see above).
+        public static Column LazyText(Column c)
+        {
+            string[] src = c.S; int n = c.Length;
+            int[] offs = new int[n + 1]; long total = 0;
+            for (int i = 0; i < n; i++) { string v = src[i]; if (v != null && !(c.Nulls != null && c.Nulls[i])) total += Encoding.UTF8.GetByteCount(v); }
+            if (total > int.MaxValue) return c;
+            byte[] data = new byte[total]; int at = 0;
+            for (int i = 0; i < n; i++)
+            {
+                offs[i] = at; string v = src[i];
+                if (v != null && !(c.Nulls != null && c.Nulls[i])) at += Encoding.UTF8.GetBytes(v, 0, v.Length, data, at);
+            }
+            offs[n] = at;
+            Column r = new Column(); r.Type = c.Type; r.Length = n; r.Nulls = c.Nulls; r.Utf8 = data; r.Offs = offs;
+            return r;
+        }
+        // A fresh Column over the same values (lazy text decodes into the copy, not into this one).
+        public Column ShallowCopy()
+        {
+            Column r = new Column(); r.Type = Type; r.Length = Length; r.I = I; r.F = F; r.s = s; r.Utf8 = Utf8; r.Offs = Offs; r.B = B; r.Nulls = Nulls;
+            return r;
+        }
 
         public Column(DataType t, int n)
         {
@@ -157,7 +203,8 @@ namespace NativeDataEngine
                 long b = 32 + (Nulls != null ? Length : 0);
                 if (I != null || F != null) b += 8L * Length;
                 else if (B != null) b += Length;
-                else if (S != null) { b += 8L * Length; for (int i = 0; i < Length; i++) if (S[i] != null) b += 24 + 2 * S[i].Length; }
+                else if (IsLazyText) b += Utf8.LongLength + 4L * Offs.Length;
+                else if (s != null) { b += 8L * Length; for (int i = 0; i < Length; i++) if (s[i] != null) b += 24 + 2 * s[i].Length; }
                 return b;
             }
         }

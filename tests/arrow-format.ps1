@@ -110,6 +110,23 @@ try {
   Check 'second query read memory' ($hits -ge 1) "hits $hits"
   $all1 = Rows "SELECT * FROM read_dataset('$ds') ORDER BY id"
   Check 'memory full scan = source' ($all1.text -eq $orig.text)
+  $M = "read_dataset('$ds')"
+  $mq = @(
+    "SELECT s, count(*) FROM $M GROUP BY s ORDER BY count(*) DESC, s LIMIT 20",
+    "SELECT count(DISTINCT s), count(DISTINCT u), min(s), max(s) FROM $M",
+    "SELECT a.id, a.s, b.s FROM $M a JOIN $M b ON a.id = b.id + 1 WHERE a.id % 5000 = 1 ORDER BY a.id",
+    "SELECT id, s, row_number() OVER (PARTITION BY u ORDER BY id DESC) AS r FROM $M WHERE id % 997 = 0 ORDER BY id",
+    "SELECT * FROM $M WHERE s LIKE 'txt-12%' ORDER BY dbl DESC LIMIT 30",
+    "CREATE TABLE t AS SELECT id, s, u FROM $M WHERE id < 2000; UPDATE t SET s = upper(s) WHERE id % 2 = 0; SELECT count(*), max(s), min(s) FROM t",
+    "SELECT DISTINCT u FROM $M ORDER BY u",
+    "SELECT d, count(*), string_agg(DISTINCT CAST(t8 AS VARCHAR), ',') FROM $M WHERE id < 3000 GROUP BY d ORDER BY d LIMIT 5"
+  )
+  $onAns = @(); foreach ($q in $mq) { $onAns += (Rows $q).text }
+  $hitsOn = $engine.Resident.Info()['datasets'][0]['hits']
+  $engine.Options.ResidentFraction = 0
+  for ($k = 0; $k -lt $mq.Count; $k++) { $offAns = (Rows $mq[$k]).text; Check "memory = disk: $($mq[$k].Substring(0, [Math]::Min(70, $mq[$k].Length)))" ($onAns[$k] -eq $offAns) }
+  $engine.Options.ResidentFraction = 0.6
+  Check 'those queries read memory' ($hitsOn -ge $mq.Count) "hits $hitsOn"
   [void](WriteDs "SELECT * FROM read_dataset('$ds') WHERE id < 10" $ds 'arrow')
   $after = Rows "SELECT count(*) FROM read_dataset('$ds')"
   Check 'rewrite is seen at once (no stale memory)' ($after.text -eq "10|`n") $after.text
