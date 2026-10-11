@@ -53,7 +53,7 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\sql-cheatsheet.ps1    # SQL dialect: 158 checks
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\arrow-format.ps1      # Arrow = Parquet answers, memory, exports
-powershell -NoProfile -ExecutionPolicy Bypass -File testsspill.ps1             # GROUP BY / sort / window / join spill to disk
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\spill.ps1             # GROUP BY / sort / window / join spill to disk
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\bench-compare.ps1     # old vs new engine, rows/s per step
 ```
 

@@ -2,7 +2,7 @@
     "fileThreads":  16,
     "engineWorkers":  64,
     "engineMemory":  0.5,
-    "port":  58687,
+    "port":  27647,
     "browser":  "chrome",
     "portMode":  "random",
     "theme":  "dark"
