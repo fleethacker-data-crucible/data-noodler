@@ -4,7 +4,7 @@
 //   await UI.form('New project', fields)         { values } or null; fields = [{ name, label, type, value, options, required }]
 //   UI.dataTable(el, cols, rows)                 query results as a table
 const UI = (() => {
-  const $ = id => document.getElementById(id);
+  const $ = id => document.getElementById(id) || [...(window.DNPopped || [])].map(d => d.getElementById(id)).find(Boolean) || null;   // also inside a popped-out table window
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // Notifications, every window (look: css/theme.css .toast, as in the Server Control panel): the newest drops in at the

@@ -615,6 +615,22 @@ function Complete-StaticJobs {
 # --- import api (source files outside the project) ---
 . (Join-Path $here 'import-api.ps1')
 
+# --- one-time rename: data/staged -> data/imported in every project, trashed project and snapshot ---
+try {
+    $projRoot = Join-Path $root 'projects'
+    if (Test-Path $projRoot) {
+        Get-ChildItem $projRoot -Recurse -Directory -Force -Filter 'staged' | Where-Object { $_.Parent.Name -eq 'data' } | ForEach-Object {
+            $to = Join-Path $_.Parent.FullName 'imported'
+            if (-not (Test-Path $to)) { Rename-Item -LiteralPath $_.FullName -NewName 'imported'; Add-Log 'server' "Renamed $($_.FullName) to imported" }
+        }
+        Get-ChildItem $projRoot -Recurse -File -Force -Filter 'project-config.json' | ForEach-Object {
+            $t = [IO.File]::ReadAllText($_.FullName)
+            $n = $t -replace '/data/staged/', '/data/imported/' -replace '("stage"\s*:\s*)"staged"', '$1"imported"'
+            if ($n -ne $t) { [IO.File]::WriteAllText($_.FullName, $n, (New-Object Text.UTF8Encoding $false)) }
+        }
+    }
+} catch { Add-Log 'server' "Rename staged -> imported failed: $($_.Exception.Message)" }
+
 # --- native data engine: C# sources in engine\, compiled by Add-Type (cached DLL), runs in this process ---
 . (Join-Path $here 'engine-loader.ps1')
 $engine = $null; $script:engineError = 'The data engine is not loaded; see the server log.'

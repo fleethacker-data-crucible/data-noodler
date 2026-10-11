@@ -96,11 +96,7 @@ Click a field: insert it in the SQL">Input datasets</h2>
 <script src="../js/pipeline/steps.js"></script>
 <script src="../js/pipeline/runner.js"></script>
 <script src="../js/pipeline/sql-editor.js"></script>
-<script src="../js/charts/apex-render.js"></script>
-<script src="../js/charts/apex-options.js"></script>
-<script src="../js/charts/apex-widget.js"></script>
-<script src="../js/grid/data-grid-pkg.js"></script>
-<script src="../js/grid/preview-grid.js"></script>
+<script src="../js/grid/data-table.js"></script>
 <script>
 // Transform = a list of SQL queries (each one SELECT or a script ending in a SELECT; engine/Core/Script.cs). The
 // active query builds the output dataset data/source/<output name>/ (Arrow parts). Saved in pipeline/pipeline.json as
@@ -116,7 +112,7 @@ const FILE = () => PipelineRunner.file(ctx);
 const PRE = 'CLEAN_', OUT = /^CLEAN_[A-Z0-9_]+$/;   // output dataset name: CLEAN_ + letters, digits and _
 // Dataset and field lists are alphabetical (queries keep their own order).
 const abc = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
-const staged = () => (ctx?.cfg.datasets || []).filter(d => Projects.stageOf(d) === 'staged').sort((a, b) => abc(a.name, b.name));
+const importedDs = () => (ctx?.cfg.datasets || []).filter(d => Projects.stageOf(d) === 'imported').sort((a, b) => abc(a.name, b.name));
 const cur = () => pipe.queries[sel];
 const named = q => !!(q && (q.name || '').trim());
 const locked = () => !named(cur()) || $('sql').querySelector('textarea').readOnly;
@@ -162,13 +158,13 @@ const ed = SqlEditor.mount($('sql'), {
 });
 
 function render() {
-  $('dsList').innerHTML = staged().map(d => `<div data-ds="${esc(d.name)}" title="Click: show fields · Shift+click: insert name"><span>${Icons.caret(open.has(d.name), 'tw')}${esc(d.name)}</span><small>${UI.rows(d.rows)} rows · ${d.columns.length} cols</small></div>`
-    + (open.has(d.name) ? [...d.columns].sort((a, b) => abc(a.name, b.name)).map(c => `<div class="fld" data-col="${esc(c.name)}" title="Click to insert"${fhit(c.name) ? '' : ' hidden'}><span>${esc(c.name)}</span><small>${esc(c.type)}</small></div>`).join('') : '')).join('') || '<div class="muted">Nothing staged. Import data first.</div>';
+  $('dsList').innerHTML = importedDs().map(d => `<div data-ds="${esc(d.name)}" title="Click: show fields · Shift+click: insert name"><span>${Icons.caret(open.has(d.name), 'tw')}${esc(d.name)}</span><small>${UI.rows(d.rows)} rows · ${d.columns.length} cols</small></div>`
+    + (open.has(d.name) ? [...d.columns].sort((a, b) => abc(a.name, b.name)).map(c => `<div class="fld" data-col="${esc(c.name)}" title="Click to insert"${fhit(c.name) ? '' : ' hidden'}><span>${esc(c.name)}</span><small>${esc(c.type)}</small></div>`).join('') : '')).join('') || '<div class="muted">Nothing imported. Import data first.</div>';
   $('qList').innerHTML = pipe.queries.map((q, i) => `<div data-i="${i}" draggable="true" title="Drag to reorder" class="${i === sel ? 'sel' : ''}"><span><span class="n">${i + 1}</span>${named(q) ? esc(q.name) : '<span class="muted" style="font-weight:400">blank</span>'}</span>${q.id === pipe.active ? '<small class="act" title="Build Output Dataset runs this query">ACTIVE</small>' : ''}</div>`).join('') || '<div class="muted">No queries yet.</div>';
   $('none').hidden = sel >= 0; $('editor').hidden = sel < 0;
   $('del').disabled = sel < 0;
   $('setActive').disabled = sel < 0 || cur().id === pipe.active;
-  const outBad = !OUT.test(pipe.output || '') || staged().some(d => d.name === pipe.output);
+  const outBad = !OUT.test(pipe.output || '') || importedDs().some(d => d.name === pipe.output);
   $('outName').classList.toggle('bad', outBad);
   $('outName').title = !pipe.output ? 'Required: name the output dataset' : outBad ? (OUT.test(pipe.output) ? `${pipe.output} is an input dataset; pick another name` : 'Type the name after CLEAN_ (letters, digits and _)') : '';
   $('run').disabled = !PipelineRunner.active(pipe) || outBad || !named(PipelineRunner.active(pipe));
@@ -201,7 +197,7 @@ $('qList').onclick = ev => { const el = ev.target.closest('[data-i]'); if (el) s
 $('outName').oninput = () => {
   const o = $('outName'); let p = o.selectionStart, u = o.value.toUpperCase().replace(/\s/g, '_').replace(/[^A-Z0-9_]/g, '');
   if (u && !u.startsWith(PRE)) {
-    let k = 0; while (k < PRE.length && u[k] === PRE[k]) k++;   // a partly deleted prefix: whatever was typed after it stays
+    let k = 0; if ((pipe.output || '').startsWith(PRE)) while (k < PRE.length && u[k] === PRE[k]) k++;   // a partly deleted prefix: whatever was typed after it stays (a fresh box keeps every letter)
     const rest = u.slice(k); u = rest ? PRE + rest : ''; p = u.length ? Math.max(PRE.length, p + PRE.length - k) : 0;
   }
   if (u === PRE) { u = ''; p = 0; }
@@ -211,7 +207,7 @@ $('outName').oninput = () => {
 // Query names are upper case with _ for spaces, as you type.
 $('qName').oninput = () => { const o = $('qName'), p = o.selectionStart, u = o.value.toUpperCase().replace(/\s/g, '_'); if (u !== o.value) { o.value = u; o.setSelectionRange(p, p); } const q = cur(); if (!q) return; q.name = o.value; touch(); render(); };
 $('add').onclick = () => {
-  const first = staged()[0]?.name || 'my_dataset';
+  const first = importedDs()[0]?.name || 'my_dataset';
   pipe.queries.push({ id: crypto.randomUUID(), name: '', sql: `SELECT *\nFROM ${first}` });
   if (!PipelineRunner.active(pipe)) pipe.active = pipe.queries[pipe.queries.length - 1].id;   // there is always an active query
   touch(); select(pipe.queries.length - 1); $('qName').focus();
@@ -254,7 +250,7 @@ function validate() {
   if (!named(q)) throw new Error('Give the active query a name.');
   if (!q.sql.trim()) throw new Error(`The active query "${q.name}" is empty.`);
   if (!OUT.test(pipe.output || '')) throw new Error('Enter an output dataset name (CLEAN_ + letters, digits or _).');
-  if (staged().some(d => d.name === pipe.output)) throw new Error(`"${pipe.output}" is an input dataset; pick another output name.`);
+  if (importedDs().some(d => d.name === pipe.output)) throw new Error(`"${pipe.output}" is an input dataset; pick another output name.`);
 }
 
 // Preview: the selected query's output, or a source dataset. Top 100 rows plus the total row count; for a script
@@ -284,7 +280,7 @@ $('preview').onclick = UI.guard(async () => {
 $('srcPrev').onclick = ev => {
   ev.stopPropagation(); const m = $('srcMenu');
   if (!m.hidden) return m.hidden = true;
-  m.innerHTML = staged().map(d => `<div data-ds="${esc(d.name)}"><span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows</small></div>`).join('') || '<div class="muted">Nothing staged.</div>';
+  m.innerHTML = importedDs().map(d => `<div data-ds="${esc(d.name)}"><span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows</small></div>`).join('') || '<div class="muted">Nothing imported.</div>';
   m.hidden = false;
 };
 $('srcMenu').onclick = UI.guard(async ev => {
@@ -300,7 +296,6 @@ addEventListener('resize', () => fit());
 let popWin = null;
 $('result').addEventListener('grid-popout', e => {
   popWin = e.detail.open ? e.detail.win : null; $('sql').classList.toggle('tall', e.detail.open); fit();
-  if (!e.detail.open) showTable();   // back here: the latest preview (it may have changed while popped out)
 });
 
 // Preview table: the Data Grid widget (its own Pop-out button opens it in a window).
@@ -308,14 +303,9 @@ let last = null;
 function info(t) { $('pinfo').textContent = t; }
 function showTable() {
   const el = $('result');
-  if (popWin && !popWin.closed && popWin.DNGridShow) {   // popped out: update that window; the grid here stays hidden
-    if (last) PreviewGrid.popData(last.cols, last.rows, { total: last.total, more: last.more, title: last.title }).then(d => popWin.DNGridShow(d)).catch(e => UI.toast(e.message, 'err'));
-    return;
-  }
-  if (!last) { el.innerHTML = ''; return; }
-  if (!el.querySelector('.pgrid')) el.innerHTML = '<div class="pgrid"></div>';
-  fit();
-  PreviewGrid.show(el, last.cols, last.rows, { total: last.total, more: last.more }).catch(e => UI.toast(e.message, 'err'));
+  if (!last) { if (!el._popped) el.innerHTML = ''; return; }
+  fit();   // popped out: DataTable draws in that window (the same table)
+  DataTable.show(el, last.cols, last.rows, { total: last.total, more: last.more, title: last.title });
 }
 // Syntax Library: its own window, 1600 x 800 (narrower on small screens) in the bottom-right corner like Widget Settings.
 $('synLib').onclick = () => {

@@ -78,7 +78,7 @@ function pane() {
   }
   el.innerHTML = `<label class="field" data-path="w:title">Title<input id="pTitle" type="text" value="${esc(w.title)}" placeholder="${esc(cur.pkgName)}"></label>
     <label class="field" data-path="w:dataset">Dataset<select id="pDs"><option value="">Select a dataset…</option>${cur.datasets.map(d => `<option ${d === w.dataset ? 'selected' : ''}>${esc(d)}</option>`).join('')}</select></label>
-    ${cur.datasets.length ? '' : '<div class="muted">No ready datasets. Use Import Directly, or run the Transform on staged data.</div>'}`;
+    ${cur.datasets.length ? '' : '<div class="muted">No ready datasets. Use Import Directly, or run the Transform on imported data.</div>'}`;
   $('pTitle').oninput = e => { B()?.setTitle(w, e.target.value); $('tree').querySelector('.root').textContent = e.target.value || cur.pkgName; };
   $('pDs').onchange = e => { B()?.setDataset(w, e.target.value); show(); };
 }

@@ -16,9 +16,9 @@ The server compiles the engine (`engine/**/*.cs`, cached as a DLL in `temp\engin
 
 ```
 raw file (CSV / Parquet / Arrow / SQLite, in data/raw or read in place from X:\ or \\server\share)
-   │ Import ── Stage: column choices applied
+   │ Import: column choices applied
    ▼
-data/staged/<NAME>/        part-NNNNNN.arrow + dataset.json      ← Arrow IPC: the working format
+data/imported/<NAME>/        part-NNNNNN.arrow + dataset.json      ← Arrow IPC: the working format
    │ Transform ── SQL query / script
    ▼
 data/source/CLEAN_<NAME>/  part-NNNNNN.arrow + dataset.json
@@ -32,14 +32,14 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
   background and every query (Transform previews, Dashboard widgets, Data Grids, D3 Studio) reads RAM. A dataset that
   changes on disk is reloaded; one too large for the engine's in-memory share is read from its parts instead.
 - **Parquet is an export format.** Older projects whose datasets are Parquet keep working; a dataset becomes Arrow the
-  next time it is staged or built.
+  next time it is imported or built.
 
 ## Modules
 
 | Module | Page | What it does |
 |---|---|---|
 | Project Manager | `html/project_manager.html` | Projects (create, edit, rename, trash), module buttons, Update workflow. Entry point. |
-| Import | `html/import.html` | Pick or link a raw file, set column names / types, Stage it as an Arrow dataset. |
+| Import | `html/import.html` | Pick or link a raw file, set column names / types, Import it as an Arrow dataset. |
 | Transform | `html/transform.html` | Named SQL queries (SELECT or scripts); the active one builds `data/source/CLEAN_*`. |
 | Dashboard | `html/dashboard.html` | Charts from D3 Studio + Data Grids on a grid layout; queries run in the engine. |
 | D3 Studio | `html/d3-studio.html` | Build D3 charts (code + inputs linked to TABLE.FIELD); Publish to the Dashboard. |

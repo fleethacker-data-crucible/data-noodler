@@ -12,7 +12,9 @@
   .list div { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; cursor: pointer; }
   .list div + div { border-top: 1px solid var(--border); }
   .list div:hover { background: var(--panel); }
-  .list div.sel { background: var(--sel); font-weight: 600; }
+  .list div.sel { background: var(--blue); color: #fff; font-weight: 600; }   /* the dataset shown (Pop-out / Export use it) */
+  .list div.sel small { color: #fff; }
+  #schemaBox table.grid td:not(.mono) { font-family: inherit; font-size: inherit; }
   .list small { color: var(--muted); white-space: nowrap; }
   .drop { border: 1px dashed var(--border); border-radius: 4px; padding: 27px 14px 26px; text-align: center; color: var(--muted); margin: 8px 0; }
   .drop.over { border-color: var(--blue); color: var(--text); }
@@ -26,6 +28,12 @@
   table.schema input[type=text] { width: 100%; min-width: 120px; font-family: inherit; }
   #preview .pgrid { height: 480px; }
   #dsName { width: 440px; }
+  /* Long file / dataset names: one line with ..., the size stays on the right (full name on hover). */
+  .list > div { display: flex; gap: 8px; min-width: 0; overflow: hidden; }
+  .list > div > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .list > div > small { flex: none; white-space: nowrap; }
+  #dsName.bad, #dsName.bad:focus { border-color: var(--err); outline: 1px solid var(--err); }
+  #dsNameMsg { color: var(--err); font-size: 12px; }
   #rowCount { display: inline-block; min-width: 13ch; }
   /* Activity log: 5 lines visible, newest on top. */
   .progress.busy > i { width: 30% !important; animation: busy 1.2s linear infinite; }
@@ -63,7 +71,7 @@
           <div class="list" id="sources"></div>
         </section>
         <section>
-          <h2>Staged Datasets</h2>
+          <h2>Imported Datasets</h2>
           <div class="list" id="datasets"></div>
         </section>
       </aside>
@@ -72,14 +80,20 @@
         <div id="editor" hidden class="stack">
           <div class="ok" id="howto"></div>
           <h2 class="hw">Schema</h2>
-          <div class="table-wrap" style="max-height:300px"><table class="grid schema" id="schema"></table></div>
+          <div id="schemaHost"><div class="pgrid" id="schemaBox">
+            <div class="dt-bar"><input class="search" id="schemaSearch" type="search" placeholder="Search" spellcheck="false"><span class="muted dt-n" id="schemaN"></span><span style="flex:1"></span>
+              <button id="keepAll" class="ghost small" title="Keep every column">Select All</button><button id="keepNone" class="ghost small" title="Keep no columns">Select None</button>
+              <button class="ghost small dt-pop" id="schemaPop" title="Open the schema in its own window">Pop-out</button>
+              <div class="dt-exp"><button class="ghost small" id="schemaExpBtn">Export ▾</button><div class="dd-menu" id="schemaExp"><div data-fmt="csv">.csv</div><div data-fmt="parquet">.parquet</div><div data-fmt="sqlite">.sqlite</div></div></div></div>
+            <div class="table-wrap dt-wrap" style="max-height:300px"><table class="grid schema" id="schema"></table></div>
+          </div></div>
           <div class="row">
             <label class="field" id="tableLbl" hidden>Table<select id="table"></select></label>
-            <label class="field">Output Dataset Name<input id="dsName" type="text" pattern="[A-Za-z0-9_]+" placeholder="UPPER_CASE_NAME"></label>
+            <label class="field">Output Dataset Name<input id="dsName" type="text" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="UPPER_CASE_NAME"><span id="dsNameMsg" hidden>The name can't start with a number.</span></label>
             <div style="width:25px"></div>
             <div class="stats"><div class="stat"><label>Rows</label><b id="rowCount">-</b></div><div class="stat"><label>Columns</label><b id="colCount">-</b></div></div>
           </div>
-          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Arrow in data/staged (input for Transform)">Stage</button><button id="delDs" class="danger" hidden>Delete</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
+          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Arrow in data/imported (input for Transform)">Import</button><button id="delDs" class="danger" hidden>Delete</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
           <div class="progress"><i id="bar"></i></div>
           <div class="log" id="log"></div>
           <h2 class="hw">Preview</h2>
@@ -108,11 +122,7 @@
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
 <script src="../js/import/external-source.js"></script>
-<script src="../js/charts/apex-render.js"></script>
-<script src="../js/charts/apex-options.js"></script>
-<script src="../js/charts/apex-widget.js"></script>
-<script src="../js/grid/data-grid-pkg.js"></script>
-<script src="../js/grid/preview-grid.js"></script>
+<script src="../js/grid/data-table.js"></script>
 <script>
 const { $, esc } = UI;
 // Plain-English hint shown next to each type in the Change Type list.
@@ -154,14 +164,14 @@ async function listSources(force = true) {
   if (!force && sig === rawSig) return files;
   rawSig = sig;
   $('sources').hidden = !files.length;
-  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${cur?.path === f.path ? 'sel' : ''}" title="${esc(f.path)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small>${UI.bytes(f.size)}</small></div>`).join('');
+  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${!cur?.ds && cur?.path === f.path ? 'sel' : ''}" title="${esc(f.name)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small>${UI.bytes(f.size)}</small></div>`).join('');
   return files;
 }
-const staged = cfg => (cfg.datasets || []).filter(d => d.source && d.source.kind !== 'pipeline').sort((a, b) => a.name.localeCompare(b.name));
+const importedDs = cfg => (cfg.datasets || []).filter(d => d.source && d.source.kind !== 'pipeline').sort((a, b) => a.name.localeCompare(b.name));
 async function listDatasets() {
   const cfg = await ctx.reload();
   // Imported datasets only (transform outputs live in Transform), A to Z.
-  const list = staged(cfg);
+  const list = importedDs(cfg);
   $('datasets').innerHTML = list.map(d => `<div data-ds="${esc(d.name)}" class="${cur?.ds === d.name ? 'sel' : ''}" title="${esc(d.path)}"><span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows</small></div>`).join('') || '<div class="muted">None yet.</div>';
   return list;
 }
@@ -190,12 +200,10 @@ $('sources').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-p]'); if (!el) return;
   const path = el.dataset.p;
   if (!Engine.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet, Arrow or SQLite.', 'err');
-  // Already staged from this file: open that dataset (its saved choices, Update) instead of a new Stage.
-  const d = staged(await ctx.reload()).find(x => x.source?.path === path);
-  if (d) return openDataset(d);
+  // The raw file itself (its own schema and preview); its imported datasets open from Imported Datasets.
   await openReader({ path, label: path.split('/').pop() }, () => reader(path));
 });
-// A staged dataset: its source again (data/raw copy, or the linked path) with the column choices it was staged with.
+// A imported dataset: its source again (data/raw copy, or the linked path) with the column choices it was imported with.
 async function openDataset(d) {
   const s = d.source || {}, c = { ds: d.name, apply: d, table: s.table || '', label: (s.path || s.origin || d.name).split(/[\\/]/).pop(), from: s.from || null };
   try {
@@ -203,7 +211,7 @@ async function openDataset(d) {
     else await openReader({ ...c, path: null, ext: { src: s.origin, size: s.size, modified: s.modified } }, () => reader(s.origin));
   } catch (e) {
     live(null); $('editor').hidden = true; $('empty').hidden = false;
-    $('empty').textContent = `${d.name} cannot be shown: its source ${s.path || s.origin} cannot be read. Import the file again (Browse or From Path) and Stage it as ${d.name}.`;
+    $('empty').textContent = `${d.name} cannot be shown: its source ${s.path || s.origin} cannot be read. Import the file again (Browse or From Path) as ${d.name}.`;
     throw new Error(`${d.name}: its source ${s.path || s.origin} cannot be read (${String(e.message).split('\n')[0]}).`);
   }
 }
@@ -213,20 +221,20 @@ async function reader(src) {
   return { kind: o.kind, tables: o.tables?.length ? o.tables : [''], sql: t => Engine.src(src, t) };
 }
 // Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
-async function openReader(c, open) {   // c.table / c.ds + c.apply (a staged dataset: its saved column choices)
-  $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Stage</b> to convert this raw source (.csv, .sqlite, .parquet or .arrow) into an Arrow dataset (the fast working format of this project; Parquet / CSV / SQLite are for export).`;
+async function openReader(c, open) {   // c.table / c.ds + c.apply (a imported dataset: its saved column choices)
+  $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Import</b> to convert this raw source (.csv, .sqlite, .parquet or .arrow) into an Arrow dataset (the fast working format of this project; Parquet / CSV / SQLite are for export).`;
   $('empty').hidden = true; $('editor').hidden = false; live('Reading source…');
   const r = await open();
   cur = { ...c, reader: r };
   $('tableLbl').hidden = r.kind !== 'sqlite';
   $('table').innerHTML = r.tables.map(t => `<option>${esc(t)}</option>`).join('');
   if (c.table && r.tables.includes(c.table)) $('table').value = c.table;
-  // Delete: the staged dataset shown, or a raw file in data/raw (a linked file outside the project is never deleted).
+  // Delete: the imported dataset shown, or a raw file in data/raw (a linked file outside the project is never deleted).
   $('delDs').hidden = !c.ds && !c.path;
-  $('delDs').title = c.ds ? `Delete the staged dataset ${c.ds} and its data files` : `Delete the raw file ${c.label} from data/raw`;
-  // A staged dataset: the button re-runs its import (same name, its saved choices or any made now) instead of a new Stage.
-  $('import').textContent = c.ds ? 'Update' : 'Stage';
-  $('import').title = c.ds ? `Read the source again and replace ${c.ds} with the column choices above` : 'Apply the column choices above and save the dataset as Arrow in data/staged (input for Transform)';
+  $('delDs').title = c.ds ? `Delete the imported dataset ${c.ds} and its data files` : `Delete the raw file ${c.label} from data/raw`;
+  // A imported dataset: the button re-runs its import (same name, its saved choices or any made now) instead of a new Import.
+  $('import').textContent = c.ds ? 'Update' : 'Import';
+  $('import').title = c.ds ? `Read the source again and replace ${c.ds} with the column choices above` : 'Apply the column choices above and save the dataset as Arrow in data/imported (input for Transform)';
   await listSources(); await listDatasets();
   await loadTable(c.table && r.tables.includes(c.table) ? c.table : r.tables[0]);
 }
@@ -284,7 +292,7 @@ $('extGo').onclick = UI.guard(async () => {
       // Linked: read where it is (the engine reads the file in place); nothing is copied into the project.
       await openReader({ path: null, label: name, ext: { src, size: info.size, modified: info.modified } }, () => reader(src));
     }
-    extMsg('Ready: set columns and Stage.', 'ok');
+    extMsg('Ready: set columns and Import.', 'ok');
     $('pathDlg').close();
   } finally { $('extGo').disabled = false; }
 });
@@ -295,22 +303,25 @@ $('table').onchange = UI.guard(() => loadTable($('table').value));
 async function loadTable(table) {
   const src = await cur.reader.sql(table);
   cur.table = table; cur.src = src; cur.rows = null;
-  $('dsName').value = dsSlug(table || cur.label);
+  $('dsName').value = dsSlug(table || cur.label); checkName();
   // Schema and preview together. The preview runs on one worker: LIMIT 100 then stops after the first rows instead of
   // splitting the whole file for a parallel scan (the row count below does that).
-  const [cols, p] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), Engine.query(`SELECT * FROM ${src} LIMIT 100`, { workers: 1 })]);
+  // Preview: an imported dataset shows its own imported data (data/imported); a raw file shows the file.
+  const psrc = cur.apply?.path ? Engine.src(cur.apply.path) : src;
+  const [cols, p] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), Engine.query(`SELECT * FROM ${psrc} LIMIT 100`, { workers: 1 })]);
   cur.cols = cols.map(c => { const n = c.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || c.name; return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
-  // A staged dataset: the keep / type / name choices it was staged with (matched by source field name).
+  // A imported dataset: the keep / type / name choices it was imported with (matched by source field name).
   const saved = cur.apply?.source?.columns;
   if (saved) {
     const by = new Map(saved.map(x => [x.name, x]));
     for (const c of cur.cols) { const x = by.get(c.name); if (x) Object.assign(c, { keep: x.keep, newName: x.newName, newType: x.newType }); else c.keep = false; }
   }
   if (cur.apply) $('dsName').value = cur.apply.name;
+  checkName();
   renderSchema();
   $('colCount').textContent = cols.length; $('rowCount').textContent = '…';
   // The grid asks for the next 100 rows as the reader nears the end.
-  PreviewGrid.show($('preview'), p.cols, p.rows, { more: async at => (await Engine.query(`SELECT * FROM ${src} LIMIT 100 OFFSET ${at}`, { workers: 1 })).rows }).catch(e => UI.toast(e.message, 'err'));
+  DataTable.show($('preview'), p.cols, p.rows, { title: cur.apply?.name || cur.label, more: async at => (await Engine.query(`SELECT * FROM ${psrc} LIMIT 100 OFFSET ${at}`, { workers: 1 })).rows });
   // Row count: the engine splits the work across its workers (row groups / batches); no % is known, so the bar runs busy.
   live(null); const st = ctx.step('Counting rows…'); $('bar').parentElement.classList.add('busy');
   // Rows shows "Calculating" with 1-4 dots cycling every 500 ms.
@@ -324,22 +335,45 @@ async function loadTable(table) {
 }
 function renderSchema() {
   $('schema').innerHTML = `<thead><tr><th class="fit">Keep</th><th>Source Field</th><th class="fit">Detected Type</th><th class="fit">Change Type</th><th>New Field Name</th></tr></thead><tbody>` +
-    cur.cols.map((c, i) => `<tr><td class="fit"><input type="checkbox" data-i="${i}" data-k="keep" ${c.keep ? 'checked' : ''}></td><td class="mono src">${esc(c.name)}</td><td class="muted fit">${esc(c.type)}</td>
+    // Listed A to Z by source field (the import keeps the source column order).
+    cur.cols.map((c, i) => [c, i]).sort((a, b) => a[0].name.localeCompare(b[0].name, undefined, { sensitivity: 'base', numeric: true })).map(([c, i]) => `<tr><td class="fit"><input type="checkbox" data-i="${i}" data-k="keep" ${c.keep ? 'checked' : ''}></td><td class="mono src">${esc(c.name)}</td><td class="muted fit">${esc(c.type)}</td>
       <td class="fit"><select data-i="${i}" data-k="newType">${[...new Set([c.type, ...TYPES])].map(t => `<option value="${esc(t)}" ${t === c.newType ? 'selected' : ''}>${esc(typeLabel(t))}</option>`).join('')}</select></td>
       <td class="nn"><input type="text" data-i="${i}" data-k="newName" value="${esc(c.newName)}" title="${esc(c.newName)}"></td></tr>`).join('') + '</tbody>';
   // Every Change Type box as wide as the widest one.
-  const sels = [...document.querySelectorAll('#schema select[data-k="newType"]')];
+  const sels = [...$('schema').querySelectorAll('select[data-k="newType"]')];
   sels.forEach(el => el.style.width = '');
   const w = Math.max(0, ...sels.map(el => el.offsetWidth));
   if (w) sels.forEach(el => el.style.width = w + 'px');
-  showValidate();
+  showValidate(); filterSchema();
 }
 // Check Type Changes only shows when a kept column's type differs from the detected one.
 const showValidate = () => { const h = !cur.cols.some(c => c.newType !== c.type); $('validate').hidden = h || !cur.cols.some(c => c.keep && c.newType !== c.type); $('resetTypes').hidden = h; };
+// Schema bar: Search (source or new field name), Pop-out and Export of the schema shown (same as the Preview's).
+const schemaRows = () => cur.cols.map(c => [c.keep ? 'Yes' : 'No', c.name, c.type, typeLabel(c.newType), c.newName]).sort((a, b) => a[1].localeCompare(b[1], undefined, { sensitivity: 'base', numeric: true }));
+const SCHEMA_COLS = ['Keep', 'Source Field', 'Detected Type', 'Change Type', 'New Field Name'];
+function filterSchema() {
+  const q = $('schemaSearch').value.trim().toLowerCase(); let n = 0;
+  $('schema').querySelectorAll('tbody tr').forEach(tr => { const c = cur.cols[+tr.querySelector('[data-i]').dataset.i], ok = !q || c.name.toLowerCase().includes(q) || c.newName.toLowerCase().includes(q); tr.hidden = !ok; if (ok) n++; });
+  $('schemaN').textContent = `${UI.num(n)}${q ? ' matching' : ''} of ${UI.num(cur.cols.length)} fields`;
+}
+$('schemaSearch').oninput = () => filterSchema();
+$('schemaPop').onclick = () => DataTable.popOut($('schemaHost'), $('schemaBox'), `${$('dsName').value || cur.label} schema`);
+$('schemaExpBtn').onclick = e => { e.stopPropagation(); $('schemaExp').classList.toggle('open'); };
+document.addEventListener('click', () => $('schemaExp').classList.remove('open'));
+$('schemaExp').onclick = e => {
+  const f = e.target.closest('[data-fmt]')?.dataset.fmt; if (!f) return; $('schemaExp').classList.remove('open');
+  if (f !== 'csv') return UI.toast(`Export to .${f}: not built yet.`);
+  DataTable.csv(document, SCHEMA_COLS, schemaRows(), `${$('dsName').value || 'schema'}_schema.csv`);
+};
+$('preview').addEventListener('grid-export', e => UI.toast(`Export to .${e.detail.format}: not built yet.`));
+$('keepAll').onclick = () => { cur.cols.forEach(c => c.keep = true); renderSchema(); };
+$('keepNone').onclick = () => { cur.cols.forEach(c => c.keep = false); renderSchema(); };
 $('resetTypes').onclick = () => { cur.cols.forEach(c => c.newType = c.type); renderSchema(); ctx.log('Change types reset to the detected types.'); };
 // Dataset and new field names are upper case as typed (Caps Lock on or not).
 const upper = el => { const p = el.selectionStart, u = el.value.toUpperCase(); if (u !== el.value) { el.value = u; el.setSelectionRange(p, p); } };
-$('dsName').addEventListener('input', ev => upper(ev.target));
+$('dsName').addEventListener('input', ev => { const el = ev.target, p = el.selectionStart, u = el.value.toUpperCase().replace(/\s/g, '_'); if (u !== el.value) { el.value = u; el.setSelectionRange(p, p); } checkName(); });   // upper case, spaces become _
+// Dataset names start with a letter (SQL reads 2025_X as a number): red box and a note until fixed.
+function checkName() { const v = $('dsName').value.trim(), bad = /^[0-9]/.test(v); $('dsName').classList.toggle('bad', bad); $('dsNameMsg').hidden = !bad; }
 $('schema').addEventListener('input', ev => { if (ev.target.dataset.k === 'newName') upper(ev.target); });
 $('schema').onchange = ev => {
   const el = ev.target, c = cur.cols[+el.dataset.i]; if (!c) return;
@@ -366,7 +400,7 @@ async function checkTypes() {
   const bad = changed.map((c, i) => [c, Number(r.rows[0][i])]).filter(([, n]) => n > 0);
   // Orange border on each Change Type box that cannot convert cleanly.
   const badSet = new Set(bad.map(([c]) => c));
-  document.querySelectorAll('#schema select[data-k="newType"]').forEach(el => el.classList.toggle('bad', badSet.has(cur.cols[+el.dataset.i])));
+  $('schema').querySelectorAll('select[data-k="newType"]').forEach(el => el.classList.toggle('bad', badSet.has(cur.cols[+el.dataset.i])));
   const total = bad.reduce((s, [, n]) => s + n, 0);
   if (!bad.length) st.done('Type check: all changes convert cleanly');
   // One line per failing column: count, example values, what the type needs. The last one closes the timed step.
@@ -383,7 +417,7 @@ $('validate').onclick = UI.guard(checkTypes);
 
 // ---- import ----
 // Every dataset is Arrow (the working format; Parquet / CSV / SQLite only on export); Import is the only module that reads raw files.
-//   Stage:           column choices applied (keep, rename, retype) -> data/staged/  (Pipeline works on it)
+//   Import:          column choices applied (keep, rename, retype) -> data/imported/  (Pipeline works on it)
 // The engine streams the source into a partitioned Arrow dataset folder (part-NNNNNN.arrow + dataset.json),
 // written to a temp folder and swapped in only when complete, so a failed import keeps the previous version.
 // One live line at the top of the activity log for work in progress (null removes it).
@@ -396,11 +430,11 @@ function live(msg) {
 const changedCols = () => cur.cols.some(c => !c.keep || c.newType !== c.type || c.newName !== c.defName);   // user edits only
 async function runImport(direct) {
   const name = $('dsName').value.trim();
-  if (!/^[A-Za-z0-9_]+$/.test(name)) throw new Error('Dataset name: use letters, digits and _ only.');
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) throw new Error(/^[0-9]/.test(name) ? "Dataset name: it can't start with a number." : 'Dataset name: use letters, digits and _ only.');
   if (cur.rows == null) throw new Error('Still counting rows; try again in a moment.');
   let select, want;
   if (direct) {
-    if (changedCols() && !await UI.confirm('Import Directly keeps every column exactly as it is in the source; the column choices above are ignored. Use Stage to apply them. Continue?', { ok: 'Import Directly' })) return;
+    if (changedCols() && !await UI.confirm('Import Directly keeps every column exactly as it is in the source; the column choices above are ignored. Use Import to apply them. Continue?', { ok: 'Import Directly' })) return;
     select = '*'; want = cur.cols.map(c => c.name);
   } else {
     const keep = cur.cols.filter(c => c.keep);
@@ -411,9 +445,9 @@ async function runImport(direct) {
     if (bad && !await UI.confirm(`${UI.num(bad)} value(s) cannot be converted and will be imported as null. Continue?`, { ok: 'Import anyway' })) return;
     select = selectList(); want = keep.map(c => c.newName);
   }
-  const folder = 'staged', dest = `${ctx.dir}/data/${folder}/${name}`;
+  const folder = 'imported', dest = `${ctx.dir}/data/${folder}/${name}`;
   const cfg = await ctx.reload();
-  if (cfg.datasets?.some(d => d.name === name) && cur.ds !== name && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;   // Update on a staged dataset replaces it without asking
+  if (cfg.datasets?.some(d => d.name === name) && cur.ds !== name && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;   // Update on a imported dataset replaces it without asking
   const t0 = performance.now(), bar = p => $('bar').style.width = `${Math.round(p)}%`;
   $('import').disabled = true; bar(5);
   try {
@@ -447,8 +481,8 @@ async function runImport(direct) {
         columns: cur.cols.map(c => ({ name: c.name, type: c.type, keep: direct ? true : c.keep, newName: direct ? c.name : c.newName, newType: direct ? c.type : c.newType })) },
     });
     await Projects.touchModule(ctx.folder, 'import');
-    ctx.log(`${direct ? 'Imported' : 'Staged'} ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
-    UI.toast(`${direct ? 'Imported' : 'Staged'} ${name}`, 'ok');
+    ctx.log(`Imported ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
+    UI.toast(`Imported ${name}`, 'ok');
     cur.ds = name; cur.apply = (await ctx.reload()).datasets.find(d => d.name === name); $('delDs').hidden = false; $('import').textContent = 'Update';
     bar(100);
     await listDatasets();
@@ -456,7 +490,7 @@ async function runImport(direct) {
 }
 $('import').onclick = UI.guard(() => runImport(false));
 
-// ---- staged datasets: click = open it again (schema with its saved choices, preview); Delete Dataset removes it ----
+// ---- imported datasets: click = open it again (schema with its saved choices, preview); Delete Dataset removes it ----
 $('datasets').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-ds]'); if (!el) return;
   const d = (await ctx.reload()).datasets.find(x => x.name === el.dataset.ds);
@@ -472,16 +506,16 @@ $('delDs').onclick = UI.guard(async () => {
   cur = null; $('editor').hidden = true; $('empty').hidden = false;
   await listDatasets(); tried.clear(); await autoOpen();
 });
-// A raw file in data/raw (staged datasets made from it keep their data; Update then needs the file again).
+// A raw file in data/raw (imported datasets made from it keep their data; Update then needs the file again).
 async function delRaw(path) {
-  const name = path.split('/').pop(), users = staged(await ctx.reload()).filter(d => d.source?.path === path).map(d => d.name);
-  if (!await UI.confirm(`Delete the raw file ${name} from data/raw?${users.length ? ` ${users.join(', ')} ${users.length > 1 ? 'were' : 'was'} staged from it: the staged data stays, but Update cannot read this file again.` : ''}`, { danger: true, ok: 'Delete' })) return;
+  const name = path.split('/').pop(), users = importedDs(await ctx.reload()).filter(d => d.source?.path === path).map(d => d.name);
+  if (!await UI.confirm(`Delete the raw file ${name} from data/raw?${users.length ? ` ${users.join(', ')} ${users.length > 1 ? 'were' : 'was'} imported from it: the imported data stays, but Update cannot read this file again.` : ''}`, { danger: true, ok: 'Delete' })) return;
   await DNFS.remove(path);
   ctx.log(`Deleted raw file ${name}`, 'ok');
   cur = null; $('editor').hidden = true; $('empty').hidden = false;
   await listSources(); tried.clear(); await autoOpen();
 }
-// Nothing shown yet: the first staged dataset (A to Z); with none, the first raw file. Runs on load, after a delete,
+// Nothing shown yet: the first imported dataset (A to Z); with none, the first raw file. Runs on load, after a delete,
 // and when a file shows up in data/raw while nothing is shown.
 let opening = false;
 const tried = new Set();   // auto-open tries each dataset / file once (a source that cannot be read does not retry every 3 s)
@@ -490,7 +524,7 @@ async function autoOpen() {
   opening = true;
   try {
     let files = []; try { files = (await DNFS.list(RAW())).filter(f => !f.dir && Engine.kind(f.name)); } catch {}
-    const next = [...staged(await ctx.reload()).map(d => ({ key: 'ds:' + d.name, d })), ...files.map(f => ({ key: 'raw:' + f.path, f }))].filter(x => !tried.has(x.key));
+    const next = [...importedDs(await ctx.reload()).map(d => ({ key: 'ds:' + d.name, d })), ...files.map(f => ({ key: 'raw:' + f.path, f }))].filter(x => !tried.has(x.key));
     for (const x of next) {
       tried.add(x.key);
       try {

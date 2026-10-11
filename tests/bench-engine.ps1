@@ -19,7 +19,7 @@ if ($hasFormat) { $o.DatasetFormat = $Format; $o.ResidentFraction = $(if ($Memor
 $none = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
 $ct = [Threading.CancellationToken]::None
 $proj = 'projects/_bench_' + [guid]::NewGuid().ToString('N').Substring(0, 6)
-$fact = "$proj/data/staged/FACT"; $dim = "$proj/data/staged/DIM"
+$fact = "$proj/data/imported/FACT"; $dim = "$proj/data/imported/DIM"
 $proc = [Diagnostics.Process]::GetCurrentProcess()
 $results = New-Object System.Collections.Generic.List[object]
 

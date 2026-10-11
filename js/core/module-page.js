@@ -46,7 +46,7 @@ const ModulePage = {
       },
       async reload() { ctx.cfg = await Projects.get(folder); return ctx.cfg; },
     };
-    // The project's datasets (staged + data/source) start loading into engine memory now, in the background, so the
+    // The project's datasets (imported + data/source) start loading into engine memory now, in the background, so the
     // module's queries read RAM. Shared by every window; the engine refreshes a dataset when it changes on disk.
     if (typeof Engine !== 'undefined') Projects.sourceDatasets(folder, cfg).catch(() => [])
       .then(src => Engine.memory.preload([...new Set([...(cfg.datasets || []).map(d => d.path), ...src.map(d => d.path)])]))

@@ -14,7 +14,7 @@
 const ProjectUpdate = (() => {
   const STEPS = [{ id: 'import', label: 'Import' }, { id: 'transform', label: 'Transform' }, { id: 'dashboard', label: 'Dashboard' },
     { id: 'publish', label: 'Publish' }, { id: 'archive', label: 'Archive' }];
-  const SNAP_PARTS = ['project-config.json', 'data/staged', 'data/source', 'pipeline', 'dashboard'];   // what a snapshot holds (as in Archives)
+  const SNAP_PARTS = ['project-config.json', 'data/imported', 'data/source', 'pipeline', 'dashboard'];   // what a snapshot holds (as in Archives)
 
   // Sources live in the project (source.path) or outside it (source.origin: local / network path, via the server).
   async function statSource(d) {

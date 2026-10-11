@@ -103,7 +103,8 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `js/charts/d3-render.js` | `D3Render`: compile / draw a chart's code in its `<div>` (`d3, data, el, W, H, colors, opts, theme, inputs` + accessors), fit, rounded bars, redraw animation. |
 | `js/charts/apex-render.js`, `apex-options.js` | ApexCharts / ApexTree drawing for dashboards made before D3 charts (kept so they still draw); option catalog. |
 | `js/charts/chart-settings.js`, `color-picker.js` | Chart Settings pop-out (inputs → TABLE.FIELD, options); colour swatch. |
-| `js/grid/data-grid.js` (+ `data-grid.css`, `data-grid-pkg.js`, `grid-remote.js`, `preview-grid.js`) | `DNGrid`: our Data Grid (rows on screen only, sort / filter / search, export, pop-out); engine paging (`GridRemote`); Import / Transform previews. |
+| `js/grid/data-grid.js` (+ `data-grid.css`, `data-grid-pkg.js`, `grid-remote.js`) | `DNGrid`: Dashboard Data Grid (sort / filter / search, export, pop-out); engine paging (`GridRemote`). |
+| `js/grid/data-table.js` (+ `html/table-pop.html`) | `DataTable`: Import / Transform preview tables (schema-table look; Search, Pop-out, Export). |
 | `js/d3studio/studio.js`, `d3-api.js`, `d3-assist.js`, `observable.js` | D3 Studio: editor, inputs, data from a CLEAN_ dataset via the engine, live code file, Save / Publish; D3 API list, suggestions / checks, Observable import. |
 | `js/vendor/apexcharts.min.js`, `apextree.min.js`, `d3.min.js` (v7.9.0) | Vendored libraries (offline; no CDN at runtime). |
 
@@ -127,7 +128,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `tests/arrow-format.ps1` | Arrow datasets give the same answers as Parquet (all types, NULLs, Unicode, parts, pruning), exports, resident datasets. |
 | `tests/bench-engine.ps1`, `tests/bench-compare.ps1` | Speed per step (import, filter, calculations, group by, joins, sort, window, write, export) for the old engine vs the new one; results in `temp/bench/`. |
 | `config/users.json` | Shared users. |
-| `projects/<folder>/` | Projects (`data/raw`, `data/staged/<ds>/`, `data/source/<ds>/`, `pipeline/`, `dashboard/`, `publish/`, `archives/`, `logs/`). |
+| `projects/<folder>/` | Projects (`data/raw`, `data/imported/<ds>/`, `data/source/<ds>/`, `pipeline/`, `dashboard/`, `publish/`, `archives/`, `logs/`). |
 | `ref-docs/` | SQL cheatsheets (test source), engine / D3 Studio design reviews. |
 | `arrow after action report.md` | Report of the Arrow engine work: what changed, old vs new speed, what is left. |
 

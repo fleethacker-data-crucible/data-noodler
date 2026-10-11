@@ -17,7 +17,7 @@
     <button id="snap">Take snapshot</button>
   </header>
   <div class="main stack">
-    <div class="muted">A snapshot copies the project's settings, staged datasets, pipeline and dashboard into archives/. Source files and published output are not included.</div>
+    <div class="muted">A snapshot copies the project's settings, imported datasets, pipeline and dashboard into archives/. Source files and published output are not included.</div>
     <div class="table-wrap"><table class="grid" id="tbl"></table></div>
     <h2>Compare with current</h2>
     <div id="cmp" class="muted">Click Compare on a snapshot.</div>
@@ -34,7 +34,7 @@
 <script>
 const { $, esc } = UI;
 let ctx;
-const PARTS = ['project-config.json', 'data/staged', 'data/source', 'pipeline', 'dashboard']; // what a snapshot holds
+const PARTS = ['project-config.json', 'data/imported', 'data/source', 'pipeline', 'dashboard']; // what a snapshot holds
 const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
 
 async function snapshots() {
@@ -84,7 +84,7 @@ async function compare(path) {
 
 // Restore: snapshot the current state first, then copy the snapshot back. Name and folder stay as they are now.
 async function restore(path) {
-  if (!await UI.confirm('Restore this snapshot? Staged datasets, pipeline and dashboard are replaced. The current state is saved as a new snapshot first.', { danger: true, ok: 'Restore' })) return;
+  if (!await UI.confirm('Restore this snapshot? Imported datasets, pipeline and dashboard are replaced. The current state is saved as a new snapshot first.', { danger: true, ok: 'Restore' })) return;
   await take(`Before restoring ${path.split('/').pop()}`);
   for (const p of PARTS.filter(p => p !== 'project-config.json')) {
     if ((await DNFS.stat(`${ctx.dir}/${p}`)).exists) await DNFS.remove(`${ctx.dir}/${p}`, { recursive: true });

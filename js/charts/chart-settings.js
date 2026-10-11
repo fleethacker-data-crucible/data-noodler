@@ -46,7 +46,7 @@ const ChartSettings = (() => {
       // Charts: each input variable = TABLE.FIELD (one table for all, like SQL FROM).
       const tabs = Object.entries(args.tables), cur = w.dataset || '';
       let h = `<div class="muted ws-from">${cur ? `FROM <b>${esc(cur)}</b>: every input reads this table. A field of another table switches the chart to it (the other inputs are cleared).` : 'No fields linked: the chart shows its axes / grid only. Link each input to a TABLE.FIELD.'}</div>`;
-      if (!tabs.length) h += '<div class="muted">No ready datasets in this project. Use Import Directly, or run the Transform on staged data.</div>';
+      if (!tabs.length) h += '<div class="muted">No ready datasets in this project. Use Import Directly, or run the Transform on imported data.</div>';
       for (const i of ins) {
         const b = A.binding(m, w, i), isM = i.role === 'measure';
         const ok = c => !isM || ['count', 'count_distinct', 'min', 'max'].includes(b.agg) || NUMERIC.test(c.type);

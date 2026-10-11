@@ -16,7 +16,7 @@ const BenchTests = (() => {
   const dirOf = n => `${DATA}/${n}`;
 
   const TESTS = [
-    { id: 'import-csv', label: 'Import CSV', kind: 'read', desc: 'CSV file -> Arrow dataset (the Import / Stage path)' },
+    { id: 'import-csv', label: 'Import CSV', kind: 'read', desc: 'CSV file -> Arrow dataset (the Import path)' },
     { id: 'import-parquet', label: 'Import Parquet', kind: 'read', desc: 'Parquet file -> Arrow dataset' },
     { id: 'import-sqlite', label: 'Import SQLite', kind: 'read', desc: 'SQLite table -> Arrow dataset' },
     { id: 'export-csv', label: 'Export CSV', kind: 'write', desc: 'Arrow dataset -> CSV file' },

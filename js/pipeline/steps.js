@@ -1,6 +1,6 @@
 // Pipeline step types: each turns its form settings into SQL. Global: PipelineSteps.
 // Every step becomes a view named after the step, so later steps (and the SQL step) can use it by name.
-// Staged datasets are views too, under their dataset names.
+// Imported datasets are views too, under their dataset names.
 const PipelineSteps = (() => {
   const q = s => '"' + String(s).replace(/"/g, '""') + '"';
   const lines = s => String(s || '').split('\n').map(l => l.trim()).filter(Boolean);

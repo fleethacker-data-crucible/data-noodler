@@ -132,7 +132,7 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
   aggregate, window and cached tables reserve what they hold; over budget → `QUERY_OUT_OF_MEMORY` (HTTP 507) instead of
   paging the machine. Parallel readers stop starting new row groups while free RAM is below max(512 MB, 10%).
   No disk spilling yet: a sort/join/window must fit the budget.
-- **Resident datasets** (`Storage/ResidentDatasets.cs`): project datasets (`projects/<p>/data/source|staged/<name>/`) are
+- **Resident datasets** (`Storage/ResidentDatasets.cs`): project datasets (`projects/<p>/data/source|imported/<name>/`) are
   loaded into memory on all workers (in the background: when a module page opens a project, on the first read, or on
   `memory/load`). A query reads the in-memory batches when the dataset's files (sizes + write times) still match, else
   it reads the files and reloads in the background. They share `ResidentFraction` (60%) of the budget; the least
@@ -161,7 +161,7 @@ Errors: `{ ok: false, error, code }` with codes like `CSV_INVALID_QUOTE`, `PARQU
 ## 6. Storage: datasets
 
 ```
-data/staged/<name>/  or  data/source/<name>/
+data/imported/<name>/  or  data/source/<name>/
   part-000000.arrow     Arrow IPC file: one record batch per 100k rows, new part every 2M rows (EngineOptions.PartRows)
   dataset.json          { name, version, format: "arrow", rowCount, bytes, columns, partitions: [{ file, rows, bytes }], codec,
                           createdUtc, updatedUtc, lineage?: { pipelineStep, pipelineVersion, upstream: [{ dataset, version }] } }
@@ -191,8 +191,8 @@ data/staged/<name>/  or  data/source/<name>/
 ```
 data/raw/ or X:\… / \\server\share\…   (read in place)
    │  Import: Engine.write({ sql: SELECT <columns> FROM read_csv/read_sqlite/read_dataset(...) })
-   └─ Stage            column choices applied → data/staged/<name>/  (always; input for Pipeline)
-data/staged ──Transform (active SQL query / script)──→ data/source/CLEAN_<name>/
+   └─ Import           column choices applied → data/imported/<name>/  (always; input for Pipeline)
+data/imported ──Transform (active SQL query / script)──→ data/source/CLEAN_<name>/
 data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLite)
 ```
 
@@ -222,13 +222,13 @@ data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLit
   `engine-test.html` = SQL console.
 
 **Light/dark mode:** one global setting, `settings.json` `theme`, chosen in the server panel; pages follow via `js/core/theme.js`.
-Project layout: `projects/<folder>/` with `data/raw`, `data/staged`, `data/source`, `pipeline/`, `dashboard/`, `publish/`, `archives/`.
+Project layout: `projects/<folder>/` with `data/raw`, `data/imported`, `data/source`, `pipeline/`, `dashboard/`, `publish/`, `archives/`.
 
 ## 7b. Chart packages (no widgets)
 
 - No widgets for now (no `widget-studio/`, no `widgets/` folder). Charts are built in D3 Studio: `d3-studio/dev/<id>/` (Save) and `d3-studio/live/<id>/` (Publish copies dev to live). The Dashboard reads ONLY `d3-studio/live` (Dashboard > Charts; registry id `chart-<id>`).
 - One package = `chart.json` manifest (+ `spec.json` = `{ $kind: 'd3', data: inputs, query: { sort, top } }`, `d3-code.js`, `sample.json`, `thumb.svg`, `style.css`). `ChartRegistry.list` = the live charts (`m.chart`) + the built-in Data Grid; `ChartRegistry.scan(<folder>)` lists any folder (D3 Studio uses it for dev).
-- The Data Grid is core app code, not a package folder: `js/grid/data-grid-pkg.js` (`DataGrid.pkg()`: manifest + spec + style), renderer `js/grid/data-grid.js` (`DNGrid`), style `js/grid/data-grid.css` (`.GRID`), `grid-remote.js` (engine paging), `preview-grid.js` (Import / Transform previews). Grids already on a dashboard keep drawing; new ones are not added from the Dashboard.
+- The Data Grid is core app code, not a package folder: `js/grid/data-grid-pkg.js` (`DataGrid.pkg()`: manifest + spec + style), renderer `js/grid/data-grid.js` (`DNGrid`), style `js/grid/data-grid.css` (`.GRID`), `grid-remote.js` (engine paging). Import / Transform previews use `js/grid/data-table.js` (`DataTable`, schema-table look; pop-out `html/table-pop.html`). Grids already on a dashboard keep drawing; new ones are not added from the Dashboard.
 - `style.css` (manifest `"style"`) is the chart's ONLY style, the same wherever it is drawn. `ApexWidget.useStyle(m, box)` puts it in the page with `.CHART` (or `.GRID`) -> `.dn-w-<id>` and tags the box; `--w-*` variables reach the code as `theme` (`ApexWidget.theme(box)`).
 - The manifest drives Chart Settings (`ChartSettings`, `js/charts/chart-settings.js`, in `html/dashboard-settings.html`): `inputs` (each linked to `TABLE.FIELD`; dimension = group by, measure = aggregate) and `options` (`opts.<path>`; `show` hides one).
 - Dashboard item `{ type: "widget" (stored name, kept for old files), pkg, dataset, inputs: { key: { col, agg } }, opts: { path: value }, sort, top }`. The engine runs `ApexWidget.query`; rows are re-keyed by input key and handed to `D3Render` (`js/charts/d3-render.js`, vendored d3 v7.9.0: `d3, data, el, W, H, colors, opts, theme, inputs` + capital accessors). Not linked yet: drawn with no data (axes / grid).

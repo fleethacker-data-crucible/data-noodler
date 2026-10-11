@@ -1,4 +1,4 @@
-// Resident datasets: project datasets (projects/<p>/data/source|staged/<name>/) held in engine memory as columnar
+// Resident datasets: project datasets (projects/<p>/data/source|imported/<name>/) held in engine memory as columnar
 // batches, so every module (Transform, Dashboard, D3 Studio, Publish) queries RAM instead of decoding Parquet again.
 // Parquet stays the on-disk / export format; memory is only a faster copy of it.
 //  - One batch per Parquet row group, in file order: a resident dataset gives the same units, order and answers.
@@ -39,7 +39,7 @@ namespace NativeDataEngine
         public bool Enabled { get { return e.Options.ResidentFraction > 0; } }
         public long Bytes { get { lock (gate) { long b = 0; foreach (Entry x in entries.Values) b += x.Bytes; return b; } } }
 
-        // A project dataset folder that may be held in memory (only data/source and data/staged inside a project).
+        // A project dataset folder that may be held in memory (only data/source and data/imported inside a project).
         public bool Eligible(string full)
         {
             if (!Enabled || full == null || !Directory.Exists(full)) return false;
@@ -47,7 +47,7 @@ namespace NativeDataEngine
             if (rel == full) return false;   // outside the project root
             string[] seg = rel.Split('/');
             return seg.Length == 5 && string.Equals(seg[0], "projects", StringComparison.OrdinalIgnoreCase) && string.Equals(seg[2], "data", StringComparison.OrdinalIgnoreCase) &&
-                (string.Equals(seg[3], "source", StringComparison.OrdinalIgnoreCase) || string.Equals(seg[3], "staged", StringComparison.OrdinalIgnoreCase));
+                (string.Equals(seg[3], "source", StringComparison.OrdinalIgnoreCase) || string.Equals(seg[3], "imported", StringComparison.OrdinalIgnoreCase));
         }
 
         static string Signature(List<string> files, string folder)
@@ -120,7 +120,7 @@ namespace NativeDataEngine
                 try
                 {
                     string full = fulls[i] ?? PathGuard.Project(e.Root, list[i], false);
-                    if (!Eligible(full)) { d["state"] = "skipped"; d["reason"] = "not a project dataset folder (data/source or data/staged)"; r.Add(d); continue; }
+                    if (!Eligible(full)) { d["state"] = "skipped"; d["reason"] = "not a project dataset folder (data/source or data/imported)"; r.Add(d); continue; }
                     List<string> files = Datasets.Files(full);
                     string sig = Signature(files, full);
                     Entry x = Find(full, sig);

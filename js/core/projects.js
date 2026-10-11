@@ -7,7 +7,7 @@
 //   await Projects.trash(folder)                moves it to projects/.trash/
 const Projects = (() => {
   const ROOT = 'projects';
-  const LAYOUT = ['data/raw', 'data/source', 'data/staged', 'data/cache', 'pipeline', 'dashboard', 'publish', 'archives', 'logs'];
+  const LAYOUT = ['data/raw', 'data/source', 'data/imported', 'data/cache', 'pipeline', 'dashboard', 'publish', 'archives', 'logs'];
   const MODULES = ['import', 'pipeline', 'dashboard', 'publish', 'update', 'archives'];
   // Option lists: [stored value, label]. The value is also the badge class.
   const PHASE = [['not-started', 'Not Started'], ['planning', 'Planning'], ['development', 'Development'], ['testing', 'Testing'], ['production', 'Production']];
@@ -116,7 +116,7 @@ const Projects = (() => {
   }
 
   // Datasets (Arrow IPC parts; older ones Parquet): { name, path, parts?, stage, direct?, rows, columns: [{ name, type }], source, imported }
-  //   stage 'staged' = data/staged (Import > Stage; input for Pipeline)
+  //   stage 'imported' = data/imported (Import > Import; input for Pipeline)
   //   stage 'source' = data/source (Import > Import Directly, or Pipeline output; ready for Dashboard)
   //   path = dataset folder (part-NNNNNN.arrow + dataset.json, written by the engine); parts = its part files.
   //   version = dataset.json version (bumped on every rewrite). Older records may point at a single .parquet file.
@@ -142,8 +142,8 @@ const Projects = (() => {
     }
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }
-  // 'staged' | 'source' (older records have no stage: taken from the path; pipeline outputs are 'source').
-  const stageOf = d => d.stage || (d.source?.kind !== 'pipeline' && d.path.includes('/data/staged/') ? 'staged' : 'source');
+  // 'imported' | 'source' (older records have no stage: taken from the path; pipeline outputs are 'source').
+  const stageOf = d => (d.stage === 'staged' ? 'imported' : d.stage) || (d.source?.kind !== 'pipeline' && d.path.includes('/data/imported/') ? 'imported' : 'source');
 
   return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, trashList, restore, emptyTrash, touchModule, upsertDataset, dir, stageOf, sourceDatasets };
 })();
