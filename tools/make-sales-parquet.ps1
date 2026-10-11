@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 # Locate duckdb.exe (PATH first, then local tools folder, else download)
 $duck = (Get-Command duckdb -ErrorAction SilentlyContinue).Source
 if (-not $duck) {
-    $toolDir = Join-Path $PSScriptRoot 'tools\duckdb'
+    $toolDir = Join-Path $PSScriptRoot 'duckdb'
     $duck = Join-Path $toolDir 'duckdb.exe'
     if (-not (Test-Path $duck)) {
         Write-Host "Downloading DuckDB CLI v$DuckDbVersion..."
