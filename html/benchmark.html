@@ -11,6 +11,7 @@
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .bar .sep { flex: 1; }
   .pick { position: relative; }
+  .pick > .dd-wrap > button { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* long picks are cut (full list on hover) */
   .pick .dd-menu { min-width: 210px; max-height: 360px; overflow: auto; }
   .pick .dd-menu label { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
   .pick .dd-menu label:hover { background: var(--sel); }

@@ -26,6 +26,7 @@
     const paint = () => {
       const sel = st[key], all = items.every(i => sel.includes(i.v));
       btn.textContent = `${title}: ${all ? 'All' : sel.length ? items.filter(i => sel.includes(i.v)).map(i => i.short || i.l).join(', ') : 'none'} ▾`;
+      btn.title = btn.textContent.replace(' ▾', '');
       menu.innerHTML = `<label class="all"><input type="checkbox" data-v="*" ${all ? 'checked' : ''}>${key === 'tests' ? 'Run All' : 'All'}</label>` +
         items.map(i => `<label class="${i.bad ? 'bad' : ''}" title="${esc(i.desc || '')}"><input type="checkbox" data-v="${esc(String(i.v))}" ${sel.includes(i.v) ? 'checked' : ''}><span>${esc(i.l)}${i.desc ? `<small>${esc(i.desc)}</small>` : ''}</span></label>`).join('');
       plan();
