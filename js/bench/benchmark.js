@@ -26,7 +26,7 @@
       const sel = st[key], all = items.every(i => sel.includes(i.v));
       btn.textContent = `${title}: ${all ? 'All' : sel.length ? items.filter(i => sel.includes(i.v)).map(i => i.short || i.l).join(', ') : 'none'} ▾`;
       menu.innerHTML = `<label class="all"><input type="checkbox" data-v="*" ${all ? 'checked' : ''}>${key === 'tests' ? 'Run All' : 'All'}</label>` +
-        items.map(i => `<label title="${esc(i.desc || '')}"><input type="checkbox" data-v="${esc(String(i.v))}" ${sel.includes(i.v) ? 'checked' : ''}><span>${esc(i.l)}${i.desc ? `<small>${esc(i.desc)}</small>` : ''}</span></label>`).join('');
+        items.map(i => `<label class="${i.bad ? 'bad' : ''}" title="${esc(i.desc || '')}"><input type="checkbox" data-v="${esc(String(i.v))}" ${sel.includes(i.v) ? 'checked' : ''}><span>${esc(i.l)}${i.desc ? `<small>${esc(i.desc)}</small>` : ''}</span></label>`).join('');
       plan();
     };
     btn.onclick = ev => { ev.stopPropagation(); const was = menu.classList.contains('open'); document.querySelectorAll('.pick .dd-menu.open').forEach(m => m.classList.remove('open')); if (!was && !running) menu.classList.add('open'); };
@@ -213,11 +213,23 @@
     if (saved?.settings) st = { ...st, ...saved.settings };
     if (saved?.results) results = saved.results;
     for (const r of Object.values(results)) for (const t of Object.keys(r.cells)) if (r.cells[t]?.running) r.cells[t] = { err: 'interrupted' };
+    // Pre-calculate which sizes fit in engine memory (popup + progress); the ones that do not are red and spill to disk.
+    let mem = {};
+    if (status) {
+      const dlg = $('memDlg'); dlg.showModal();
+      const say = (t, f) => { $('memMsg').textContent = t; $('memBar').style.width = `${Math.round(f * 100)}%`; };
+      try { say('Reading the engine memory budget', 0.05); mem = await T.memoryPlan(call, status.memory?.budget || 0, say); }
+      catch (e) { log(`Memory pre-calculation failed: ${e.message}`, 'err'); }
+      finally { dlg.close(); }
+      const over = T.SIZES.filter(n => mem[n] && !mem[n].fits);
+      if (over.length) log(`Will not fit in memory (spill to disk, slower): ${over.map(T.sizeLabel).join(', ')} rows.`, 'warn');
+    }
     const threads = Array.from({ length: maxW }, (_, i) => i + 1);
     if (!st.threads.length) st.threads = [...new Set([1, 2, 4, maxW])].filter(t => t <= maxW);
     st.threads = st.threads.filter(t => t <= maxW);
     $('unit').value = st.unit;
-    pick($('pSizes'), 'Rows', T.SIZES.map(v => ({ v, l: `${T.sizeLabel(v)} rows`, short: T.sizeLabel(v) })), 'sizes');
+    pick($('pSizes'), 'Rows', T.SIZES.map(v => ({ v, l: `${T.sizeLabel(v)} rows`, short: T.sizeLabel(v), bad: mem[v] && !mem[v].fits,
+      desc: mem[v] ? `memory tests need ~${UI.bytes(mem[v].need)} of ${UI.bytes(mem[v].room)}${mem[v].fits ? '' : ': does not fit, spills to disk'}` : '' })), 'sizes');
     pick($('pTests'), 'Tests', T.TESTS.map(t => ({ v: t.id, l: t.label, short: t.label.replace(/^(Import|Export|Read\/Write) /, '$1 ').replace('Read/Write', 'R/W'), desc: t.desc })), 'tests');
     pick($('pThreads'), 'Workers', threads.map(v => ({ v, l: `${v} worker${v > 1 ? 's' : ''}`, short: String(v) })), 'threads');
     pick($('pBatches'), 'Rows per batch', T.BATCHES.map(v => ({ v, l: `${T.sizeLabel(v)} rows${v === DEFAULT_BATCH ? ' (default)' : ''}`, short: T.sizeLabel(v) })), 'batches');

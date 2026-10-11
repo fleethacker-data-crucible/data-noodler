@@ -75,6 +75,22 @@ const BenchTests = (() => {
       if (!await exists(`${D}/src.${f}`)) { say(`Making the ${sizeLabel(n)} ${f.toUpperCase()} file`); await job('export', { sql: `SELECT * FROM read_dataset(${lit(`${D}/base`)})`, to: `${D}/src.${f}`, format: f, table: 't' }); }
   }
 
+  // Measures bytes per row of the test table in engine memory (two sample sizes, not saved) and returns, per size,
+  // what the memory tests hold (the table + its copy) against what fits before the engine spills to disk (70% of budget).
+  async function memoryPlan(call, budget, say) {
+    const probes = [50000, 200000], per = [];
+    for (let i = 0; i < probes.length; i++) {
+      say(`Measuring ${sizeLabel(probes[i])} sample rows`, (i + 1) / (probes.length + 1));
+      const r = await call('cache/load', { name: 'bench_probe', sql: baseSql(probes[i]) });
+      per.push(r.bytes / Math.max(1, r.rows));
+      await call('cache/drop', { name: 'bench_probe' }).catch(() => {});
+    }
+    const bpr = Math.max(...per), room = budget * 0.7, plan = {};
+    for (const n of SIZES) { const need = n * bpr * 2; plan[n] = { need, room, fits: need <= room }; }
+    say('Done', 1);
+    return plan;
+  }
+
   // ---- runs one test: returns metrics ----
   // ctx = { n, workers, job(op, body) -> job, call(op, body), say(text) }
   async function run(id, ctx) {
@@ -141,5 +157,5 @@ const BenchTests = (() => {
   const metricsOf = id => id === 'heavy' ? HEAVY.map(([q, l]) => ({ id: q, label: l, kind: 'query' }))
     : id.startsWith('rw-') ? [{ id: `${id}:read`, kind: 'read' }, { id: `${id}:write`, kind: 'write' }] : [{ id, kind: TESTS.find(t => t.id === id).kind }];
 
-  return { DIR, DATA, SIZES, BATCHES, TESTS, HEAVY, sizeLabel, ensureData, run, dropMem, metricsOf };
+  return { memoryPlan, DIR, DATA, SIZES, BATCHES, TESTS, HEAVY, sizeLabel, ensureData, run, dropMem, metricsOf };
 })();
