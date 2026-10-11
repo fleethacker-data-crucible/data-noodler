@@ -294,9 +294,21 @@ namespace NativeDataEngine
                     case Kind.Decimal:
                         {
                             decimal scale = 1; for (int s = 0; s < t.Scale; s++) scale *= 10;
+                            double dscale = (double)scale;
                             for (int i = 0; i < n; i++)
                             {
                                 if (col.IsNull(i)) continue;
+                                // Fast path: the scaled value as a whole number in a long, when it is clearly not near a .5 tie
+                                // and well inside 15 significant digits (so it is exactly what the decimal path gives).
+                                double x = col.F[i] * dscale, r = Math.Round(x);
+                                if (Math.Abs(x) < 1e14 && Math.Abs(Math.Abs(x - Math.Floor(x)) - 0.5) > 1e-6)
+                                {
+                                    long lv = (long)r; int q = p + 16 * i;
+                                    for (int k = 0; k < 8; k++) body[q + k] = (byte)(lv >> (8 * k));
+                                    byte hi = (byte)(lv < 0 ? 0xff : 0);
+                                    for (int k = 8; k < 16; k++) body[q + k] = hi;
+                                    continue;
+                                }
                                 decimal dv; try { dv = decimal.Round((decimal)col.F[i] * scale); } catch (OverflowException) { dv = 0; }
                                 byte[] raw = new BigInteger(dv).ToByteArray();
                                 byte fill = (byte)((raw[raw.Length - 1] & 0x80) != 0 ? 0xff : 0);

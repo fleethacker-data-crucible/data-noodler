@@ -150,9 +150,17 @@ namespace NativeDataEngine
                 case Kind.Decimal:
                     {
                         decimal scale = 1; for (int s = 0; s < t.Scale; s++) scale *= 10;
+                        double dscale = (double)scale;
                         for (int i = 0; i < n; i++)
                         {
                             if (col.IsNull(i)) continue;
+                            if (phys == ParquetTypes.INT64)
+                            {
+                                // Fast path (same value as the decimal path): clearly not a .5 tie, well inside 15 digits.
+                                double x = col.F[i] * dscale;
+                                if (Math.Abs(x) < 1e14 && Math.Abs(Math.Abs(x - Math.Floor(x)) - 0.5) > 1e-6)
+                                { long fv = (long)Math.Round(x); page.Int64(fv); if (fv < lmin) lmin = fv; if (fv > lmax) lmax = fv; hasStats = true; continue; }
+                            }
                             decimal dv;
                             try { dv = decimal.Round((decimal)col.F[i] * scale); } catch (OverflowException) { dv = 0; }
                             if (phys == ParquetTypes.INT64) { long v = (long)dv; page.Int64(v); if (v < lmin) lmin = v; if (v > lmax) lmax = v; hasStats = true; }

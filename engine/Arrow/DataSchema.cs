@@ -466,6 +466,40 @@ namespace NativeDataEngine
             return true;
         }
 
+        // yyyy-MM-dd HH:mm:ss (or T between), optional .fraction (up to 7 digits) -> microseconds, UTC: the same value
+        // ParseTimestamp gives for these forms; anything else returns false (the general parser decides).
+        public static bool FastTimestamp(char[] a, int s, int n, out long micros)
+        {
+            micros = 0;
+            if (n < 19 || (a[s + 10] != ' ' && a[s + 10] != 'T') || a[s + 13] != ':' || a[s + 16] != ':') return false;
+            long days; if (!FastDate(a, s, 10, out days)) return false;
+            int h, mi, se;
+            if (!Two(a, s + 11, out h) || !Two(a, s + 14, out mi) || !Two(a, s + 17, out se) || h > 23 || mi > 59 || se > 59) return false;
+            long frac = 0;
+            if (n > 19)
+            {
+                if (a[s + 19] != '.' || n == 20 || n > 27) return false;
+                int digits = n - 20; long scale = 1;
+                for (int k = 0; k < digits; k++) { char c = a[s + 20 + k]; if (c < '0' || c > '9') return false; frac = frac * 10 + (c - '0'); }
+                for (int k = digits; k < 7; k++) scale *= 10;
+                frac = frac * scale / 10;   // 100 ns ticks -> microseconds
+            }
+            micros = days * 86400000000L + h * 3600000000L + mi * 60000000L + se * 1000000L + frac;
+            return true;
+        }
+        static bool Two(char[] a, int s, out int v) { char x = a[s], y = a[s + 1]; v = 0; if (x < '0' || x > '9' || y < '0' || y > '9') return false; v = (x - '0') * 10 + (y - '0'); return true; }
+        // true / false / t / f / yes / no / y / n / 1 / 0 (any case), as ParseBool, without making a string.
+        public static bool FastBool(char[] a, int s, int n, out bool v)
+        {
+            v = false;
+            if (n == 1) { char c = (char)(a[s] | 0x20); if (c == 't' || c == 'y' || a[s] == '1') { v = true; return true; } if (c == 'f' || c == 'n' || a[s] == '0') return true; return false; }
+            if (n == 4 && (a[s] | 0x20) == 't' && (a[s + 1] | 0x20) == 'r' && (a[s + 2] | 0x20) == 'u' && (a[s + 3] | 0x20) == 'e') { v = true; return true; }
+            if (n == 5 && (a[s] | 0x20) == 'f' && (a[s + 1] | 0x20) == 'a' && (a[s + 2] | 0x20) == 'l' && (a[s + 3] | 0x20) == 's' && (a[s + 4] | 0x20) == 'e') return true;
+            if (n == 3 && (a[s] | 0x20) == 'y' && (a[s + 1] | 0x20) == 'e' && (a[s + 2] | 0x20) == 's') { v = true; return true; }
+            if (n == 2 && (a[s] | 0x20) == 'n' && (a[s + 1] | 0x20) == 'o') return true;
+            return false;
+        }
+
         // Text -> value parsers (CSV, casts). Return false when the text does not fit the type.
         public static bool ParseLong(string s, out long v)
         {

@@ -2,6 +2,15 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: Faster imports and exports
+
+- **CSV read:** timestamps (yyyy-MM-dd HH:mm:ss[.f], space or T) and true / false values parse straight from the
+  record buffer, like numbers and dates already did (no string per value): 5M rows 843k -> about 1.3-1.4M rows/s;
+  CSV import 779k -> 1.27M rows/s.
+- **DECIMAL write (Arrow and Parquet):** values that are clearly not a .5 tie and within 15 digits are written from a
+  long instead of through decimal + BigInteger per value (same bytes; ties and huge values keep the exact path).
+  Arrow dataset write 1.9M -> 2.7M rows/s; Parquet / Arrow import 1.55M -> 1.85M rows/s.
+
 ## 2026-10-11: Parallel full sort
 
 - ORDER BY over all rows sorts one piece per worker at the same time, then merges the pieces in pairs (each merge

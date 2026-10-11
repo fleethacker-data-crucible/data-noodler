@@ -398,6 +398,8 @@ namespace NativeDataEngine
                     case Kind.Int: { long l; if (Values.FastLong(a, st, n, out l)) { b.AddLong(l); return; } break; }
                     case Kind.Double: case Kind.Decimal: { double d; if (Values.FastDouble(null, a, st, n, out d)) { b.AddDouble(d); return; } break; }
                     case Kind.Date: { long d; if (Values.FastDate(a, st, n, out d)) { b.AddLong(d); return; } break; }
+                    case Kind.Timestamp: { long m; if (Values.FastTimestamp(a, st, n, out m)) { b.AddLong(m); return; } break; }
+                    case Kind.Bool: { bool x; if (Values.FastBool(a, st, n, out x)) { b.AddBool(x); return; } break; }
                 }
             }
             Add(b, t, p.Text(c), p.Quoted[c], c, ctx);
