@@ -206,6 +206,9 @@
     } finally {
       live = null; idleAll(); running = false; barOff();
       await setBatch(DEFAULT_BATCH); await T.dropMem(call).catch(() => {});
+      // Done (or stopped): free the engine's memory, as Purge Memory does.
+      try { const r = await call('memory/purge', {}); log(`Memory purged after the run: engine holds ${UI.bytes(r.managed)}.`, 'ok'); }
+      catch (e) { log(`Memory purge after the run failed: ${e.message}`, 'err'); }
       $('stop').disabled = true; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); save();
     }
   });
