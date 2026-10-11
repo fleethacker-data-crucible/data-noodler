@@ -150,13 +150,46 @@ namespace NativeDataEngine
                 Schema = new Schema(fs);
             }
         }
-        public override int Units(ExecCtx ctx) { return 1; }
+        // Parallel read: a table with rowids is cut into rowid ranges (about 200k rows each, up to 64), one unit each, read
+        // on its own read-only connection; units come back in rowid order, the order a plain SELECT * returns. Views and
+        // WITHOUT ROWID tables (no rowid) stay one unit.
+        long[] cuts;   // unit u = rowid in [cuts[u], cuts[u + 1]); null = one unit, plain SELECT *
+        bool planned;
+        readonly object gate = new object();
+        void Plan()
+        {
+            lock (gate)
+            {
+                if (planned) return;
+                planned = true;
+                try
+                {
+                    using (SqliteDb db = new SqliteDb(path, false))
+                    using (SqliteStmt s = db.Prepare("SELECT min(rowid), max(rowid) FROM " + SqliteDb.Q(table)))
+                    {
+                        if (!s.Step() || s.Kind(0) == 5) return;
+                        long lo = s.Long(0), hi = s.Long(1);
+                        long span = hi - lo + 1, k = Math.Max(1, Math.Min(64, span / 200000));
+                        if (k < 2) return;
+                        long[] c = new long[k + 1];
+                        for (long u = 0; u <= k; u++) c[u] = lo + span * u / k;
+                        c[k] = hi + 1;
+                        cuts = c;
+                    }
+                }
+                catch (EngineException) { cuts = null; }   // no rowid (view / WITHOUT ROWID): one unit
+            }
+        }
+        public override int Units(ExecCtx ctx) { Plan(); return cuts == null ? 1 : cuts.Length - 1; }
         public override long KnownRows(ExecCtx ctx) { return -1; }
         public override IEnumerable<Batch> RunUnit(ExecCtx ctx, int unit)
         {
             int w = Schema.Count;
+            Plan();
+            string sql = cuts == null ? "SELECT * FROM " + SqliteDb.Q(table)
+                : "SELECT * FROM " + SqliteDb.Q(table) + " WHERE rowid >= " + cuts[unit] + " AND rowid < " + cuts[unit + 1] + " ORDER BY rowid";
             using (SqliteDb db = new SqliteDb(path, false))
-            using (SqliteStmt s = db.Prepare("SELECT * FROM " + SqliteDb.Q(table)))
+            using (SqliteStmt s = db.Prepare(sql))
             {
                 ColumnBuilder[] cb = New(); int rows = 0;
                 while (s.Step())

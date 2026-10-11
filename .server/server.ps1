@@ -240,7 +240,7 @@ function Start-Site {
 }
 
 # Opens the selected module in $name (default: the Settings browser). Returns an error message or $null.
-# $page (optional, e.g. 'html/engine-bench.html'): open that page instead, for testing; the default is unchanged.
+# $page (optional, e.g. 'html/benchmark.html'): open that page instead, for testing; the default is unchanged.
 # Pages that live in the app shell (they load js/core/embed.js) open as html/app.html?m=<name> directly,
 # so the browser doesn't load the page, get redirected and cancel its half-loaded files.
 function Get-ShellUrl([string]$page) {
@@ -615,7 +615,7 @@ function Read-EngineLog {
 }
 
 # Returns $true if the request was handed to a background job (which closes the response itself).
-# --- browser memory (engine-bench live graph) ---
+# --- memory (Benchmark page memory card) ---
 # Browser tab/process memory plus this server process (where the native engine runs). The process
 # list (via CIM, slow) is refreshed every 5 s; memory is read fresh on each call (fast).
 Add-Type -AssemblyName Microsoft.VisualBasic
@@ -726,7 +726,7 @@ function Handle-Site($req, $res, $rel, $ctx) {
         } else { $res.StatusCode = 403 }
         return $false
     }
-    # Polled 4x a second by the memory graph: not logged.
+    # Polled by the Benchmark page's memory card: not logged.
     if ($rel -eq 'api/mem') {
         try { if (Test-FsRequest $req) { Send-Json $res (Get-BrowserMem) } else { $res.StatusCode = 403 } } catch { $res.StatusCode = 500 }
         return $false

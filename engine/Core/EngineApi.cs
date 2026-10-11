@@ -7,11 +7,12 @@
 //   POST preview  {sql, views, limit, workers}          -> query result + {count}  (sql may be a script)
 //   POST open     {src, table}                          -> {kind, tables, columns, rows, size, modified}
 //   POST write    {sql, views, dest, meta, codec}       -> {jobId}   (partitioned Parquet dataset)
-//   POST export   {sql, views, to, format, table}       -> {jobId}   (csv / parquet / sqlite file)
+//   POST export   {sql, views, to, format, table, workers} -> {jobId}   (csv / parquet / sqlite file)
 //   POST pipeline {datasets, nodes, changed, version}   -> {jobId}
 //   GET  job?id=  /  POST job/cancel?id=  /  GET jobs
 //   POST cache/load {name, sql, views}  /  POST cache/drop {name}     (in-memory tables for the engine bench)
 //   GET  memory  /  POST memory/load {paths, wait}  /  POST memory/drop {path}   (resident project datasets)
+//   GET / POST options {batchRows}                      rows per batch (Benchmark page)
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -124,8 +125,9 @@ namespace NativeDataEngine
                 case "export":
                     {
                         string sql = Need(req, "sql"), to = Need(req, "to"), fmt = Json.Str(req, "format"), table = Json.Str(req, "table");
+                        int workers = (int)Json.Long(req, "workers", 0);
                         Dictionary<string, string> v = Views(req);
-                        Job j = e.Jobs.Start("export", to, jb => e.Export(jb, sql, v, to, fmt, table));
+                        Job j = e.Jobs.Start("export", to, jb => e.Export(jb, sql, v, to, fmt, table, workers));
                         return Json.Write(j.ToJson());
                     }
                 case "pipeline":
@@ -152,6 +154,12 @@ namespace NativeDataEngine
                     }
                 case "cache/load": return Ok(e.CacheLoad(Need(req, "name"), Need(req, "sql"), Views(req), (int)Json.Long(req, "workers", 0)));
                 case "cache/drop": { Dictionary<string, object> d = new Dictionary<string, object>(); d["dropped"] = e.CacheDrop(Json.Str(req, "name")); return Ok(d); }
+                case "options":
+                    {
+                        // Rows per batch (also per row group / record batch written): the Benchmark page tries several.
+                        if (req.ContainsKey("batchRows")) e.Options.BatchRowCount = (int)Math.Max(1000, Math.Min(2000000, Json.Long(req, "batchRows", 100000)));
+                        Dictionary<string, object> d = new Dictionary<string, object>(); d["batchRows"] = e.Options.BatchRowCount; return Ok(d);
+                    }
                 case "memory": return Ok(e.Resident.Info());
                 case "memory/load":
                     {

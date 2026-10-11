@@ -95,6 +95,17 @@ try {
   }
   $x = Rows "SELECT * FROM read_parquet('$tmp/out.parquet') ORDER BY id"
   Check 'parquet export = arrow data' ($x.text -eq $a.text)
+  # SQLite read in parallel (rowid ranges): same values in the same order as the source (no ORDER BY on purpose).
+  $sq = "SELECT range AS id, CAST(range * 7 % 1000 AS INTEGER) AS v, range / 4.0 AS f, CASE WHEN range % 9 = 0 THEN NULL ELSE 'r' || CAST(range % 777 AS VARCHAR) END AS s FROM range(600000)"
+  $jb = New-Object NativeDataEngine.Job('export', 'test')
+  [void]$engine.Export($jb, $sq, $none, "$tmp/big.sqlite", 'sqlite', 't')
+  $want = Rows "$sq"
+  $got = Rows "SELECT * FROM read_sqlite('$tmp/big.sqlite', 't')"
+  Check 'SQLite parallel read = source (values and order)' ($got.text -eq $want.text) "rows $($got.rows) vs $($want.rows)"
+  $one = $engine.Query("SELECT count(*), sum(v), max(s) FROM read_sqlite('$tmp/big.sqlite', 't')", $none, 0, 1, $ct)
+  $many = $engine.Query("SELECT count(*), sum(v), max(s) FROM read_sqlite('$tmp/big.sqlite', 't')", $none, 0, 0, $ct)
+  $t1 = (0..2 | % { [NativeDataEngine.Values]::Text($one.Batches[0].Cols[$_], 0) }) -join '|'; $t2 = (0..2 | % { [NativeDataEngine.Values]::Text($many.Batches[0].Cols[$_], 0) }) -join '|'
+  Check 'SQLite 1 worker = all workers' ($t1 -eq $t2) "$t1 vs $t2"
 
   Write-Host 'Resident datasets (engine memory)'
   $ds = "$proj/data/source/CLEAN_t"

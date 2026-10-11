@@ -45,7 +45,8 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
 | D3 Studio | `html/d3-studio.html` | Build D3 charts (code + inputs linked to TABLE.FIELD); Publish to the Dashboard. |
 | Publish | `html/publish.html` | Web app / PDF / PowerPoint / images of a dashboard; dataset export (CSV / Parquet / SQLite). |
 | Archives | `html/archives.html` | Snapshots of a project, compare, restore. |
-| Benches | `html/engine-bench.html`, `thread-bench.html`, `engine-test.html` | Engine speed by worker count, SQL console. |
+| Benchmark | `html/benchmark.html` (Utilities menu) | Engine speed: imports, exports, reads / writes, heavy queries by rows, batch size and workers. |
+| SQL console | `html/engine-test.html` | Run SQL against the engine. |
 
 ## Tests and benchmarks
 

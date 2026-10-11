@@ -90,8 +90,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `js/pipeline/runner.js` | `PipelineRunner`: `load` (pipeline.json v2), `run` = `Engine.write` of the active query → `data/source/<CLEAN_name>/`. |
 | `js/publish/publisher.js` | `Publisher`: dashboard publishing (Web App, PDF, PowerPoint, images) and dataset exports; shared by Publish and Update. |
 | `js/update/project-update.js` | `ProjectUpdate.run(folder)`: Import (changed sources), Transform, Dashboard caches, Publish, Archive. |
-| `js/mem-monitor.js` | `MemMonitor`: live graph of engine, browser, system memory (`/api/mem`). |
-| `js/test-data-gen.js` | `TestDataGen`: 50-column synthetic data SQL, sizes, part plans (benches). |
+| `js/bench/bench-tests.js`, `js/bench/benchmark.js` | Benchmark page: test data (`test-data/bench/data/<rows>/`), the tests (`BenchTests.run`), and the page (check-box pickers, live cards, results table, saved results, Markdown report, Wipe Test Data). |
 | `css/theme.css`, `assets/fonts/` | Universal theme (see `THEME_GUIDE.md`). |
 
 ### Charts, Data Grid, D3 Studio
@@ -115,7 +114,8 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `import.html`, `transform.html`, `dashboard.html`, `d3-studio.html`, `publish.html`, `archives.html` | Modules. |
 | `dashboard-settings.html`, `dashboard-grid.html`, `grid-pop.html` | Dashboard pop-outs: Chart Settings, Data Grid drill-down, any grid's Pop-out. |
 | `syntax-library.html` | SQL syntax / function reference (Transform's Syntax Library button). |
-| `engine-bench.html`, `thread-bench.html`, `engine-test.html`, `generate-test-parquet-files.html` | Benches (worker counts, profile → `config/engine-profile.json`), SQL console, test datasets in `test-data/gen/`. |
+| `benchmark.html` | Benchmark (Project Manager > Utilities): engine speed by rows, rows per batch and workers. |
+| `engine-test.html` | SQL console. |
 | `app.html` | Redirect only (old shell links → the module page). |
 
 ### Tests, tools, config, data
@@ -125,7 +125,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `tests/sql-cheatsheet.ps1` (+ `-cases.ps1`) | Engine SQL tests: every cheatsheet command in `ref-docs/`, edge cases, Parquet row groups. |
 | `tests/arrow-format.ps1` | Arrow datasets give the same answers as Parquet (all types, NULLs, Unicode, parts, pruning), exports, resident datasets. |
 | `tests/bench-engine.ps1`, `tests/bench-compare.ps1` | Speed per step (import, filter, calculations, group by, joins, sort, window, write, export) for the old engine vs the new one; results in `temp/bench/`. |
-| `config/users.json`, `config/engine-profile.json` | Shared users; saved engine profile. |
+| `config/users.json` | Shared users. |
 | `projects/<folder>/` | Projects (`data/raw`, `data/staged/<ds>/`, `data/source/<ds>/`, `pipeline/`, `dashboard/`, `publish/`, `archives/`, `logs/`). |
 | `ref-docs/` | SQL cheatsheets (test source), engine / D3 Studio design reviews. |
 | `arrow after action report.md` | Report of the Arrow engine work: what changed, old vs new speed, what is left. |

@@ -369,6 +369,11 @@ namespace NativeDataEngine
         // ---------- export ----------
         public Dictionary<string, object> Export(Job j, string sql, Dictionary<string, string> views, string toRel, string format, string table)
         {
+            return Export(j, sql, views, toRel, format, table, 0);
+        }
+        // workers > 0: at most that many workers (benchmarks); 0 = all.
+        public Dictionary<string, object> Export(Job j, string sql, Dictionary<string, string> views, string toRel, string format, string table, int workers)
+        {
             string to = PathGuard.Project(Root, toRel, false);
             format = (format ?? Path.GetExtension(to).TrimStart('.')).ToLowerInvariant();
             Directory.CreateDirectory(Path.GetDirectoryName(to));
@@ -378,7 +383,7 @@ namespace NativeDataEngine
                 QueryStmt q; Catalog cat;
                 Planned p = Plan(sql, views, out q, out cat, j.Cts.Token);
                 if (cat.KnownRows > 0) j.RowsTotal = cat.KnownRows;
-                ExecCtx ctx = Ctx(j, 0, j.Cts.Token);
+                ExecCtx ctx = Ctx(j, workers, j.Cts.Token);
                 long rows = 0;
                 j.Stage = "Exporting " + format.ToUpperInvariant();
                 try

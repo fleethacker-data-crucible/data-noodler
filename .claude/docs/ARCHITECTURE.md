@@ -211,8 +211,10 @@ data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLit
 - **Publish:** self-contained HTML (results embedded); dataset export to CSV / Parquet (single file) / SQLite via `Engine.exportTo`.
 - **Update:** compares source size/modified, re-imports changed sources, then re-runs **only** the pipeline outputs downstream of them.
 - **Archives:** folder copies (datasets are folders).
-- **Benches:** `engine-bench.html` (worker counts, Auto, profile → `config/engine-profile.json`), `thread-bench.html` (worker sweep),
-  `engine-test.html` (SQL console), `generate-test-parquet-files.html` (test datasets via the engine).
+- **Benchmark** (`html/benchmark.html`, Project Manager > Utilities): imports, exports, reads / writes (memory, CSV, Parquet,
+  Arrow, SQLite) and heavy queries for 100k-25M rows, any rows per batch (`POST /api/engine/options {batchRows}`) and 1 .. max
+  workers; live cards, results table, results saved in `test-data/bench/benchmark.json`, reports in `test-data/bench/reports/`.
+  `engine-test.html` = SQL console.
 
 **Light/dark mode:** one global setting, `settings.json` `theme`, chosen in the server panel; pages follow via `js/core/theme.js`.
 Project layout: `projects/<folder>/` with `data/raw`, `data/staged`, `data/source`, `pipeline/`, `dashboard/`, `publish/`, `archives/`.

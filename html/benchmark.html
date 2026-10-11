@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Benchmark</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .bar .sep { flex: 1; }
+  .pick { position: relative; }
+  .pick .dd-menu { min-width: 210px; max-height: 360px; overflow: auto; }
+  .pick .dd-menu label { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .pick .dd-menu label:hover { background: var(--sel); }
+  .pick .dd-menu label.all { border-bottom: 1px solid var(--border); margin-bottom: 4px; font-weight: 600; }
+  .pick .dd-menu small { display: block; color: var(--muted); font-size: 11px; white-space: normal; max-width: 280px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; display: grid; gap: 2px; min-width: 0; }
+  .card label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .card b { font: 400 24px/1.2 var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card small { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card.read b { color: var(--c1); } .card.write b { color: var(--c2); } .card.query b { color: var(--c3); }
+  #results table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #results th, #results td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #results th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; font-size: 12px; z-index: 1; }
+  #results td:nth-child(-n+4), #results th:nth-child(-n+4) { text-align: left; }
+  #results td.v { font-family: var(--mono); }
+  #results td.best { color: var(--ok); font-weight: 600; }
+  #results td.err { color: var(--err); font-family: inherit; font-size: 12px; }
+  #results td.run { color: var(--warn); }
+  #results tr.grp td { background: var(--panel-2); color: var(--text-2); font-weight: 600; text-align: left; }
+  .kind { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+  .kind.read { background: var(--c1); } .kind.write { background: var(--c2); } .kind.query { background: var(--c3); }
+  #results .table-wrap { max-height: calc(100vh - 420px); min-height: 160px; }
+  #status { min-height: 18px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">BM</span><div><h1>Benchmark</h1><div class="sub" id="sub">Engine speed by data size, rows per batch and number of workers</div></div></div>
+  </header>
+  <div class="main stack">
+    <div class="bar">
+      <span class="pick" id="pSizes"></span>
+      <span class="pick" id="pTests"></span>
+      <span class="pick" id="pThreads"></span>
+      <span class="pick" id="pBatches"></span>
+      <label class="field" style="flex-direction:row;align-items:center;gap:6px">Show<select id="unit"><option value="rps">Rows / s</option><option value="ms">Time (ms)</option></select></label>
+      <span class="sep"></span>
+      <button id="run" title="Run the checked tests for every checked size, rows per batch and worker count">Run</button>
+      <button id="stop" class="ghost" disabled title="Stop after cancelling the step that is running">Stop</button>
+      <button id="report" class="ghost" title="Save the results as a Markdown report in test-data/bench/reports/">Save Report</button>
+      <button id="clear" class="ghost" title="Clear the results table (test data stays)">Clear Results</button>
+      <button id="wipe" class="danger" title="Delete every file the tests made (test-data/bench/data). Results and reports stay.">Wipe Test Data</button>
+    </div>
+    <div class="cards">
+      <div class="card read"><label>Read</label><b id="cRead">–</b><small id="sRead">&nbsp;</small></div>
+      <div class="card write"><label>Write</label><b id="cWrite">–</b><small id="sWrite">&nbsp;</small></div>
+      <div class="card query"><label>Query</label><b id="cQuery">–</b><small id="sQuery">&nbsp;</small></div>
+      <div class="card"><label>Engine memory</label><b id="cMem">–</b><small id="sMem">&nbsp;</small></div>
+      <div class="card"><label>Progress</label><b id="cProg">–</b><small id="sProg">&nbsp;</small></div>
+      <div class="card"><label>Elapsed</label><b id="cTime">–</b><small id="sTime">&nbsp;</small></div>
+    </div>
+    <div id="status" class="muted"></div>
+    <div class="progress"><i id="bar"></i></div>
+    <div id="results"></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/bench/bench-tests.js"></script>
+<script src="../js/bench/benchmark.js"></script>
+</body>
+</html>
