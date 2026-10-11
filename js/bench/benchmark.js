@@ -61,24 +61,20 @@
   }, 500);
 
   // ---- progress bar ----
-  // The bar shows the step running (a test or a file): it fills 0 -> 100% and starts again at 0 for the next one, and
-  // is back at 0 when everything is done (the Progress card counts the steps). Inside a step, part(a, b, rows, expectMs) marks the share [a, b]
+  // The bar shows the whole run (every selected test, or every file being generated): (steps done + the step running)
+  // / steps, and drops back to 0 when everything is done. Inside a step, part(a, b, rows, expectMs) marks the share [a, b]
   // being worked: an engine job moves it by its rows processed (out of rows); a call with no progress of its own
   // (queries, loads into memory) moves it by elapsed time against expectMs, easing toward b until it returns.
   const P = { on: false, done: 0, total: 1, a: 0, b: 0, rows: 0, expect: 1000, t0: 0, frac: 0 };
-  // New step: the bar drops straight to 0 (no slide) and stays there until the step's first part starts.
-  function steps(done, total) {
-    P.on = true; P.done = done; P.total = Math.max(1, total);
-    P.a = 0; P.b = 0; P.rows = 0; P.frac = 0;
-    const bar = $('bar'); bar.style.transition = 'none'; bar.style.width = '0%'; void bar.offsetWidth; bar.style.transition = '';
-  }
+  // New step: the bar sits at (steps done) / steps until the step's first part starts.
+  function steps(done, total) { P.on = true; P.done = done; P.total = Math.max(1, total); P.a = 0; P.b = 0; P.rows = 0; P.frac = 0; paintBar(); }
   function part(a, b, rows, expectMs) { P.a = a; P.b = b; P.rows = rows || 0; P.expect = Math.max(200, expectMs || (rows ? rows / 3e6 * 1000 : 1000)); P.t0 = performance.now(); P.frac = null; }
   function paintBar() {
     if (!P.on) return;
     // A job's own rows (held just short of the end until it returns); else elapsed time, easing toward 90%.
     const f = P.frac != null ? Math.min(0.98, P.frac) : 0.9 * (1 - Math.exp(-(performance.now() - P.t0) / P.expect));
     const inner = P.a + (P.b - P.a) * Math.max(0, f);
-    $('bar').style.width = `${(100 * Math.min(1, inner)).toFixed(1)}%`;
+    $('bar').style.width = `${(100 * Math.min(1, (P.done + inner) / P.total)).toFixed(1)}%`;
   }
   function barOff() { P.on = false; const bar = $('bar'); bar.style.transition = 'none'; bar.style.width = '0%'; void bar.offsetWidth; bar.style.transition = ''; }
   setInterval(paintBar, 100);
@@ -147,10 +143,9 @@
     const prog = (label) => { $('cProg').textContent = `${done} / ${total}`; $('sProg').textContent = label; $('status').textContent = label; };
     const ctxBase = { call, job, part, stopped: () => stopped, say: t => prog(t) };
     // Test data made during a run: the bar shows that file's progress, then goes back to the run's.
-    const prep = (t, rows) => { prog(t); log(t); steps(0, 1); part(0, 1, rows); };
+    const prep = t => { prog(t); log(t); };
     // Loading the table into memory before the memory / query tests (not timed): the bar shows that load, then the step.
-    ctxBase.loading = rows => { steps(0, 1); part(0, 1, 0, rows / 5e6 * 1000); };
-    ctxBase.loaded = () => steps(done, total);
+
     try {
       for (const n of st.sizes) {
         if (stopped) break;
