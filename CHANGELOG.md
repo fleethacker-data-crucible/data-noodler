@@ -2,6 +2,14 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: Faster Parquet writer (same bytes)
+
+- Numbers go straight into the page buffer (bulk copy when there are no NULLs) instead of one buffer call per byte;
+  a column with no NULLs writes its definition levels as one run (no per-row array); dictionary building finds shared
+  strings by reference and stops as soon as a dictionary can no longer be used (mostly-unique text was built to the
+  end, then thrown away); page buffers start at about their final size. Output files are byte-for-byte the same
+  (SHA-256 checked, every type, with / without NULLs). Parquet export 5M rows: about 3.0M -> 3.8M rows/s.
+
 ## 2026-10-11: Fast paths for every type (text output, NULL text, Parquet text, in-memory text)
 
 - **Text of values** (CSV / SQLite export, Data Grid, JSON): dates, timestamps, DECIMAL and DOUBLE are written by hand

@@ -78,27 +78,34 @@ namespace NativeDataEngine
         static EncodedChunk Chunk(Column col, DataType t, int n, int codec)
         {
             EncodedChunk ch = new EncodedChunk(); ch.Values = n;
-            int[] def = new int[n]; int nonNull = 0;
-            for (int i = 0; i < n; i++) { if (!col.IsNull(i)) { def[i] = 1; nonNull++; } }
+            int nonNull = 0;
+            if (col.Nulls == null) nonNull = n; else for (int i = 0; i < n; i++) if (!col.Nulls[i]) nonNull++;
             ch.Nulls = n - nonNull;
             ByteBuf levels = new ByteBuf(n / 8 + 16);
-            ByteBuf lv = new ByteBuf(n / 8 + 16); Rle.Encode(lv, def, n, 1);
+            ByteBuf lv = new ByteBuf(n / 8 + 16);
+            if (nonNull == n && n >= 8) { lv.Varint((ulong)n << 1); lv.Byte(1); }   // no NULLs: one run of 1s (what Rle.Encode writes)
+            else { int[] def = new int[n]; for (int i = 0; i < n; i++) if (!col.IsNull(i)) def[i] = 1; Rle.Encode(lv, def, n, 1); }
             levels.Int32(lv.N); levels.Bytes(lv.B, 0, lv.N);
 
             ByteBuf page = new ByteBuf(Math.Max(64, nonNull * 8));
-            ByteBuf output = new ByteBuf(1024);
+            ByteBuf output = new ByteBuf(256 + n / 4 + (col.S == null ? 9 * n : 0));   // about the final size: no regrowth copies
             int phys = ParquetTypes.Physical(t);
 
             // Text with repeats: dictionary page + RLE_DICTIONARY indices.
             if (t.Kind == Kind.String && nonNull > 0)
             {
                 Dictionary<string, int> dict = new Dictionary<string, int>(StringComparer.Ordinal); List<string> order = new List<string>();
+                Dictionary<object, int> byRef = new Dictionary<object, int>(RefEq.Instance);   // repeated values are usually one shared string
                 int[] idx = new int[nonNull]; int k = 0; long dictBytes = 0; bool useDict = true;
                 for (int i = 0; i < n && useDict; i++)
                 {
                     if (col.IsNull(i)) continue;
                     string s = col.S[i]; int id;
-                    if (!dict.TryGetValue(s, out id)) { id = order.Count; dict[s] = id; order.Add(s); dictBytes += 4 + s.Length; if (dictBytes > (1 << 20) || order.Count > 100000) useDict = false; }
+                    if (!byRef.TryGetValue(s, out id))
+                    {
+                        if (!dict.TryGetValue(s, out id)) { id = order.Count; dict[s] = id; order.Add(s); dictBytes += 4 + s.Length; if (dictBytes > (1 << 20) || order.Count > 100000 || order.Count >= nonNull * 0.7) useDict = false; }   // can no longer be used: stop now
+                        if (byRef.Count < 200000) byRef[s] = id;
+                    }
                     idx[k++] = id;
                 }
                 if (useDict && order.Count < nonNull * 0.7)
@@ -132,21 +139,35 @@ namespace NativeDataEngine
                         break;
                     }
                 case Kind.Int: case Kind.Date: case Kind.Timestamp:
-                    for (int i = 0; i < n; i++)
                     {
-                        if (col.IsNull(i)) continue;
-                        long v = col.I[i]; if (v < lmin) lmin = v; if (v > lmax) lmax = v; hasStats = true;
-                        if (phys == ParquetTypes.INT32) page.Int32((int)v); else page.Int64(v);
+                        long[] I = col.I; bool[] nl = col.Nulls;
+                        int w = phys == ParquetTypes.INT32 ? 4 : 8;
+                        page.Need(w * nonNull); byte[] B = page.B; int at = page.N;
+                        if (nl == null && w == 8) { Buffer.BlockCopy(I, 0, B, at, 8 * n); at += 8 * n; }
+                        for (int i = 0; i < n; i++)
+                        {
+                            if (nl != null && nl[i]) continue;
+                            long v = I[i]; if (v < lmin) lmin = v; if (v > lmax) lmax = v;
+                            if (w == 4) { B[at] = (byte)v; B[at + 1] = (byte)(v >> 8); B[at + 2] = (byte)(v >> 16); B[at + 3] = (byte)(v >> 24); at += 4; }
+                            else if (nl != null) { for (int k = 0; k < 8; k++) B[at + k] = (byte)(v >> (8 * k)); at += 8; }
+                        }
+                        page.N = at; hasStats = nonNull > 0;
+                        break;
                     }
-                    break;
                 case Kind.Double:
-                    for (int i = 0; i < n; i++)
                     {
-                        if (col.IsNull(i)) continue;
-                        double v = col.F[i]; if (!double.IsNaN(v)) { if (v < dmin) dmin = v; if (v > dmax) dmax = v; hasStats = true; }
-                        page.Double(v);
+                        double[] F = col.F; bool[] nl = col.Nulls;
+                        page.Need(8 * nonNull); byte[] B = page.B; int at = page.N;
+                        if (nl == null) { Buffer.BlockCopy(F, 0, B, at, 8 * n); at += 8 * n; }
+                        for (int i = 0; i < n; i++)
+                        {
+                            if (nl != null && nl[i]) continue;
+                            double v = F[i]; if (!double.IsNaN(v)) { if (v < dmin) dmin = v; if (v > dmax) dmax = v; hasStats = true; }
+                            if (nl != null) { long x = BitConverter.DoubleToInt64Bits(v); for (int k = 0; k < 8; k++) B[at + k] = (byte)(x >> (8 * k)); at += 8; }
+                        }
+                        page.N = at;
+                        break;
                     }
-                    break;
                 case Kind.Decimal:
                     {
                         decimal scale = 1; for (int s = 0; s < t.Scale; s++) scale *= 10;
@@ -201,6 +222,13 @@ namespace NativeDataEngine
             return mag;
         }
 
+        // Reference equality (shared strings): one lookup without hashing the text.
+        sealed class RefEq : IEqualityComparer<object>
+        {
+            public static readonly RefEq Instance = new RefEq();
+            public new bool Equals(object a, object b) { return ReferenceEquals(a, b); }
+            public int GetHashCode(object o) { return System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(o); }
+        }
         static byte[] Trim(ByteBuf b) { byte[] r = new byte[b.N]; Buffer.BlockCopy(b.B, 0, r, 0, b.N); return r; }
 
         // pageType 0 = data v1, 2 = dictionary. encoding = value encoding.
