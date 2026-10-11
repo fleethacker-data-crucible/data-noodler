@@ -60,6 +60,23 @@
     if (running) $('cTime').textContent = fmtS(performance.now() - runT0);
   }, 500);
 
+  // ---- worker activity lights: one per engine worker (green idle, blue reading / computing, red writing) ----
+  // Threads outside the pool that are writing (SQLite pieces / merge) light idle slots red.
+  let lightsBusy = false;
+  setInterval(async () => {
+    if (lightsBusy || document.hidden) return;
+    lightsBusy = true;
+    try {
+      const r = await Engine.call('workers');
+      const st2 = r.states.slice(); let extra = r.writers || 0;
+      for (let i = 0; i < st2.length && extra > 0; i++) if (st2[i] === 0) { st2[i] = 2; extra--; }
+      const host = $('lights');
+      if (host.children.length !== st2.length) host.innerHTML = st2.map((_, i) => `<i title="Worker ${i + 1}"></i>`).join('');
+      st2.forEach((v, i) => { const c = `l${v}`; if (host.children[i].className !== c) host.children[i].className = c; });
+    } catch { $('lights').innerHTML = ''; }
+    finally { lightsBusy = false; }
+  }, 150);
+
   // ---- progress bar ----
   // The bar shows the whole run (every selected test, or every file being generated): (steps done + the step running)
   // / steps, and drops back to 0 when everything is done. Inside a step, part(a, b, rows, expectMs) marks the share [a, b]

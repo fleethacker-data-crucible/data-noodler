@@ -62,7 +62,7 @@ namespace NativeDataEngine
             }
             catch { }
             finally { try { res.Close(); } catch { } }
-            if (op != "status" && op != "job" && op != "jobs")
+            if (op != "status" && op != "job" && op != "jobs" && op != "workers")   // polled: not logged
                 EngineLog.Write("req", ctx.Request.HttpMethod + "|" + code + "|" + body.Length + "|" + sw.ElapsedMilliseconds + "|/api/engine/" + op);
         }
 
@@ -91,6 +91,12 @@ namespace NativeDataEngine
             switch (op)
             {
                 case "status": return Json.Write(e.Status());
+                case "workers":
+                    {
+                        // Activity lights: per worker 0 idle, 1 reading / computing, 2 writing; writers = writing threads outside the pool.
+                        Dictionary<string, object> d = new Dictionary<string, object>();
+                        d["states"] = e.Pool.States(); d["writers"] = WorkerPool.Writers; return Ok(d);
+                    }
                 case "query":
                     {
                         Dictionary<string, object> spec = Json.Obj(req, "query");

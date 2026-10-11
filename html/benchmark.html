@@ -35,6 +35,15 @@
   .kind.read { background: var(--c1); } .kind.write { background: var(--c2); } .kind.query { background: var(--c3); }
   #results .table-wrap { max-height: calc(100vh - 420px); min-height: 160px; }
   #status { min-height: 18px; }
+  .lights { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .lights .lbl { text-transform: uppercase; letter-spacing: .06em; }
+  #lights { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+  #lights i, .lights .key i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: var(--border); transition: background .1s; }
+  .lights .key { display: inline-flex; align-items: center; gap: 4px; }
+  .lights .key i { width: 10px; height: 10px; margin-left: 8px; }
+  #lights i.l0, .lights i.l0 { background: var(--ok); }
+  #lights i.l1, .lights i.l1 { background: var(--blue); }
+  #lights i.l2, .lights i.l2 { background: var(--err); }
   .pick .dd-menu label.bad, .pick .dd-menu label.bad small { color: var(--err); }
   #memDlg .body { gap: 10px; }
   .gen { display: grid; gap: 8px; max-height: 50vh; overflow: auto; }
@@ -81,6 +90,10 @@
       <div class="card"><label>Engine memory</label><b id="cMem">–</b><small id="sMem">&nbsp;</small></div>
       <div class="card"><label>Progress</label><b id="cProg">–</b><small id="sProg">&nbsp;</small></div>
       <div class="card"><label>Elapsed</label><b id="cTime">–</b><small id="sTime">&nbsp;</small></div>
+    </div>
+    <div class="lights" title="Engine worker threads: green = ready / idle, blue = reading or computing, red = writing">
+      <span class="lbl">Workers</span><span id="lights"></span>
+      <span class="key"><i class="l0"></i>Idle<i class="l1"></i>Reading<i class="l2"></i>Writing</span>
     </div>
     <div id="status" class="muted"></div>
     <div class="progress"><i id="bar"></i></div>

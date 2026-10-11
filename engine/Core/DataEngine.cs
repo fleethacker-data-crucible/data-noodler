@@ -352,7 +352,7 @@ namespace NativeDataEngine
             Schema s = root.Schema;
             Action<Batch> submit = rg =>
             {
-                q.Enqueue(Pool.Submit(() => encode(rg)));
+                q.Enqueue(Pool.Submit(() => encode(rg), true));
                 while (q.Count >= maxInflight || (q.Count > 0 && !Mem.RoomForMore())) append(q.Dequeue().Wait(ctx.Ct));
             };
             foreach (Batch b0 in root.Run(ctx))

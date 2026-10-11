@@ -262,6 +262,7 @@ namespace NativeDataEngine
                 db.Exec("DROP TABLE IF EXISTS " + SqliteDb.Q(table));
                 db.Exec("CREATE TABLE " + SqliteDb.Q(table) + " (" + string.Join(", ", cols) + ")");
                 if (k == 1)
+                using (WorkerPool.Writing())
                 {
                     db.Exec("BEGIN");
                     long n1 = 0;
@@ -287,6 +288,7 @@ namespace NativeDataEngine
                         {
                             try
                             {
+                                using (WorkerPool.Writing())
                                 using (SqliteDb pdb = OpenFast(piece))
                                 {
                                     pdb.Exec("BEGIN");
@@ -334,20 +336,23 @@ namespace NativeDataEngine
                     // SQLite attaches at most 10 files at once, so pieces are attached as their slices come up (the 9 most
                     // recent stay attached). ATTACH is not allowed inside a transaction; with no journal and no syncs each
                     // copy commits on its own at no extra cost.
-                    List<long> open = new List<long>();
-                    foreach (long[] r in ranges)
+                    using (WorkerPool.Writing())
                     {
-                        if (!open.Contains(r[0]))
+                        List<long> open = new List<long>();
+                        foreach (long[] r in ranges)
                         {
-                            if (open.Count >= 9) { db.Exec("DETACH DATABASE p" + open[0]); open.RemoveAt(0); }
-                            db.Exec("ATTACH DATABASE '" + Path.Combine(dir, "p" + r[0] + ".sqlite").Replace("'", "''") + "' AS p" + r[0]);
-                            open.Add(r[0]);
+                            if (!open.Contains(r[0]))
+                            {
+                                if (open.Count >= 9) { db.Exec("DETACH DATABASE p" + open[0]); open.RemoveAt(0); }
+                                db.Exec("ATTACH DATABASE '" + Path.Combine(dir, "p" + r[0] + ".sqlite").Replace("'", "''") + "' AS p" + r[0]);
+                                open.Add(r[0]);
+                            }
+                            else { open.Remove(r[0]); open.Add(r[0]); }
+                            db.Exec("INSERT INTO main." + SqliteDb.Q(table) + " SELECT * FROM p" + r[0] + ".s" + r[3]);
+                            ctx.Ct.ThrowIfCancellationRequested();
                         }
-                        else { open.Remove(r[0]); open.Add(r[0]); }
-                        db.Exec("INSERT INTO main." + SqliteDb.Q(table) + " SELECT * FROM p" + r[0] + ".s" + r[3]);
-                        ctx.Ct.ThrowIfCancellationRequested();
+                        foreach (long w in open) db.Exec("DETACH DATABASE p" + w);
                     }
-                    foreach (long w in open) db.Exec("DETACH DATABASE p" + w);
                     return next;
                 }
                 finally { DatasetWriter.TryDelete(dir); }

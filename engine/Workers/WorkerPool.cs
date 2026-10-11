@@ -11,6 +11,7 @@ namespace NativeDataEngine
     {
         public readonly string Id;
         public readonly Action Action;
+        public bool Write;   // shown as writing (encoding output) in the worker activity lights
         public WorkItem(string id, Action action) { Id = id; Action = action; }
     }
 
@@ -37,6 +38,14 @@ namespace NativeDataEngine
         private volatile bool disposed;
         private int busy;
         [ThreadStatic] private static bool onWorker;   // true on pool threads: nested parallel work runs inline (no deadlock)
+        // Activity lights (Benchmark page): per worker 0 = idle, 1 = reading / computing, 2 = writing. Threads outside
+        // the pool that write (SQLite piece writers, the SQLite merge) count in Writers while they work.
+        private readonly int[] states;
+        private static int writers;
+        public int[] States() { return (int[])states.Clone(); }
+        public static int Writers { get { return Volatile.Read(ref writers); } }
+        public static IDisposable Writing() { Interlocked.Increment(ref writers); return new Scope(); }
+        sealed class Scope : IDisposable { int done; public void Dispose() { if (Interlocked.Exchange(ref done, 1) == 0) Interlocked.Decrement(ref writers); } }
         public static bool OnWorker { get { return onWorker; } }
 
         public int WorkerCount { get { return threads.Count; } }
@@ -48,9 +57,11 @@ namespace NativeDataEngine
             if (workerCount < 1) throw new ArgumentOutOfRangeException("workerCount");
             queue = new BlockingCollection<WorkItem>(new ConcurrentQueue<WorkItem>());
             threads = new List<Thread>(workerCount);
+            states = new int[workerCount];
             for (int i = 0; i < workerCount; i++)
             {
-                Thread t = new Thread(Loop);
+                int me = i;
+                Thread t = new Thread(() => Loop(me));
                 t.IsBackground = true;
                 t.Name = "DataWorker-" + i;
                 threads.Add(t);
@@ -64,18 +75,21 @@ namespace NativeDataEngine
             queue.Add(item);
         }
 
-        public Work<T> Submit<T>(Func<T> fn)
+        public Work<T> Submit<T>(Func<T> fn) { return Submit(fn, false); }
+        public Work<T> Submit<T>(Func<T> fn, bool write)
         {
             Work<T> w = new Work<T>();
-            Enqueue(new WorkItem(null, () =>
+            WorkItem it = new WorkItem(null, () =>
             {
                 try { w.Set(fn()); }
                 catch (Exception e) { w.Fail(e); }
-            }));
+            });
+            it.Write = write;
+            Enqueue(it);
             return w;
         }
 
-        private void Loop()
+        private void Loop(int me)
         {
             onWorker = true;
             // The item is run in its own method and dropped before waiting for the next one: an idle worker must not keep
@@ -83,7 +97,9 @@ namespace NativeDataEngine
             WorkItem item;
             while (queue.TryTake(out item, Timeout.Infinite))
             {
+                states[me] = item.Write ? 2 : 1;
                 Run(item);
+                states[me] = 0;
                 item = null;
             }
         }
