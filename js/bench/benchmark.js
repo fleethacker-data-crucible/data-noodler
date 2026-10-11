@@ -46,19 +46,19 @@
 
   // ---- cards ----
   // Read / Write / Query cards are live only: while that kind of step runs they show its elapsed time (Time) or its
-  // rows per second so far (Rows / s); otherwise -- or 0 r/s. Nothing is kept from earlier steps.
+  // rows per second so far (Rows / s); otherwise 0 s or 0 r/s. Nothing is kept from earlier steps.
   const cardId = kind => kind === 'read' ? 'Read' : kind === 'write' ? 'Write' : 'Query';
   function card(kind, ms, rows, note) {
     $('c' + cardId(kind)).textContent = st.unit === 'ms' ? fmtS(ms) : fmtR(ms > 0 ? (rows || 0) / ms * 1000 : 0);
     $('s' + cardId(kind)).textContent = note || '00a0';
   }
-  function idle(kind) { $('c' + cardId(kind)).textContent = st.unit === 'ms' ? '--' : '0 r/s'; $('s' + cardId(kind)).textContent = '00a0'; }
+  function idle(kind) { $('c' + cardId(kind)).textContent = st.unit === 'ms' ? '0 s' : '0 r/s'; $('s' + cardId(kind)).textContent = '00a0'; }
   const idleAll = () => ['read', 'write', 'query'].forEach(idle);
   setInterval(async () => {
     try {
       const r = await fetch('/api/mem', { headers: { 'X-DN-Token': window.DN_TOKEN || '' }, cache: 'no-store' }).then(r => r.json());
       $('cMem').textContent = UI.bytes(r.engine);
-      $('sMem').textContent = `system free ${UI.bytes(r.sysFree)} of ${UI.bytes(r.sysTotal)}`;
+      $('sMem').textContent = `System free ${UI.bytes(r.sysFree)} of ${UI.bytes(r.sysTotal)}`;
     } catch {}
     if (running) $('cTime').textContent = fmtS(performance.now() - runT0);
   }, 500);
