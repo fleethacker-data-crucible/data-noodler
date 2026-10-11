@@ -1,13 +1,13 @@
 // Chart Builder (html/chart-builder.html): the simple way to make a chart. Pick a chart type, pick a dataset, drag its
 // fields onto the slots (Category, Value ...), set colours and a few settings; Code shows the D3 code behind it, which
 // can be edited or replaced with code from the web (the chart is then "custom": the chart type no longer rewrites it).
-// It saves the same chart package as D3 Studio (d3-studio/dev/<id>/; Publish copies it to d3-studio/live/<id>/ for
+// It saves the same chart package as D3 Studio (chart-builder/dev/<id>/; Publish copies it to chart-builder/live/<id>/ for
 // Dashboard > Charts), plus chart.json "builder" { template, custom, links, size } so it reopens here as it was.
 (() => {
   const { $, esc } = UI;
   const DEV = ChartRegistry.CHARTS_DEV, LIVE = ChartRegistry.CHARTS_LIVE, G = 24;
-  const CATS = ['Bar', 'Line & Area', 'Pie & Donut', 'Scatter', 'Hierarchy', 'Network', 'Map', 'Tables', 'Controls', 'Other'];
-  const CAT_OF = { bar: 'Bar', hbar: 'Bar', line: 'Line & Area', area: 'Line & Area', scatter: 'Scatter', pie: 'Pie & Donut', donut: 'Pie & Donut' };
+  // Category (Dashboard > Charts group) = the chart type for now: Column, Bar, Line ... (code-only charts: Other).
+  const catOf = () => tpl?.label || 'Other';
   const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, DATE = /DATE|TIME/i;
 
   // ---- state ----
@@ -51,11 +51,12 @@
     const cols = columns().filter(c => !q || c.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
     $('fields').innerHTML = cols.map(c => { const k = kindOf(c.type); return `<div class="chip" draggable="true" data-col="${esc(c.name)}" title="${esc(c.name)} (${esc(c.type)})"><span class="t ${k}">${k === 'num' ? '#' : k === 'date' ? 'D' : 'Aa'}</span><span>${esc(c.name)}</span></div>`; }).join('');
     $('fhint').hidden = !!columns().length && !q;
-    if (!source) $('fhint').textContent = 'Pick a dataset, then drag its fields onto the slots above the chart (or straight onto the chart).';
+    if (!source) $('fhint').textContent = 'Pick a dataset, then drag its fields onto X (under the chart) and Y (left of it), or straight onto the chart.';
     else if (q && !cols.length) { $('fhint').hidden = false; $('fhint').textContent = 'No field matches.'; }
   }
   $('fq').oninput = drawFields;
-  $('fields').addEventListener('dragstart', e => { const c = e.target.closest('.chip'); if (c) { e.dataTransfer.setData('text/x-field', c.dataset.col); e.dataTransfer.effectAllowed = 'copy'; } });
+  $('fields').addEventListener('dragstart', e => { const c = e.target.closest('.chip'); if (c) { e.dataTransfer.setData('text/x-field', c.dataset.col); e.dataTransfer.effectAllowed = 'copy'; document.body.classList.add('dragging'); } });
+  $('fields').addEventListener('dragend', () => document.body.classList.remove('dragging'));
   // Double-click a field: it goes into the first empty slot that suits it.
   $('fields').addEventListener('dblclick', e => { const c = e.target.closest('.chip'); if (c) autoPlace(c.dataset.col); });
 
@@ -101,7 +102,9 @@
   $('types').onclick = async e => {
     const t = ChartTemplates.get(e.target.closest('[data-t]')?.dataset.t); if (!t || t === tpl) return;
     if (custom && !await UI.confirm(`Switch to ${t.label}? The code changes you made are replaced by the ${t.label} chart's code.`, { ok: 'Switch' })) return;
-    useTemplate(t);
+    // Quick cross-fade: the old chart fades out, the new one fades in (drawn at once, not morphed from the old one).
+    $('pv').classList.add('fade');
+    setTimeout(() => { still = true; useTemplate(t); drawNow(); still = false; requestAnimationFrame(() => $('pv').classList.remove('fade')); }, 120);
   };
   function useTemplate(t) {
     // Fields stay on the slot with the same key (x, y): a Column chart becomes a Line chart with the same data.
@@ -110,9 +113,8 @@
     for (const k of Object.keys(links)) { const i = inputs.find(x => x.key === k); if (!i) delete links[k]; else if (i.role === 'measure' && i.agg === 'none') links[k].agg = 'none'; else if (i.role === 'measure' && links[k].agg === 'none') links[k].agg = i.agg || 'sum'; else if (i.role !== 'measure') delete links[k].agg; }
     if (t.sort) sort = t.sort; else if (sort === 'label' && !t.sort) sort = 'desc';
     top = t.top || (top >= 1000 ? 20 : top);
-    if (!$('cat').dataset.touched) $('cat').value = CAT_OF[t.id] || 'Other';
-    if (editor) editor.value = code;
-    drawTypes(); drawOpts(); drawSlots(); drawCustom(); loadData();
+    pushCode();
+    drawTypes(); drawOpts(); drawSlots(); drawCustom(); syncCat(); loadData();
   }
 
   // ---- colours and settings ----
@@ -129,46 +131,62 @@
   $('opts').onchange = e => { const p = e.target.dataset.p; if (p) { opts[p] = e.target.checked; draw(); } };
   $('sort').onchange = () => { sort = $('sort').value; loadData(); };
   $('top').onchange = () => { top = Math.max(1, +$('top').value || 20); loadData(); };
-  $('cat').innerHTML = CATS.map(c => `<option>${c}</option>`).join('');
-  $('cat').onchange = () => { $('cat').dataset.touched = '1'; };
+  const syncCat = () => {};   // the category is the chart type picked (catOf); nothing to show
 
-  // ---- code drawer ----
-  let editor = null;
+  // ---- code: its own window (html/chart-code.html), out of the way. It works through window.ChartCode below and
+  //      gets every change made here (chart type switched, chart opened). ----
+  let codeWin = null;
+  const subs = new Set();
+  const pushCode = () => subs.forEach(f => { try { f(); } catch { subs.delete(f); } });
+  window.ChartCode = {
+    get code() { return code; },
+    get custom() { return custom; },
+    get title() { return $('name').value.trim() || 'New chart'; },
+    vars: () => `Ready made: data (rows), ${inputs.map(i => `${i.key.toUpperCase()}(d) = ${i.label}`).join(', ')}, W, H, colors[0..7], opts, theme`,
+    set(v) { if (v === code) return; code = v; if (!custom) { custom = true; drawCustom(); } draw(); },
+    async reset() {
+      if (!tpl) return UI.toast('This chart was made as code: it has no chart type to go back to. Pick one on the right to start from it.');
+      if (custom && !await UI.confirm("Throw away your code changes and use the chart type's code again?", { danger: true, ok: 'Reset' })) return;
+      useTemplate(tpl);
+    },
+    subscribe(f) { subs.add(f); return () => subs.delete(f); },
+  };
   $('codeBtn').onclick = () => {
-    $('drawer').hidden = !$('drawer').hidden;
-    if (!$('drawer').hidden && !editor) {
-      editor = SqlEditor.mount($('code'), { lang: 'js', onChange: () => { if (editor.value === code) return; code = editor.value; if (!custom) { custom = true; drawCustom(); } draw(); } });
-      editor.value = code;
-    }
-    $('vars').textContent = `Ready made: data (rows), ${inputs.map(i => `${i.key.toUpperCase()}(d) = ${i.label}`).join(', ')}, W, H, colors[0..7], opts, theme`;
-    layout();
+    if (codeWin && !codeWin.closed) return codeWin.focus();
+    const W = Math.min(900, screen.availWidth), H = Math.min(800, screen.availHeight), L = (screen.availLeft ?? 0) + screen.availWidth - W, T = screen.availTop ?? 0;
+    codeWin = window.open('chart-code.html', 'dn-chart-code', `popup,width=${W},height=${H},left=${L},top=${T}`);
+    if (!codeWin) UI.toast('The browser blocked the code window. Allow pop-ups for this site.', 'err');
   };
-  $('closeCode').onclick = () => { $('drawer').hidden = true; layout(); };
-  $('reset').onclick = async () => {
-    if (!tpl) return UI.toast('This chart was made as code: it has no chart type to go back to. Pick one on the right to start from it.');
-    if (custom && !await UI.confirm('Throw away your code changes and use the chart type\'s code again?', { danger: true, ok: 'Reset' })) return;
-    useTemplate(tpl);
-  };
-  function drawCustom() { $('custom').hidden = !custom; $('codeBtn').textContent = custom ? 'Code (custom)' : 'Code'; }
+  addEventListener('beforeunload', () => { try { codeWin?.close(); } catch {} });
+  function drawCustom() { $('custom').hidden = !custom; $('codeBtn').title = custom ? 'Custom code: see and edit it' : "See and edit the chart's D3 code, or paste code from the web"; }
 
   // ---- stage layout: the 24px grid with a line at the centre; the card centred on it, its slots above it ----
   function layout() {
     const st = $('stage'), W = st.clientWidth, c = Math.floor(W / 2);
     st.style.setProperty('--gx', `${c % G}px`);
-    const avail = st.clientHeight - ($('drawer').hidden ? 0 : $('drawer').offsetHeight);
-    const cw = size.w * G, ch = Math.min(size.h * G, Math.max(6 * G, Math.floor((avail - 6 * G) / G) * G));
-    const left = c - Math.round(size.w / 2) * G, topPx = 5 * G;
+    const avail = st.clientHeight;
+    // The chart's centre is locked to the centre of the grid area.
+    const cw = size.w * G, ch = Math.min(size.h * G, Math.max(6 * G, Math.floor((avail - 8 * G) / G) * G));
+    const left = Math.round(c - cw / 2), topPx = Math.max(4 * G, Math.round(avail / 2 - ch / 2));
     Object.assign($('card').style, { left: `${left}px`, top: `${topPx}px`, width: `${cw + 1}px`, height: `${ch + 1}px` });
-    Object.assign($('slots').style, { left: `${left}px`, width: `${cw}px`, top: `${3 * G + 10}px` });
+    // X slot: centred under the chart; Y slot: centred on its left side; any other slot under X.
+    let below = 0;
+    for (const el of $('slots').children) {
+      const i = inputs.find(x => x.key === el.dataset.key), a0 = i?.axis || (i?.role === 'measure' ? 'y' : 'x'), axis = tpl?.flip && !custom ? { x: 'y', y: 'x' }[a0] || a0 : a0;   // Bar (horizontal): X is down the left
+      if (axis === 'y') Object.assign(el.style, { left: `${left - 10}px`, top: `${topPx + ch / 2}px`, transform: 'translate(-100%, -50%)' });
+      else { Object.assign(el.style, { left: `${left + cw / 2}px`, top: `${topPx + ch + 10 + below * 40}px`, transform: 'translateX(-50%)' }); below++; }
+    }
     $('sz').textContent = `${cw} x ${ch} px`;
-    draw();
+    drawNow();   // at once: a resize redraws the chart to its new size in the same frame
   }
   new ResizeObserver(() => layout()).observe($('stage'));
   // Resize the card in whole cells: try the chart at Dashboard sizes.
-  $('rz').addEventListener('pointerdown', ev => {
+  $('card').addEventListener('pointerdown', ev => {
+    const dir = ev.target.closest('.rz')?.dataset.dir; if (!dir) return;
     ev.preventDefault();
     const sx = ev.clientX, sy = ev.clientY, s0 = { ...size };
-    const move = e => { size = { w: Math.max(8, s0.w + 2 * Math.round((e.clientX - sx) / G / 2) * 1), h: Math.max(6, s0.h + Math.round((e.clientY - sy) / G)) }; layout(); };
+    const fx = dir.includes('e') ? 1 : dir.includes('w') ? -1 : 0, fy = dir.includes('s') ? 1 : dir.includes('n') ? -1 : 0;   // side bars: one direction only
+    const move = e => { size = { w: Math.max(8, s0.w + 2 * fx * Math.round((e.clientX - sx) / G)), h: Math.max(6, s0.h + 2 * fy * Math.round((e.clientY - sy) / G)) }; layout(); };
     const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
     addEventListener('pointermove', move); addEventListener('pointerup', up);
   });
@@ -181,7 +199,7 @@
     const missing = inputs.filter(i => !links[i.key] && !i.optional);
     if (!source || missing.length) {
       rows = null;
-      note = !source ? 'Sample data: pick a dataset on the left.' : `Sample data: drop a field on ${missing.map(i => i.label || i.key).join(' and ')}.`;
+      note = !source ? 'Sample data: pick a dataset under Data (right).' : `Sample data: drop a field on ${missing.map(i => i.label || i.key).join(' and ')}.`;
       return draw();
     }
     const m = manifest(), w = { dataset: source.d.name, inputs: Object.fromEntries(Object.entries(links).map(([k, l]) => [k, { ...l }])), sort, top };
@@ -214,9 +232,11 @@
     if (!old) return STYLE_BASE(name) + colourBlock();
     return COLOUR_BLOCK.test(old) ? old.replace(COLOUR_BLOCK, colourBlock()) : old.replace(/\s*$/, '\n') + colourBlock();
   }
-  let drawT = 0;
+  let drawT = 0, still = false;   // still: draw without motion (a chart type switch fades instead)
   function draw() { clearTimeout(drawT); drawT = setTimeout(drawNow, 16); }
   function drawNow() {
+    clearTimeout(drawT); saveState();
+    if (!active) return;
     const pv = $('pv'), stt = $('status');
     ApexWidget.useStyle({ id: 'chart-builder-preview', styleCss: styleCss($('name').value || 'Chart') }, pv);
     if (pv.children.length !== 1) pv.innerHTML = '<div style="width:100%;height:100%;overflow:hidden"></div>';
@@ -224,7 +244,7 @@
     const data = (rows || tpl?.sample || editing?.sampleRows || []).map(r => ({ ...r }));
     const ins = Object.fromEntries(inputs.map(i => [i.key, { key: i.key, label: i.label, role: i.role, agg: links[i.key]?.agg || i.agg, field: links[i.key] ? `${source?.d.name}.${links[i.key].col}` : '' }]));
     try {
-      D3Render.draw(pv.firstElementChild, code, data, { W, H, colors: colours.map((c, i) => c || th.colors[i]), opts: clone(nest(opts)), theme: th, inputs: ins });
+      D3Render.draw(pv.firstElementChild, code, data, { W, H, colors: colours.map((c, i) => c || th.colors[i]), opts: clone(nest(opts)), theme: th, inputs: ins, motion: !still });
       stt.className = 'status'; stt.textContent = note;
     } catch (e) { stt.className = 'status err'; stt.textContent = `The chart's code failed: ${e.message}`; }
   }
@@ -236,7 +256,7 @@
     [all, live] = await Promise.all([ChartRegistry.scan(DEV, { only: m => m.kind === 'd3' }), DNFS.list(LIVE).then(es => new Set(es.filter(e => e.dir).map(e => e.name))).catch(() => new Set())]);
     $('openmenu').innerHTML = all.length ? all.map(m => `<div data-act="${esc(m.id)}">${esc(m.name)}<small>${esc(m.category || '')}${m.builder ? '' : ' · made in D3 Studio (opens as code)'}${live.has(m.id) ? ' · published' : ''}</small></div>`).join('') : '<div class="off">No saved charts yet</div>';
   }
-  Menus.bind($('open'), $('openmenu'), id => { const m = all.find(x => x.id === id); if (m) openChart(m); });
+  Menus.bind($('open'), $('openmenu'), id => { const m = all.find(x => x.id === id); if (m) { show(); openChart(m); } });
   function openChart(m) {
     editing = m || null; rows = null;
     const b = m?.builder || {};
@@ -252,12 +272,52 @@
       if (b.source) setSourceQuiet(b.source);
     }
     opts = { ...defaults(options), ...(m?.builder?.opts || {}) };
-    $('name').value = m?.name || ''; $('cat').value = m?.category || CAT_OF[tpl?.id] || 'Other'; delete $('cat').dataset.touched;
-    if (editor) editor.value = code;
-    drawTypes(); drawColours(); drawOpts(); drawFields(); drawSlots(); drawCustom(); loadData();
+    $('name').value = m?.name || ''; 
+    pushCode();
+    drawTypes(); drawColours(); drawOpts(); drawFields(); drawSlots(); drawCustom(); syncCat(); loadData();
   }
   function setSourceQuiet(key) { source = sources.find(s => s.key === key) || source; $('src').value = source?.key || ''; }
-  $('new').onclick = async () => { if (await UI.confirm('Start a new chart? Unsaved changes to this one are lost.', { ok: 'New chart' })) openChart(null); };
+  $('new').onclick = async () => {
+    if (active && !await UI.confirm('Start a new chart? Unsaved changes to this one are lost.', { ok: 'New chart' })) return;
+    show(); openChart(null);
+  };
+  // Empty page -> working: the settings slide in from the right, the chart fades in.
+  let active = false;
+  function show() {
+    if (active) return;
+    active = true; $('card').classList.add('fade'); $('cb').classList.remove('empty');
+    requestAnimationFrame(() => requestAnimationFrame(() => $('card').classList.remove('fade')));
+  }
+
+  // ---- this window remembers where it was: a refresh (F5) comes back to the same chart, unsaved changes and all ----
+  // Kept in a file (chart-builder/builder-state.json), not browser storage: the server's port changes on every start and
+  // browser storage belongs to one port. Written shortly after each change; the open chart's id comes back with it.
+  const STATE_FILE = 'chart-builder/builder-state.json';
+  let stateT = 0, stateText = '';
+  function saveState() {
+    const text = JSON.stringify(!active ? { active: false } : { active: true, editing: editing?.id || null, tpl: tpl?.id || null, custom, code, inputs, options, links, opts, colours, sort, top, size,
+      source: source?.key || '', name: $('name').value });
+    if (text === stateText) return;
+    stateText = text; clearTimeout(stateT);
+    stateT = setTimeout(() => DNFS.writeText(STATE_FILE, text).catch(() => {}), 150);
+  }
+  addEventListener('beforeunload', () => { if (stateT) { clearTimeout(stateT); DNFS.writeText(STATE_FILE, stateText).catch(() => {}); } });   // a refresh right after a change
+  async function restoreState() {
+    let st = null; try { st = await DNFS.readJSON(STATE_FILE); } catch {}
+    stateText = JSON.stringify(st || {});
+    if (!st?.active) return false;
+    editing = all.find(x => x.id === st.editing) || null;
+    tpl = st.tpl ? ChartTemplates.get(st.tpl) : null; custom = !!st.custom; code = st.code || tpl?.code || '';
+    inputs = st.inputs || clone(tpl?.inputs || []); options = st.options || clone(tpl?.options || []);
+    links = st.links || {}; opts = st.opts || defaults(options); colours = st.colours || Array(8).fill(null);
+    sort = st.sort || 'desc'; top = +st.top || 20; size = st.size || { w: 26, h: 14 };
+    if (st.source) setSourceQuiet(st.source);
+    $('name').value = st.name || '';
+    active = true; $('cb').classList.add('instant'); $('cb').classList.remove('empty');
+    setTimeout(() => $('cb').classList.remove('instant'), 300);
+    drawTypes(); drawColours(); drawOpts(); drawFields(); drawSlots(); drawCustom(); loadData();
+    return true;
+  }
 
   function thumb() {
     const svg = $('pv').querySelector('svg'); if (!svg) return null;
@@ -269,7 +329,7 @@
     return new XMLSerializer().serializeToString(c).replace(/var\((--[\w-]+)\)/g, (s, v) => root.getPropertyValue(v).trim() || s);
   }
   async function save() {
-    const name = $('name').value.trim(); if (!name) { $('name').focus(); throw new Error('Give the chart a name (top of the grid).'); }
+    const name = $('name').value.trim(); if (!name) { $('name').focus(); throw new Error('Give the chart a name (Chart name, top right).'); }
     if (!code.trim()) throw new Error('The chart has no code.');
     D3Render.compile(code, inputs.map(i => i.key));   // a syntax error stops the save
     const id = editing?.id || ChartRegistry.slug(name);
@@ -277,10 +337,10 @@
     const dir = `${DEV}/${id}`, pic = thumb();
     const ins = inputs.map(i => ({ key: i.key, label: i.label, role: i.role, axis: i.axis, ...(i.role === 'measure' ? { agg: links[i.key]?.agg || i.agg || 'sum' } : {}), ...(i.optional ? { optional: true } : {}) }));
     const m = {
-      id, name, description: editing?.description || '', category: $('cat').value || 'Other',
+      id, name, description: editing?.description || '', category: catOf(),
       version: (+editing?.version || 0) + 1, kind: 'd3', spec: 'spec.json', style: 'style.css', code: 'd3-code.js', sample: 'sample.json',
       ...(pic ? { thumb: 'thumb.svg' } : {}), inputs: ins,
-      options: colours.map((_, i) => ({ path: `colors.${i}`, label: `Colour ${i + 1}`, group: 'Colours', type: 'color', default: null, show: true }))
+      options: colours.map((_, i) => ({ path: `colors.${i}`, label: `Color ${i + 1}`, group: 'Colors', type: 'color', default: null, show: true }))
         .concat(options.map(o => ({ ...o, default: o.type === 'boolean' ? !!opts[o.path] : o.default }))),
       studio: { project: source?.folder || '', table: source?.d.name || '', links: Object.fromEntries(Object.entries(links).map(([k, l]) => [k, `${source?.d.name}.${l.col}`])) },
       builder: { template: tpl?.id || null, custom, links, opts, size, source: source?.key || '' },
@@ -308,12 +368,19 @@
   });
   $('name').oninput = () => draw();
 
+  // Folded sections stay folded next time (this browser).
+  document.querySelectorAll('details.sec').forEach(d => {
+    const key = 'chartbuilder.fold.' + d.querySelector('summary').textContent;
+    try { if (localStorage.getItem(key) === '1') d.open = false; } catch {}
+    d.addEventListener('toggle', () => { try { localStorage.setItem(key, d.open ? '0' : '1'); } catch {} });
+  });
+
   // ---- start ----
   UI.guard(async () => {
     document.title = 'Chart Builder';
     await Promise.all([refreshList(), loadSources()]);
     const want = UI.params().chart, m = want ? all.find(x => x.id === want) : null;
-    if (m?.builder?.source) setSourceQuiet(m.builder.source);
-    openChart(m);
+    if (m) { if (m.builder?.source) setSourceQuiet(m.builder.source); show(); openChart(m); }
+    else if (!await restoreState()) saveState();   // nothing to come back to: the empty grid
   })();
 })();

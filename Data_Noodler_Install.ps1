@@ -82,7 +82,7 @@ try {
     foreach ($d in $dirs) { [void](New-Item -ItemType Directory -Force -Path (Join-Path $Root ($d.Replace('/', '\')))) }
     # User data is never overwritten: projects, settings, users, charts and temp. A file there is written only when it
     # does not exist yet (a fresh install gets the defaults); everything else is program files and is replaced.
-    $UserData = @('projects/*', 'temp/*', 'config/*', 'd3-studio/*', '.server/settings.json', 'version.txt')
+    $UserData = @('projects/*', 'temp/*', 'config/*', 'chart-builder/*', '.server/settings.json', 'version.txt')
     $isUser = { param($p) foreach ($u in $UserData) { if ($p -like $u) { return $true } }; return $false }
     $kept = New-Object 'System.Collections.Generic.HashSet[string]'
     $n = 0

@@ -1,4 +1,4 @@
-// Chart packages (d3-studio/<dev|live>/<id>/chart.json + spec.json) and the built-in Data Grid, drawn by D3Render / ApexCharts / DNGrid
+// Chart packages (chart-builder/<dev|live>/<id>/chart.json + spec.json) and the built-in Data Grid, drawn by D3Render / ApexCharts / DNGrid
 // (js/charts/apex-render.js). Globals: ApexWidget, ChartRegistry. Needs the Apex libraries and js/dn-fs.js.
 //   "$kind" in spec.json: 'apexcharts' | 'apexgrid' | 'apextree' (default: apexcharts).
 //
@@ -263,11 +263,11 @@ const ApexWidget = (() => {
   return { chartInputs, AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, axisOf, labelOf, autoBind, hasTop, ready, query, objects, shape, render, dispose, theme, useStyle, cssParts, getAt, setAt, binding, sortOf, topOf };
 })();
 
-// Chart packages: a folder with a valid chart.json (D3 Studio: d3-studio/dev/<id>/ = work in progress, d3-studio/live/<id>/
+// Chart packages: a folder with a valid chart.json (D3 Studio: chart-builder/dev/<id>/ = work in progress, chart-builder/live/<id>/
 // = published). The Dashboard lists LIVE charts only (id "chart-<folder>", m.chart = true), plus the built-in Data Grid
 // (js/grid/data-grid-pkg.js, id "data-grid") so grids already on a dashboard keep drawing. m.dir = the package folder.
 const ChartRegistry = (() => {
-  const CHARTS_DEV = 'd3-studio/dev', CHARTS_LIVE = 'd3-studio/live', MANIFEST = 'chart.json';
+  const CHARTS_DEV = 'chart-builder/dev', CHARTS_LIVE = 'chart-builder/live', MANIFEST = 'chart.json';
   let cache = null;
   const valid = m => m && typeof m.id === 'string' && m.name && !!ApexWidget.KINDS[m.kind];
   // Every package folder under root (a folder with a valid chart.json). prefix = id prefix.

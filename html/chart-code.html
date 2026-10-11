@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chart Code</title>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+  .wrap { display: flex; flex-direction: column; height: 100%; padding: 10px 12px 12px; box-sizing: border-box; gap: 8px; }
+  .bar { display: flex; align-items: center; gap: 8px; }
+  .bar b { font-size: 14px; }
+  .vars { font-size: 12px; color: var(--muted); }
+  .custom { font-size: 12px; color: var(--warn); }
+  #code { flex: 1; min-height: 0; }
+  #code .sqled { height: 100%; width: 100%; box-sizing: border-box; }
+  .note { margin: auto; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar"><b id="title">D3 code</b><span class="custom" id="custom" hidden>custom</span><span style="flex:1"></span>
+    <button class="ghost small" id="reset" title="Throw away code changes and use the chart type's code again">Reset to chart type</button></div>
+  <div class="vars" id="vars"></div>
+  <div id="code"></div>
+</div>
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/pipeline/sql-editor.js"></script>
+<script>
+// Chart Builder's code window (its Code button): edit the chart's D3 code here; the chart redraws in the builder as you
+// type. Everything goes through window.opener.ChartCode (js/chartbuilder/builder.js), which also sends back changes
+// made there (chart type switched, another chart opened).
+(() => {
+  const host = window.opener || (parent !== window ? parent : null), api = host?.ChartCode, $ = id => document.getElementById(id);   // opener (its own window), or a parent page
+  if (!api) { document.querySelector('.wrap').innerHTML = '<div class="note">Open this window with the Code button in Chart Builder.</div>'; return; }
+  const editor = SqlEditor.mount($('code'), { lang: 'js', onChange: () => api.set(editor.value) });
+  const sync = () => {
+    if (editor.value !== api.code) editor.value = api.code;
+    $('title').textContent = `D3 code · ${api.title}`; document.title = `${api.title} · Chart Code`;
+    $('vars').textContent = api.vars(); $('custom').hidden = !api.custom;
+  };
+  sync();
+  const off = api.subscribe(sync);
+  $('reset').onclick = () => api.reset();
+  // The builder closed or reloaded: this window has nothing to edit any more.
+  const watch = setInterval(() => { if (!window.opener || window.opener.closed || window.opener.ChartCode !== api) { clearInterval(watch); close(); } }, 1000);
+  addEventListener('beforeunload', () => off());
+  setInterval(() => { $('custom').hidden = !api.custom; $('title').textContent = `D3 code · ${api.title}`; }, 500);
+})();
+</script>
+</body>
+</html>

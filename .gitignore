@@ -27,3 +27,6 @@ Data_Noodler_*.gz
 
 # Installed version marker (Data_Noodler_Install.ps1)
 version.txt
+
+# Chart Builder: where its window was (per user)
+chart-builder/builder-state.json

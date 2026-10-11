@@ -4,7 +4,7 @@
 // Until they are linked the Sample data is drawn. The Generated box shows what the code gets ready made (data, the X / Y
 // accessors, W x H, colors, opts, theme, inputs); Starter code writes the scales, svg, grid and axes from the inputs, so
 // only the marks are left to write. The chart is drawn in a <div> and its svg always scales to fit it (D3Render.fit).
-// Save = the chart package into d3-studio/dev/<id>/ (work in progress); Publish = Save + copy to d3-studio/live/<id>/
+// Save = the chart package into chart-builder/dev/<id>/ (work in progress); Publish = Save + copy to chart-builder/live/<id>/
 // (Dashboard > Charts lists only live charts). On the Dashboard a chart starts with no data (axes / grid only) until its
 // inputs are linked in Right-click > Chart Settings; the links made here are only for testing (chart.json "studio").
 // A chart package (kind 'd3'):
@@ -538,7 +538,7 @@ return svg.node();
     return out;
   }
 
-  // ---- live code file: d3-studio/dev/<id>/d3-code.js (a new, unsaved chart: d3-studio/dev/_new/d3-code.js) is always the
+  // ---- live code file: chart-builder/dev/<id>/d3-code.js (a new, unsaved chart: chart-builder/dev/_new/d3-code.js) is always the
   // same as the code editor. Editor changes are written to it; when the file changes on disk (edited elsewhere, e.g. by
   // Claude) the editor takes it and the preview redraws. Only Publish copies it to the live folder (the Dashboard).
   const LIVE = 'd3-code.js';

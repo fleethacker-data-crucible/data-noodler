@@ -226,7 +226,7 @@ Project layout: `projects/<folder>/` with `data/raw`, `data/imported`, `data/sou
 
 ## 7b. Chart packages (no widgets)
 
-- No widgets for now (no `widget-studio/`, no `widgets/` folder). Charts are built in D3 Studio: `d3-studio/dev/<id>/` (Save) and `d3-studio/live/<id>/` (Publish copies dev to live). The Dashboard reads ONLY `d3-studio/live` (Dashboard > Charts; registry id `chart-<id>`).
+- No widgets for now (no `widget-studio/`, no `widgets/` folder). Charts are built in D3 Studio: `chart-builder/dev/<id>/` (Save) and `chart-builder/live/<id>/` (Publish copies dev to live). The Dashboard reads ONLY `chart-builder/live` (Dashboard > Charts; registry id `chart-<id>`).
 - One package = `chart.json` manifest (+ `spec.json` = `{ $kind: 'd3', data: inputs, query: { sort, top } }`, `d3-code.js`, `sample.json`, `thumb.svg`, `style.css`). `ChartRegistry.list` = the live charts (`m.chart`) + the built-in Data Grid; `ChartRegistry.scan(<folder>)` lists any folder (D3 Studio uses it for dev).
 - The Data Grid is core app code, not a package folder: `js/grid/data-grid-pkg.js` (`DataGrid.pkg()`: manifest + spec + style), renderer `js/grid/data-grid.js` (`DNGrid`), style `js/grid/data-grid.css` (`.GRID`), `grid-remote.js` (engine paging). Import / Transform previews use `js/grid/data-table.js` (`DataTable`, schema-table look; pop-out `html/table-pop.html`). Grids already on a dashboard keep drawing; new ones are not added from the Dashboard.
 - `style.css` (manifest `"style"`) is the chart's ONLY style, the same wherever it is drawn. `ApexWidget.useStyle(m, box)` puts it in the page with `.CHART` (or `.GRID`) -> `.dn-w-<id>` and tags the box; `--w-*` variables reach the code as `theme` (`ApexWidget.theme(box)`).

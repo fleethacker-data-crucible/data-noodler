@@ -1,4 +1,4 @@
-// CHART drawing (kind 'd3', D3 Studio): runs a chart's own D3 code (d3-studio/<dev|live>/<id>/d3-code.js) in its <div>.
+// CHART drawing (kind 'd3', D3 Studio): runs a chart's own D3 code (chart-builder/<dev|live>/<id>/d3-code.js) in its <div>.
 // Needs js/vendor/d3.min.js. Global: D3Render. Used by ApexRender.render (Dashboard, previews, Publish) and D3 Studio.
 //
 // The code is a function body. It is called with:
@@ -111,7 +111,7 @@ const D3Render = (() => {
   // its new place / size / colour (ease-in: starts slow, ramps up fast). Data changes take MOTION.data ms; a new box size
   // (resize) is drawn at once (MOTION.size 0), frame by frame. Elements are matched under the same parent by tag and order (axis ticks by their label);
   // new ones fade in. The first drawing of a chart is not animated.
-  const MOTION = { data: 420, size: 0 };   // size 0: a resize redraws every frame and follows the box at once (no catch-up)
+  const MOTION = { data: 420, size: 0, toggle: 150 };   // toggle: a setting turned on / off fades its parts in / out   // size 0: a resize redraws every frame and follows the box at once (no catch-up)
   const ease = t => t * t * t;   // cubic ease-in
   const ATTRS = ['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'x1', 'x2', 'y1', 'y2', 'd', 'transform', 'points', 'opacity', 'fill-opacity', 'stroke-opacity', 'fill', 'stroke', 'stroke-width'];
   const keyOf = (el, n) => el.classList?.contains('tick') ? `tick:${el.textContent}` : `${el.tagName}#${n}`;
@@ -126,7 +126,30 @@ const D3Render = (() => {
     }
     return out;
   }
-  function animate(oldSvg, svg, ms) {
+  // A setting turned on / off (same code, data and colours): parts that are the same stay still, parts that appeared fade
+  // in, parts that went away fade out (a copy of the old part, removed after). Parts that changed (the plot got smaller
+  // for a legend) move as with a data change.
+  function toggle(oldSvg, svg, ms) {
+    if (!oldSvg || typeof d3.transition !== 'function') return;
+    const kids = el => [...el.children].filter(c => c instanceof SVGElement);
+    const olds = kids(oldSvg), used = new Set(), moved = [];
+    const news = kids(svg).map(n => { const o = olds.find(x => !used.has(x) && x.outerHTML === n.outerHTML); if (o) used.add(o); return [o, n]; });
+    for (const pr of news) {
+      if (pr[0]) continue;
+      const n = pr[1], o = olds.find(x => !used.has(x) && x.tagName === n.tagName && x.childElementCount === n.childElementCount && x.getAttribute('class') === n.getAttribute('class'));
+      if (o) { used.add(o); moved.push([o, n]); continue; }
+      const op = n.getAttribute('opacity');
+      d3.select(n).attr('opacity', 0).transition('dn').duration(ms).attr('opacity', op ?? 1)
+        .on('end interrupt', () => op == null ? n.removeAttribute('opacity') : n.setAttribute('opacity', op));
+    }
+    for (const o of olds.filter(x => !used.has(x))) {
+      const ghost = o.cloneNode(true); ghost.setAttribute('pointer-events', 'none'); svg.append(ghost);
+      d3.select(ghost).transition('dn').duration(ms).attr('opacity', 0).on('end interrupt', () => ghost.remove());
+    }
+    for (const [o, n] of moved) morph(o, n, MOTION.data);
+  }
+  function animate(oldSvg, svg, ms) { if (oldSvg && ms) morph(oldSvg, svg, ms); }
+  function morph(oldSvg, svg, ms) {
     if (!oldSvg || !ms || typeof d3.transition !== 'function') return;
     for (const [o, n] of pairs(oldSvg, svg, [])) {
       if (!(n instanceof SVGElement) || n.tagName === 'svg') continue;
@@ -153,7 +176,8 @@ const D3Render = (() => {
     const oldSvg = [...box.children].find(n => n.tagName?.toLowerCase() === 'svg') || null, was = box.__dnSize, wasSig = box.__dnSig;
     // Animate only a real change (other data, code, settings or colours) at the same size. A redraw of the same thing
     // (resize frames, refreshes, repeated redraws) is drawn at its final state at once, so nothing is ever left mid-move.
-    let sig = ''; try { sig = JSON.stringify([code, data, opts, colors]); } catch { sig = String(Math.random()); }
+    let sig = '', base = ''; try { base = JSON.stringify([code, data, colors]); sig = base + JSON.stringify(opts); } catch { sig = base = String(Math.random()); }
+    const wasBase = box.__dnBase;
     oldSvg?.querySelectorAll('*').forEach(n => d3.select(n).interrupt('dn'));   // its current (mid-move) values are the start
     box.innerHTML = '';
     const redirected = [];
@@ -165,12 +189,12 @@ const D3Render = (() => {
       if (!svg) return;
       roundBars(svg);
       const resized = was && (was[0] !== W || was[1] !== H);
-      if (motion && sig !== wasSig) animate(oldSvg, svg, resized ? MOTION.size : MOTION.data);
+      if (motion && sig !== wasSig) { if (!resized && base === wasBase) toggle(oldSvg, svg, MOTION.toggle); else animate(oldSvg, svg, resized ? MOTION.size : MOTION.data); }
     };
     finish();
-    box.__dnSize = [W, H]; box.__dnSig = sig;
+    box.__dnSize = [W, H]; box.__dnSig = sig; box.__dnBase = base;
     if (out && typeof out.then === 'function') out.then(finish, () => {});   // drawn later: fit / round / animate it then
-    return { el: box, destroy() { box.innerHTML = ''; box.__dnSize = box.__dnSig = null; }, result: out, redirected };
+    return { el: box, destroy() { box.innerHTML = ''; box.__dnSize = box.__dnSig = box.__dnBase = null; }, result: out, redirected };
   }
   // Chart colours: the spec's chosen ones (opts "colors.N"), else the style sheet's --w-c1..c8.
   const colorsOf = (s, th) => Array.from({ length: 8 }, (_, i) => s?.colors?.[i] || th.colors?.[i] || '#888888');

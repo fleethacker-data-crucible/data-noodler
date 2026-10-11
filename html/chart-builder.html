@@ -10,7 +10,18 @@
 <style>
   html, body { height: 100%; margin: 0; overflow: hidden; }
   * { scrollbar-width: thin; }
-  .cb { position: fixed; inset: 0; display: grid; grid-template-columns: 250px 1fr 270px; }
+  /* The page: the grid (stage) and the settings panel on the right. Empty (first load): just the grid; New / Open slides
+     the panel in from the right and fades the chart in. */
+  .cb { position: fixed; inset: 0; }
+  .cb > .stage { position: absolute; top: 0; bottom: 0; left: 0; right: 270px; transition: right .25s ease-out; }
+  .cb > aside.right { position: absolute; top: 0; bottom: 0; right: 0; width: 270px; box-sizing: border-box; transition: transform .25s ease-out; }
+  .cb.instant > .stage, .cb.instant > aside.right, .cb.instant .card { transition: none; }   /* a refresh: back as it was, no slide-in */
+  .cb.empty > .stage { right: 0; }
+  .cb.empty > aside.right { transform: translateX(100%); }
+  .cb.empty .card, .cb.empty .slots, .cb.empty .status, .cb.empty #save, .cb.empty #codeBtn, .cb.empty #publish { display: none; }
+  .card { transition: opacity .2s ease-out; }
+  .card.fade, .pv.fade { opacity: 0; }
+  .pv { transition: opacity .12s ease-out; }
   .cb > aside { overflow: auto; padding: 12px 14px; background: var(--panel); display: flex; flex-direction: column; gap: 10px; min-height: 0; }
   .cb > aside.left { border-right: 1px solid var(--border); }
   .cb > aside.right { border-left: 1px solid var(--border); }
@@ -18,8 +29,8 @@
   .cb select, .cb input[type=text], .cb input[type=search], .cb input[type=number] { width: 100%; box-sizing: border-box; }
 
   /* Fields: drag a chip onto a slot (or onto the chart). */
-  .fields { display: flex; flex-direction: column; gap: 4px; }
-  .chip { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg);
+  .fields { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; flex: none; }   /* long field lists scroll; Colours stays in reach */
+  .chip { flex: none; display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg);
     cursor: grab; user-select: none; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chip:hover { border-color: var(--muted); }
   .chip .t { flex: none; width: 22px; text-align: center; font: 11px var(--mono); color: var(--muted); }
@@ -28,15 +39,22 @@
   .hintbox { font-size: 12px; color: var(--muted); line-height: 1.45; }
 
   /* Stage: the 24px grid (as the Dashboard), a line locked to its centre; the chart card sits on it. */
-  .stage { position: relative; overflow: hidden; min-width: 0;
-    background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px),
-                      linear-gradient(to bottom, color-mix(in srgb, var(--border) 45%, transparent) 1px, transparent 1px);
+  .stage { overflow: hidden; min-width: 0;
+    background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px),
+                      linear-gradient(to bottom, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px);
     background-size: 24px 24px; background-position: var(--gx, 0px) 0; }
-  .tools { position: absolute; left: 50%; top: 24px; transform: translate(-50%, -50%); display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 5px; z-index: 5; width: max-content; }
+  .tools { position: absolute; left: 50%; bottom: 24px; transform: translate(-50%, 50%); display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 5px; z-index: 10; width: max-content; }
+  .tools .dd-menu { top: auto; bottom: calc(100% + 4px); }   /* at the bottom: menus open upward */
   .tools button { width: 100%; justify-content: center; text-align: center; }
-  .namebar { position: absolute; left: 50%; top: 58px; transform: translate(-50%, -50%); display: flex; gap: 8px; align-items: center; z-index: 5; }
-  .namebar input { width: 240px; } .namebar select { width: 150px; }
-  .slots { position: absolute; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; z-index: 4; }
+  .namebox { display: flex; flex-direction: column; gap: 6px; }
+  .nlbl { margin: 6px 0 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  /* Slots: X under the chart (bottom centre), Y left of it (middle); they follow the chart when it is resized. */
+  .slots { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+  .slots .slot { position: absolute; pointer-events: auto; white-space: nowrap; }
+  /* Empty slots appear (quick fade) only while a field is being dragged; filled ones always show their field. */
+  .slots .slot { transition: opacity .12s ease-out; }
+  .slots .slot:not(.set) { opacity: 0; pointer-events: none; }
+  body.dragging .slots .slot { opacity: 1; pointer-events: auto; }
   .slot { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 4px 3px 10px; border: 1px dashed var(--muted); border-radius: 4px;
     background: var(--panel); font-size: 12px; color: var(--muted); }
   .slot b { color: var(--text-2); font-weight: 600; }
@@ -48,12 +66,32 @@
   .slot .x:hover { color: var(--err); }
   .card { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box; }
   .card .pv { position: absolute; inset: 8px; }
-  .card .rz { position: absolute; right: -6px; bottom: -6px; width: 14px; height: 14px; cursor: nwse-resize; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); }
+  /* Resize handles: an L at each corner (width and height), a short bar on each side (that side only). The chart stays
+     centred, so it grows on both sides at once. */
+  .card .rz { position: absolute; width: 14px; height: 14px; z-index: 2; border-color: var(--muted); border-style: solid; border-width: 0; }
+  .card .rz:hover { border-color: var(--text); }
+  .card .rz.se { right: -6px; bottom: -6px; border-right-width: 2px; border-bottom-width: 2px; cursor: nwse-resize; }
+  .card .rz.sw { left: -6px; bottom: -6px; border-left-width: 2px; border-bottom-width: 2px; cursor: nesw-resize; }
+  .card .rz.ne { right: -6px; top: -6px; border-right-width: 2px; border-top-width: 2px; cursor: nesw-resize; }
+  .card .rz.nw { left: -6px; top: -6px; border-left-width: 2px; border-top-width: 2px; cursor: nwse-resize; }
+  .card .rz.n, .card .rz.s { left: calc(50% - 7px); width: 14px; height: 8px; cursor: ns-resize; }
+  .card .rz.n { top: -6px; border-top-width: 2px; } .card .rz.s { bottom: -6px; border-bottom-width: 2px; }
+  .card .rz.e, .card .rz.w { top: calc(50% - 7px); height: 14px; width: 8px; cursor: ew-resize; }
+  .card .rz.e { right: -6px; border-right-width: 2px; } .card .rz.w { left: -6px; border-left-width: 2px; }
   .card .sz { position: absolute; right: 4px; bottom: -22px; font: 11px var(--mono); color: var(--muted); }
-  .status { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 12px; color: var(--muted); z-index: 4; pointer-events: none; }
+  .status { position: absolute; left: 0; right: 0; top: 16px; text-align: center; font-size: 12px; color: var(--muted); z-index: 4; pointer-events: none; }
   .status.err { color: var(--err); }
 
   /* Right: chart types and settings. */
+  /* Right panel sections: click a heading to fold it (remembered per section). */
+  .sec { display: block; }
+  .sec > * + * { margin-top: 8px; }
+  .sec > .fields { display: flex; }
+  .sec > summary { list-style: none; cursor: pointer; user-select: none; margin: 6px 0 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .sec > summary::-webkit-details-marker { display: none; }
+  .sec > summary::before { content: '▾'; font-size: 10px; transition: transform .12s; }
+  .sec:not([open]) > summary::before { transform: rotate(-90deg); }
+  .sec > summary:hover { color: var(--text-2); }
   .types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .type { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 6px; border: 1px solid var(--border); border-radius: 4px;
     background: var(--bg); cursor: pointer; font-size: 12px; color: var(--text-2); }
@@ -66,61 +104,44 @@
   .codebtn { margin-top: auto; }
   .badge-custom { font-size: 11px; color: var(--warn); }
 
-  /* Code drawer: slides up over the stage; the chart keeps drawing above it. */
-  .drawer { position: fixed; left: 250px; right: 270px; bottom: 0; height: 45%; background: var(--panel); border-top: 1px solid var(--border); z-index: 20;
-    display: flex; flex-direction: column; padding: 8px 12px 12px; box-sizing: border-box; gap: 6px; }
-  .drawer[hidden] { display: none; }
-  .drawer .bar { display: flex; align-items: center; gap: 8px; }
-  .drawer .bar .muted { font-size: 12px; }
-  .drawer .sqled { flex: 1; height: auto; min-height: 0; }
 </style>
 </head>
 <body>
-<div class="cb">
-  <aside class="left">
-    <h3>Data</h3>
-    <select id="src" title="A cleaned dataset (CLEAN_) of any project"></select>
-    <input id="fq" type="search" placeholder="Search fields" spellcheck="false">
-    <div class="fields" id="fields"></div>
-    <div class="hintbox" id="fhint">Pick a dataset, then drag its fields onto the slots above the chart (or straight onto the chart).</div>
-  </aside>
+<div class="cb empty" id="cb">
 
   <main class="stage" id="stage">
     <div class="tools" id="tools">
       <button id="new" class="ghost" title="Start a new chart">New</button>
       <div class="dd-wrap"><button id="open" class="ghost" style="width:100%">Open ▾</button><div class="dd-menu" id="openmenu"></div></div>
       <button id="save" class="ghost" title="Save the chart (work in progress: not on the Dashboard yet)">Save</button>
+      <button id="codeBtn" class="ghost" title="See and edit the chart's D3 code, or paste code from the web">Code</button>
       <button id="publish" title="Save, then put the chart in Dashboard > Charts">Publish</button>
     </div>
-    <div class="namebar"><input id="name" type="text" placeholder="Chart name" spellcheck="false"><select id="cat"></select></div>
     <div class="slots" id="slots"></div>
-    <div class="card" id="card"><div class="pv" id="pv"></div><div class="rz" id="rz" title="Drag to try other sizes"></div><div class="sz" id="sz"></div></div>
+    <div class="card" id="card"><div class="pv" id="pv"></div><div class="rz nw" data-dir="nw" title="Drag to try other sizes"></div><div class="rz n" data-dir="n" title="Drag to try other sizes"></div><div class="rz ne" data-dir="ne" title="Drag to try other sizes"></div><div class="rz e" data-dir="e" title="Drag to try other sizes"></div><div class="rz se" data-dir="se" title="Drag to try other sizes"></div><div class="rz s" data-dir="s" title="Drag to try other sizes"></div><div class="rz sw" data-dir="sw" title="Drag to try other sizes"></div><div class="rz w" data-dir="w" title="Drag to try other sizes"></div><div class="sz" id="sz"></div></div>
     <div class="status" id="status"></div>
   </main>
 
   <aside class="right">
-    <h3>Chart type</h3>
-    <div class="types" id="types"></div>
-    <h3>Colours</h3>
-    <div class="swatches" id="colours"></div>
-    <h3>Settings</h3>
-    <div id="opts"></div>
-    <div id="orderBox">
-      <h3>Order</h3>
+    <div class="namebox"><label class="nlbl" for="name">Chart name</label><input id="name" type="text" placeholder="Name this chart" spellcheck="false"></div>
+    <details class="sec" open><summary>Chart type</summary>
+      <div class="types" id="types"></div></details>
+    <details class="sec" open><summary>Data</summary>
+      <select id="src" title="A cleaned dataset (CLEAN_) of any project"></select>
+      <input id="fq" type="search" placeholder="Search fields" spellcheck="false">
+      <div class="fields" id="fields"></div>
+      <div class="hintbox" id="fhint">Pick a dataset, then drag its fields onto X (under the chart) and Y (left of it), or straight onto the chart.</div></details>
+    <details class="sec" open><summary>Colors</summary>
+      <div class="swatches" id="colours"></div></details>
+    <details class="sec" open><summary>Settings</summary>
+      <div id="opts"></div></details>
+    <details class="sec" open id="orderBox"><summary>Order</summary>
       <div class="row2"><select id="sort"><option value="desc">Largest first</option><option value="asc">Smallest first</option><option value="label">A to Z / in order</option></select>
-        <input id="top" type="number" min="1" max="100000" title="How many categories to show"></div>
-    </div>
-    <button class="ghost codebtn" id="codeBtn" title="See and edit the chart's D3 code, or paste code from the web">Code</button>
+        <input id="top" type="number" min="1" max="100000" title="How many categories to show"></div></details>
     <div class="badge-custom" id="custom" hidden>Custom code: the chart type no longer rewrites it.</div>
   </aside>
 </div>
 
-<div class="drawer" id="drawer" hidden>
-  <div class="bar"><b>D3 code</b><span class="muted" id="vars"></span><span style="flex:1"></span>
-    <button class="ghost small" id="reset" title="Throw away code changes and use the chart type's code again">Reset to chart type</button>
-    <button class="ghost small" id="closeCode">Close</button></div>
-  <div id="code"></div>
-</div>
 
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/ui.js"></script>
@@ -128,7 +149,6 @@
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/engine-client.js"></script>
 <script src="../js/charts/color-picker.js"></script>
-<script src="../js/pipeline/sql-editor.js"></script>
 <script src="../js/vendor/d3.min.js"></script>
 <script src="../js/charts/d3-render.js"></script>
 <script src="../js/charts/apex-widget.js"></script>

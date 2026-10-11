@@ -98,7 +98,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 
 | Path | Purpose |
 |---|---|
-| `d3-studio/dev/<id>/`, `d3-studio/live/<id>/` | Chart packages: `chart.json` (+ `spec.json`, `d3-code.js`, `sample.json`, `style.css`, `thumb.svg`). dev = Save, live = Publish (the Dashboard reads only live). Edit only `dev/<id>/d3-code.js`. |
+| `chart-builder/dev/<id>/`, `chart-builder/live/<id>/` | Chart packages: `chart.json` (+ `spec.json`, `d3-code.js`, `sample.json`, `style.css`, `thumb.svg`). dev = Save, live = Publish (the Dashboard reads only live). Edit only `dev/<id>/d3-code.js`. |
 | `js/charts/apex-widget.js` | `ApexWidget` (inputs, query, row shaping, theme, style per chart) and `ChartRegistry` (live charts + the built-in Data Grid). |
 | `js/charts/d3-render.js` | `D3Render`: compile / draw a chart's code in its `<div>` (`d3, data, el, W, H, colors, opts, theme, inputs` + accessors), fit, rounded bars, redraw animation. |
 | `js/charts/apex-render.js`, `apex-options.js` | ApexCharts / ApexTree drawing for dashboards made before D3 charts (kept so they still draw); option catalog. |

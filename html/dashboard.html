@@ -142,11 +142,11 @@ let OX = 0;                                     // px of grid column 0: the wind
 const SIZE = [16, 9], MIN = [4, 3];             // new widget: 16:9 tile
 let ctx, dash = { version: 3, widgets: [] }, selId = null;
 const results = new Map();                      // id -> last result (redraw on resize without re-querying)
-// Packages: published charts (d3-studio/live/) and the built-in Data Grid (js/grid/data-grid-pkg.js).
+// Packages: published charts (chart-builder/live/) and the built-in Data Grid (js/grid/data-grid-pkg.js).
 let pkgs = new Map();
 const pkgOf = w => pkgs.get(w.pkg);
 const isReady = w => { const m = pkgOf(w); return !!m && ApexWidget.ready(m, w); };
-const queryOf = w => { const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found (d3-studio/live/).`); return ApexWidget.query(m, { ...w, where: whereOf(w) }); };
+const queryOf = w => { const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found (chart-builder/live/).`); return ApexWidget.query(m, { ...w, where: whereOf(w) }); };
 // ---- Filter widgets: w.filters = [{ col, label, sort }], w.sel = { col: value }. Every selection is ANDed into the WHERE of each
 // widget on the same dataset (a Filter's own dropdown ignores its own field so its list stays complete).
 const isFilter = w => pkgOf(w)?.kind === 'filter';
@@ -214,7 +214,7 @@ function draw(w, fresh = false) {
     const body = el.querySelector('.wb'), meta = el.querySelector('.wh small');
     results.delete(w.id);
     const fail = h => { ApexWidget.dispose(body); body.innerHTML = h; meta.textContent = ''; };
-    if (!pkgOf(w)) return fail(`<div class="note err">Chart "${esc(w.pkg)}" not found (d3-studio/live/): publish it in D3 Studio, or delete it here.</div>`);
+    if (!pkgOf(w)) return fail(`<div class="note err">Chart "${esc(w.pkg)}" not found (chart-builder/live/): publish it in Chart Builder, or delete it here.</div>`);
     if (pkgOf(w).kind === 'apexgrid' && isReady(w)) { try { await drawGrid(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
     if (isFilter(w) && isReady(w)) { try { await drawFilter(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
     if (!isReady(w) && isChart(w)) {   // a chart not linked yet: drawn with no data (its axes / grid) until its fields are linked
@@ -521,7 +521,7 @@ const delWidget = UI.guard(async w => {
   ctx.log(`Widget deleted: ${titleOf(w)}`);
 });
 
-// Add list = every chart in d3-studio/live/ with a valid chart.json (+ the built-in Data Grid for grids already placed).
+// Add list = every chart in chart-builder/live/ with a valid chart.json (+ the built-in Data Grid for grids already placed).
 async function loadPkgs() {
   const list = await ChartRegistry.list(true);
   pkgs = new Map(list.map(m => [m.id, m]));
