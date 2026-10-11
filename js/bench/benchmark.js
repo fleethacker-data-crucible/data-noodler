@@ -65,16 +65,22 @@
   // is back at 0 when everything is done (the Progress card counts the steps). Inside a step, part(a, b, rows, expectMs) marks the share [a, b]
   // being worked: an engine job moves it by its rows processed (out of rows); a call with no progress of its own
   // (queries, loads into memory) moves it by elapsed time against expectMs, easing toward b until it returns.
-  const P = { on: false, done: 0, total: 1, a: 0, b: 1, rows: 0, expect: 1000, t0: 0, frac: null };
-  function steps(done, total) { P.on = true; P.done = done; P.total = Math.max(1, total); part(0, 1, 0); paintBar(); }
+  const P = { on: false, done: 0, total: 1, a: 0, b: 0, rows: 0, expect: 1000, t0: 0, frac: 0 };
+  // New step: the bar drops straight to 0 (no slide) and stays there until the step's first part starts.
+  function steps(done, total) {
+    P.on = true; P.done = done; P.total = Math.max(1, total);
+    P.a = 0; P.b = 0; P.rows = 0; P.frac = 0;
+    const bar = $('bar'); bar.style.transition = 'none'; bar.style.width = '0%'; void bar.offsetWidth; bar.style.transition = '';
+  }
   function part(a, b, rows, expectMs) { P.a = a; P.b = b; P.rows = rows || 0; P.expect = Math.max(200, expectMs || (rows ? rows / 3e6 * 1000 : 1000)); P.t0 = performance.now(); P.frac = null; }
   function paintBar() {
     if (!P.on) return;
-    const f = P.frac != null ? P.frac : 0.95 * (1 - Math.exp(-(performance.now() - P.t0) / P.expect));
-    const inner = P.a + (P.b - P.a) * Math.max(0, Math.min(1, f));
+    // A job's own rows (held just short of the end until it returns); else elapsed time, easing toward 90%.
+    const f = P.frac != null ? Math.min(0.98, P.frac) : 0.9 * (1 - Math.exp(-(performance.now() - P.t0) / P.expect));
+    const inner = P.a + (P.b - P.a) * Math.max(0, f);
     $('bar').style.width = `${(100 * Math.min(1, inner)).toFixed(1)}%`;
   }
-  function barOff() { P.on = false; $('bar').style.width = '0%'; }
+  function barOff() { P.on = false; const bar = $('bar'); bar.style.transition = 'none'; bar.style.width = '0%'; void bar.offsetWidth; bar.style.transition = ''; }
   setInterval(paintBar, 100);
 
   // ---- engine calls with live numbers ----
