@@ -43,16 +43,6 @@ namespace NativeDataEngine
 
         public bool RoomForMore() { return AvailPhys > MinFree && Managed < Budget; }
 
-        public void WaitForRoom(CancellationToken ct)
-        {
-            for (int i = 0; i < 300 && !RoomForMore(); i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (i == 10) GC.Collect();
-                Thread.Sleep(100);
-            }
-        }
-
         // Reserve bytes held by a blocking operator. Throws when the budget or free RAM would be exceeded.
         public void Reserve(long bytes, string what)
         {

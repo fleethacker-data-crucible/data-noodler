@@ -43,6 +43,15 @@ namespace NativeDataEngine
             if (v == null) { AddNull(); return; }
             if (i != null) AddLong(Convert.ToInt64(v)); else if (f != null) AddDouble(Convert.ToDouble(v)); else if (s != null) AddString(v as string ?? Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture)); else if (b != null) AddBool((bool)v); else AddNull();
         }
+        // The values as a column without copying when the builder is exactly full; the builder must not be used after.
+        public Column Detach()
+        {
+            if (n != nulls.Length || Type.Kind == Kind.Null) return ToColumn();
+            Column c = new Column(Type, 0);
+            c.Length = n; c.I = i; c.F = f; c.S = s; c.B = b; c.Nulls = anyNull ? nulls : null;
+            i = null; f = null; s = null; b = null; nulls = new bool[0]; n = 0;
+            return c;
+        }
         // A copy of the values so far; the builder stays usable for more Adds.
         public Column ToColumn()
         {

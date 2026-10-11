@@ -172,10 +172,12 @@ namespace NativeDataEngine
                 try
                 {
                     int n = ps.Units(ctx);
-                    foreach (Batch b in e.Pool.Ordered(n, Math.Min(n, ctx.Parallel), u => { Batch one = null; foreach (Batch bb in ps.RunUnit(ctx, u)) one = bb; return one; }, CancellationToken.None, e.Mem))
+                    TextIntern[] shared = new TextIntern[x.Schema.Count];
+                    for (int c = 0; c < shared.Length; c++) if (x.Schema[c].Type.Kind == Kind.String) shared[c] = new TextIntern();
+                    foreach (Batch b in e.Pool.Ordered(n, Math.Min(n, ctx.Parallel), u => { List<Batch> l = new List<Batch>(ps.RunUnit(ctx, u)); return l.Count == 1 ? l[0] : Batch.Concat(ps.Schema, l); }, CancellationToken.None, e.Mem))
                     {
-                        long bytes = b.Bytes;
-                        if (!Room(full, x.Bytes + bytes)) { reason = "larger than the in-memory share (" + MemoryGuard.Mb(Cap) + "): read from its Parquet parts"; break; }
+                        long bytes = Share(b, shared);
+                        if (!Room(full, x.Bytes + bytes)) { reason = "larger than the in-memory share (" + MemoryGuard.Mb(Cap) + "): read from its files"; break; }
                         x.Lease.Add(bytes);
                         x.Batches.Add(b); x.Rows += b.Rows; x.Bytes += bytes;
                     }
@@ -203,6 +205,28 @@ namespace NativeDataEngine
                 x.Lease.Dispose(); x.Batches = null;
                 EngineLog.Write("engine", "Not in memory: " + x.Rel + ": " + reason);
             }
+        }
+
+        // Repeated text across the whole dataset becomes one shared string (the batch is fresh from the reader, so it is
+        // changed in place before anyone sees it). Returns the batch's memory with each distinct string counted once.
+        static long Share(Batch b, TextIntern[] shared)
+        {
+            long bytes = 0;
+            for (int c = 0; c < b.Cols.Length; c++)
+            {
+                Column col = b.Cols[c];
+                if (col.S == null || shared[c] == null) { bytes += col.Bytes; continue; }
+                TextIntern t = shared[c]; string[] s = col.S;
+                bytes += 32 + 8L * col.Length + (col.Nulls != null ? col.Length : 0);
+                for (int i = 0; i < s.Length; i++)
+                {
+                    string v = s[i]; if (v == null) continue;
+                    int before = t.Distinct;
+                    s[i] = t.Get(v);
+                    if (t.Distinct > before || t.Off) bytes += 24 + 2L * v.Length;
+                }
+            }
+            return bytes;
         }
 
         // Room for `need` bytes of dataset `key`: drops least recently used entries (never the one asked for).

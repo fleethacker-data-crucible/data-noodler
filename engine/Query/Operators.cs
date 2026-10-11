@@ -266,6 +266,13 @@ namespace NativeDataEngine
             }
             return a.CompareTo(b);   // stable
         }
+        // The best `limit` rows of keep (earlier rows) followed by b.
+        static Batch Best(Batch keep, Batch b, List<SortKey> keys, long limit)
+        {
+            Batch cur = keep == null ? b : Batch.Concat(b.Schema, new List<Batch> { keep, b });
+            int[] o = Order(cur, keys, limit);
+            return cur.Take(o, o.Length);
+        }
         public static int[] Order(Batch all, List<SortKey> keys, long limit)
         {
             Column[] kc = new Column[keys.Count];
@@ -283,14 +290,18 @@ namespace NativeDataEngine
                 Batch all;
                 if (topN >= 0 && topN <= 100000)
                 {
-                    // Top-N: keep only the best rows seen so far.
+                    // Top-N: keep only the best rows seen so far. A splittable input finds each unit's best rows on the
+                    // workers first; those come back in unit order and ties keep input order, so the answer is the same.
                     Batch keep = null;
-                    foreach (Batch b in child.Run(ctx))
+                    ChainOp chain = child as ChainOp;
+                    IEnumerable<Batch> input = child.Run(ctx);
+                    if (chain != null && ctx.Parallel > 1 && chain.Src.Units(ctx) > 1)
                     {
-                        Batch cur = keep == null ? b : Batch.Concat(Schema, new List<Batch> { keep, b });
-                        int[] o = Order(cur, keys, topN);
-                        keep = cur.Take(o, o.Length);
+                        List<Batch> best = new List<Batch>();
+                        foreach (Batch[] acc in chain.Fold(ctx, () => new Batch[1], (a, b) => a[0] = Best(a[0], b, keys, topN))) if (acc[0] != null) best.Add(acc[0]);
+                        input = best;
                     }
+                    foreach (Batch b in input) keep = Best(keep, b, keys, topN);
                     all = keep ?? Batch.Empty(Schema);
                     yield return all;
                     yield break;

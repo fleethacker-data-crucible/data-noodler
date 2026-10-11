@@ -313,11 +313,20 @@ namespace NativeDataEngine
             if (frac != 0) s += "." + frac.ToString("000000", CultureInfo.InvariantCulture).TrimEnd('0');
             return s;
         }
+        // Shortest text that reads back as exactly d: 15 digits when they do (checked with the engine's exact parser),
+        // else "R". (.NET Framework's "R" checks with its own parse, which can be a bit off, and then prints 17 digits.)
+        public static string R(double d)
+        {
+            string s = d.ToString("G15", CultureInfo.InvariantCulture);
+            double back;
+            if (FastDouble(s, null, 0, s.Length, out back) && back == d) return s;
+            return d.ToString("R", CultureInfo.InvariantCulture);
+        }
         public static string Num(double d)
         {
             if (double.IsNaN(d)) return "nan";
             if (double.IsInfinity(d)) return d > 0 ? "inf" : "-inf";
-            return d.ToString("R", CultureInfo.InvariantCulture);
+            return R(d);
         }
         public static string ToText(object v, DataType t)
         {
@@ -345,6 +354,70 @@ namespace NativeDataEngine
             return null;
         }
 
+        // ---- Fast exact parsers over text in a string (str) or a char buffer (arr[s..s+n)): no allocation. ----
+        // FastDouble: up to 15 significant digits, no exponent -> one IEEE division of two exact values, i.e. the correctly
+        // rounded double (.NET Framework's double.Parse can be one bit off). ParseDouble, CSV and SQL number literals all
+        // use it, so the same text always gives the same double. Anything else returns false (callers fall back).
+        static readonly double[] P10 = { 1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22 };
+        static bool White(char c) { return c == ' ' || (c >= '\t' && c <= '\r'); }
+        public static bool FastDouble(string str, char[] arr, int s, int n, out double v)
+        {
+            v = 0; int i = s, e = s + n;
+            while (i < e && White(str != null ? str[i] : arr[i])) i++;
+            while (e > i && White(str != null ? str[e - 1] : arr[e - 1])) e--;
+            bool neg = false;
+            if (i < e) { char c0 = str != null ? str[i] : arr[i]; if (c0 == '-' || c0 == '+') { neg = c0 == '-'; i++; } }
+            long m = 0; int digits = 0, frac = 0; bool dot = false, any = false;
+            for (; i < e; i++)
+            {
+                char c = str != null ? str[i] : arr[i];
+                if (c >= '0' && c <= '9')
+                {
+                    any = true;
+                    if (dot) frac++;
+                    if (m == 0 && c == '0') { if (dot && frac > 22) return false; continue; }
+                    if (++digits > 15) return false;
+                    m = m * 10 + (c - '0');
+                }
+                else if (c == '.' && !dot) dot = true;
+                else return false;
+            }
+            if (!any || frac > 22) return false;
+            if (m == 0) { v = 0; return true; }
+            double d = frac > 0 ? m / P10[frac] : m;
+            v = neg ? -d : d;
+            return true;
+        }
+        public static bool FastLong(char[] a, int s, int n, out long v)
+        {
+            v = 0; int i = s, e = s + n;
+            while (i < e && White(a[i])) i++;
+            while (e > i && White(a[e - 1])) e--;
+            bool neg = false;
+            if (i < e && (a[i] == '-' || a[i] == '+')) { neg = a[i] == '-'; i++; }
+            if (i >= e || e - i > 18) return false;
+            long m = 0;
+            for (; i < e; i++) { char c = a[i]; if (c < '0' || c > '9') return false; m = m * 10 + (c - '0'); }
+            v = neg ? -m : m;
+            return true;
+        }
+        // yyyy-MM-dd exactly (ParseDate accepts more: callers fall back to it).
+        public static bool FastDate(char[] a, int s, int n, out long days)
+        {
+            days = 0;
+            if (n != 10 || a[s + 4] != '-' || a[s + 7] != '-') return false;
+            int y = 0, mo = 0, d = 0;
+            for (int k = 0; k < 10; k++)
+            {
+                if (k == 4 || k == 7) continue;
+                char c = a[s + k]; if (c < '0' || c > '9') return false;
+                if (k < 4) y = y * 10 + (c - '0'); else if (k < 7) mo = mo * 10 + (c - '0'); else d = d * 10 + (c - '0');
+            }
+            if (y < 1 || mo < 1 || mo > 12 || d < 1 || d > DateTime.DaysInMonth(y, mo)) return false;
+            days = Days(new DateTime(y, mo, d, 0, 0, 0, DateTimeKind.Utc));
+            return true;
+        }
+
         // Text -> value parsers (CSV, casts). Return false when the text does not fit the type.
         public static bool ParseLong(string s, out long v)
         {
@@ -352,6 +425,7 @@ namespace NativeDataEngine
         }
         public static bool ParseDouble(string s, out double v)
         {
+            if (FastDouble(s, null, 0, s.Length, out v)) return true;
             if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v)) return true;
             string t = s.Trim().ToLowerInvariant();
             if (t == "nan") { v = double.NaN; return true; }
@@ -425,8 +499,7 @@ namespace NativeDataEngine
                 case Kind.Double: case Kind.Decimal:
                     double d = c.F[i];
                     if (double.IsNaN(d) || double.IsInfinity(d)) AppendJsonString(sb, Num(d));
-                    else if (c.Type.Kind == Kind.Decimal) sb.Append(Math.Round(d, c.Type.Scale).ToString("R", CultureInfo.InvariantCulture));
-                    else sb.Append(d.ToString("R", CultureInfo.InvariantCulture));
+                    else sb.Append(R(c.Type.Kind == Kind.Decimal ? Math.Round(d, c.Type.Scale) : d));
                     return;
                 default: AppendJsonString(sb, Text(c, i)); return;
             }

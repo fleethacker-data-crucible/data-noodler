@@ -514,12 +514,13 @@ namespace NativeDataEngine
                     {
                         bool large = a.Id == ArrowTypes.LargeUtf8 || a.Id == ArrowTypes.LargeBinary;
                         int d = (int)(off[2] - lo); string[] o = c.S;
+                        TextIntern shared = new TextIntern();   // repeated values: one string each (like Parquet dictionaries)
                         for (int i = 0; i < n; i++)
                         {
                             if (c.IsNull(i)) continue;
                             long s0 = large ? BitConverter.ToInt64(raw, p + 8 * i) : BitConverter.ToInt32(raw, p + 4 * i);
                             long s1 = large ? BitConverter.ToInt64(raw, p + 8 * i + 8) : BitConverter.ToInt32(raw, p + 4 * i + 4);
-                            o[i] = s1 == s0 ? "" : Encoding.UTF8.GetString(raw, d + (int)s0, (int)(s1 - s0));
+                            o[i] = s1 == s0 ? "" : shared.Get(raw, d + (int)s0, (int)(s1 - s0));
                         }
                         break;
                     }

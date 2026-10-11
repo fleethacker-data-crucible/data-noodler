@@ -34,7 +34,11 @@ namespace NativeDataEngine
         readonly TextReader r; readonly char delim, quote;
         readonly char[] buf = new char[1 << 16]; int len, pos; bool eof;
         public long Records;
-        readonly StringBuilder field = new StringBuilder(256);
+        // The current record: field k is Rec[Start[k] .. Start[k] + Len[k]) (quotes removed, "" unescaped); Quoted[k] = it was
+        // quoted. Read straight from here (no string per field); Text(k) makes one when needed.
+        public char[] Rec = new char[1024]; public int[] Start = new int[64], Len = new int[64]; public bool[] Quoted = new bool[64];
+        public int Count;
+        int recLen;
 
         public CsvParser(Stream s, char delim, char quote)
         {
@@ -42,20 +46,27 @@ namespace NativeDataEngine
             this.delim = delim; this.quote = quote;
         }
         bool Fill() { if (eof) return false; len = r.Read(buf, 0, buf.Length); pos = 0; if (len <= 0) { eof = true; len = 0; return false; } return true; }
-
-        // Next record into fields (reused). Returns false at end of file.
-        public bool Next(List<string> fields)
+        void Put(char c) { if (recLen == Rec.Length) Array.Resize(ref Rec, Rec.Length * 2); Rec[recLen++] = c; }
+        void End(int fieldStart, bool wasQuoted)
         {
-            fields.Clear();
+            if (Count == Start.Length) { Array.Resize(ref Start, Count * 2); Array.Resize(ref Len, Count * 2); Array.Resize(ref Quoted, Count * 2); }
+            Start[Count] = fieldStart; Len[Count] = recLen - fieldStart; Quoted[Count] = wasQuoted; Count++;
+        }
+        public string Text(int k) { return new string(Rec, Start[k], Len[k]); }
+
+        // Next record into Rec / Start / Len / Quoted / Count. Returns false at end of file.
+        public bool Next()
+        {
+            Count = 0; recLen = 0;
             if (pos >= len && !Fill()) return false;
-            field.Length = 0;
+            int fs = 0;
             bool quoted = false, wasQuoted = false;
             while (true)
             {
                 if (pos >= len && !Fill())
                 {
                     if (quoted) throw new EngineException("CSV_INVALID_QUOTE", "Unclosed quote in the last record (record " + (Records + 1) + ").");
-                    fields.Add(Take(wasQuoted)); Records++; return true;
+                    End(fs, wasQuoted); Records++; return true;
                 }
                 char c = buf[pos++];
                 if (quoted)
@@ -63,24 +74,31 @@ namespace NativeDataEngine
                     if (c == quote)
                     {
                         if (pos >= len) Fill();
-                        if (pos < len && buf[pos] == quote) { field.Append(quote); pos++; }
+                        if (pos < len && buf[pos] == quote) { Put(quote); pos++; }
                         else quoted = false;
                     }
-                    else field.Append(c);
+                    else Put(c);
                     continue;
                 }
-                if (c == delim) { fields.Add(Take(wasQuoted)); wasQuoted = false; continue; }
+                if (c == delim) { End(fs, wasQuoted); fs = recLen; wasQuoted = false; continue; }
                 if (c == '\n' || c == '\r')
                 {
                     if (c == '\r') { if (pos >= len) Fill(); if (pos < len && buf[pos] == '\n') pos++; }
-                    if (fields.Count == 0 && field.Length == 0 && !wasQuoted) { if (pos >= len && !Fill()) return false; continue; }   // blank line
-                    fields.Add(Take(wasQuoted)); Records++; return true;
+                    if (Count == 0 && recLen == fs && !wasQuoted) { if (pos >= len && !Fill()) return false; continue; }   // blank line
+                    End(fs, wasQuoted); Records++; return true;
                 }
-                if (c == quote && field.Length == 0 && !wasQuoted) { quoted = true; wasQuoted = true; continue; }
-                field.Append(c);
+                if (c == quote && recLen == fs && !wasQuoted) { quoted = true; wasQuoted = true; continue; }
+                Put(c);
             }
         }
-        string Take(bool wasQuoted) { string s = field.ToString(); field.Length = 0; return wasQuoted ? "\u0000Q" + s : s; }
+        // Next record as strings (detection, samples): a quoted field carries a "\0Q" prefix (Clean removes it).
+        public bool Next(List<string> fields)
+        {
+            fields.Clear();
+            if (!Next()) return false;
+            for (int k = 0; k < Count; k++) { string s = Text(k); fields.Add(Quoted[k] ? "\u0000Q" + s : s); }
+            return true;
+        }
         public static string Clean(string s, out bool quoted) { quoted = s.StartsWith("\u0000Q", StringComparison.Ordinal); return quoted ? s.Substring(2) : s; }
         public void Dispose() { r.Dispose(); }
     }
@@ -330,19 +348,19 @@ namespace NativeDataEngine
             using (Stream st = new RangeStream(raw, to - from))
             using (CsvParser p = new CsvParser(st, shape.Delimiter, opt.Quote))
             {
-                List<string> f = new List<string>();
-                if (shape.Header && unit == 0) p.Next(f);
+                if (shape.Header && unit == 0) p.Next();
                 ColumnBuilder[] cb = NewBuilders(s, per);
+                bool[] read = new bool[w]; for (int c = 0; c < w; c++) read[c] = needed == null || needed.Contains(c);
+                TextIntern[] intern = new TextIntern[w]; for (int c = 0; c < w; c++) if (s[c].Type.Kind == Kind.String) intern[c] = new TextIntern();
                 int rows = 0;
-                while (p.Next(f))
+                while (p.Next())
                 {
-                    if (f.Count == 1 && w > 1 && f[0].Length == 0) continue;
+                    if (p.Count == 1 && w > 1 && p.Len[0] == 0) continue;
                     for (int c = 0; c < w; c++)
                     {
-                        if (needed != null && !needed.Contains(c)) continue;
-                        if (c >= f.Count) { cb[c].AddNull(); continue; }
-                        bool q; string v = CsvParser.Clean(f[c], out q);
-                        Add(cb[c], s[c].Type, v, q, c, ctx);
+                        if (!read[c]) continue;
+                        if (c >= p.Count) { cb[c].AddNull(); continue; }
+                        AddField(cb[c], s[c].Type, p, c, intern[c], ctx);
                     }
                     if (++rows == per)
                     {
@@ -355,16 +373,34 @@ namespace NativeDataEngine
                 if (ctx.Job != null) ctx.Job.AddBytes(st.Length - reported);
             }
         }
-        static ColumnBuilder[] NewBuilders(Schema s, int per) { ColumnBuilder[] cb = new ColumnBuilder[s.Count]; for (int c = 0; c < cb.Length; c++) cb[c] = new ColumnBuilder(s[c].Type, Math.Min(per, 4096)); return cb; }
+        static ColumnBuilder[] NewBuilders(Schema s, int per) { ColumnBuilder[] cb = new ColumnBuilder[s.Count]; for (int c = 0; c < cb.Length; c++) cb[c] = new ColumnBuilder(s[c].Type, per); return cb; }
         Batch Build(Schema s, ColumnBuilder[] cb, int rows)
         {
             Column[] cs = new Column[cb.Length];
             for (int c = 0; c < cs.Length; c++)
             {
                 if (needed != null && !needed.Contains(c)) { Column ph = new Column(DataType.Null, 0); ph.Type = s[c].Type; ph.Length = rows; ph.Nulls = null; cs[c] = ph; }   // never read: length only
-                else cs[c] = cb[c].ToColumn();
+                else cs[c] = cb[c].Detach();   // a full batch hands its arrays over (no copy)
             }
             return new Batch(s, cs, rows);
+        }
+
+        // One field straight from the parser's record buffer: numbers and yyyy-MM-dd dates without making a string
+        // (exact fast parsers), repeated text shared; anything else takes the general path (Add) with the same rules.
+        void AddField(ColumnBuilder b, DataType t, CsvParser p, int c, TextIntern intern, ExecCtx ctx)
+        {
+            int st = p.Start[c], n = p.Len[c]; char[] a = p.Rec;
+            if (n > 0 && opt.NullText.Length == 0)
+            {
+                switch (t.Kind)
+                {
+                    case Kind.String: b.AddString(intern.Get(a, st, n)); return;
+                    case Kind.Int: { long l; if (Values.FastLong(a, st, n, out l)) { b.AddLong(l); return; } break; }
+                    case Kind.Double: case Kind.Decimal: { double d; if (Values.FastDouble(null, a, st, n, out d)) { b.AddDouble(d); return; } break; }
+                    case Kind.Date: { long d; if (Values.FastDate(a, st, n, out d)) { b.AddLong(d); return; } break; }
+                }
+            }
+            Add(b, t, p.Text(c), p.Quoted[c], c, ctx);
         }
 
         void Add(ColumnBuilder b, DataType t, string v, bool quoted, int c, ExecCtx ctx)

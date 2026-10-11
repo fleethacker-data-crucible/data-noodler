@@ -295,20 +295,6 @@ namespace NativeDataEngine
             if (ps.Cur.T != Tk.End) throw ps.Err("Unexpected " + ps.Cur);
             return q;
         }
-        public static Expr ParseExpr(string sql)
-        {
-            Parser ps = new Parser(sql);
-            Expr e = ps.Expression();
-            if (ps.Cur.T != Tk.End) throw ps.Err("Unexpected " + ps.Cur);
-            return e;
-        }
-        // "a, b DESC" -> order items; "a, b" -> expressions.
-        public static List<OrderItem> ParseOrder(string sql)
-        {
-            Parser ps = new Parser(sql); List<OrderItem> r = ps.OrderList();
-            if (ps.Cur.T != Tk.End) throw ps.Err("Unexpected " + ps.Cur);
-            return r;
-        }
 
         private Token Cur { get { return t[p]; } }
         private Token Peek(int k) { return t[Math.Min(p + k, t.Count - 1)]; }
@@ -687,7 +673,7 @@ namespace NativeDataEngine
                 {
                     long v; if (long.TryParse(c.V, NumberStyles.None, CultureInfo.InvariantCulture, out v)) { l.Value = v; l.Type = DataType.BigInt; return l; }
                 }
-                l.Value = double.Parse(c.V, CultureInfo.InvariantCulture); l.Type = DataType.Double; return l;
+                double dv; if (!Values.ParseDouble(c.V, out dv)) dv = double.Parse(c.V, CultureInfo.InvariantCulture); l.Value = dv; l.Type = DataType.Double; return l;
             }
             if (c.T == Tk.Str) { p++; Lit l = new Lit(); l.Value = c.V; l.Type = DataType.Varchar; return l; }
             if (c.T == Tk.Op && c.V == "(")

@@ -390,17 +390,8 @@ namespace NativeDataEngine
                         {
                             List<string> names = ParquetFileWriter.UniqueNames(p.Op.Schema);
                             w.Write(string.Join(d.ToString(), names.Select(n => CsvCell(n, d))) + "\r\n");
-                            StringBuilder sb = new StringBuilder();
-                            foreach (Batch b in p.Op.Run(ctx))
-                            {
-                                for (int r = 0; r < b.Rows; r++)
-                                {
-                                    sb.Length = 0;
-                                    for (int c = 0; c < b.Cols.Length; c++) { if (c > 0) sb.Append(d); string v = Values.Text(b.Cols[c], r); if (v != null) sb.Append(CsvCell(v, d)); }
-                                    sb.Append("\r\n"); w.Write(sb.ToString());
-                                }
-                                rows += b.Rows;
-                            }
+                            // Each batch is turned into text on the workers; the pieces are written in order.
+                            Encode<KeyValuePair<int, string>>(p.Op, ctx, b => new KeyValuePair<int, string>(b.Rows, CsvText(b, d)), kv => { w.Write(kv.Value); rows += kv.Key; });
                         }
                     }
                     else if (format == "parquet" || format == "pq")
@@ -425,6 +416,16 @@ namespace NativeDataEngine
                 res["path"] = PathGuard.Rel(Root, to); res["rows"] = rows; res["bytes"] = new FileInfo(to).Length; res["format"] = format;
                 return res;
             });
+        }
+        static string CsvText(Batch b, char d)
+        {
+            StringBuilder sb = new StringBuilder(Math.Min(1 << 22, b.Rows * 8 * Math.Max(1, b.Cols.Length)));
+            for (int r = 0; r < b.Rows; r++)
+            {
+                for (int c = 0; c < b.Cols.Length; c++) { if (c > 0) sb.Append(d); string v = Values.Text(b.Cols[c], r); if (v != null) sb.Append(CsvCell(v, d)); }
+                sb.Append("\r\n");
+            }
+            return sb.ToString();
         }
         static string CsvCell(string v, char d)
         {

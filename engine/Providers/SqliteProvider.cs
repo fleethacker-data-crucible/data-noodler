@@ -19,7 +19,6 @@ namespace NativeDataEngine
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_finalize(IntPtr stmt);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_column_count(IntPtr stmt);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern IntPtr sqlite3_column_name(IntPtr stmt, int i);
-        [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern IntPtr sqlite3_column_decltype(IntPtr stmt, int i);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_column_type(IntPtr stmt, int i);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern long sqlite3_column_int64(IntPtr stmt, int i);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern double sqlite3_column_double(IntPtr stmt, int i);
@@ -100,7 +99,6 @@ namespace NativeDataEngine
         public void Reset() { WinSQLite.sqlite3_reset(st); }
         public int Columns { get { return WinSQLite.sqlite3_column_count(st); } }
         public string Name(int i) { return WinSQLite.Utf8(WinSQLite.sqlite3_column_name(st, i)); }
-        public string Decl(int i) { return WinSQLite.Utf8(WinSQLite.sqlite3_column_decltype(st, i)); }
         public int Kind(int i) { return WinSQLite.sqlite3_column_type(st, i); }
         public long Long(int i) { return WinSQLite.sqlite3_column_int64(st, i); }
         public double Double(int i) { return WinSQLite.sqlite3_column_double(st, i); }
