@@ -55,10 +55,13 @@
       <button id="run" title="Run the checked tests for every checked size, rows per batch and worker count">Run</button>
       <button id="stop" class="ghost" disabled title="Stop after cancelling the step that is running">Stop</button>
       <button id="report" class="ghost" title="Save the results as a Markdown report in temp/bench/reports/">Save Report</button>
-      <button id="clear" class="ghost" title="Clear the results table (test data stays)">Clear Results</button>
-      <button id="make" class="ghost" title="Make the test data for every checked size now (temp/bench/data). Run also makes whatever is missing.">Create Test Data</button>
-      <button id="purge" class="ghost" title="Free engine memory: cached tables, loaded datasets, garbage collection">Purge Memory</button>
-      <button id="wipe" class="danger" title="Delete every file the tests made (temp/bench/data). Results and reports stay.">Wipe Test Data</button>
+      <span class="dd-wrap"><button id="utils" class="ghost" title="Test data, results and memory (hold Shift for descriptions)">Utilities ▾</button>
+        <div class="dd-menu right" id="utilmenu">
+          <div data-act="make">Generate Test Data<small>Make the test data for every checked size now (temp/bench/data). Run also makes whatever is missing.</small></div>
+          <div data-act="wipe">Remove Test Data<small>Delete every file the tests made (temp/bench/data). Results and reports stay.</small></div>
+          <div data-act="clear">Clear Results<small>Clear the results table (test data stays).</small></div>
+          <div data-act="purge">Purge Memory<small>Free engine memory: cached tables, loaded datasets, garbage collection.</small></div>
+        </div></span>
     </div>
     <div class="cards">
       <div class="card read"><label>Read</label><b id="cRead">–</b><small id="sRead">&nbsp;</small></div>
@@ -77,6 +80,7 @@
 <dialog id="memDlg"><h3>Pre-calculating memory limitations</h3><div id="memMsg" class="muted">Starting</div><div class="progress"><i id="memBar"></i></div></dialog>
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/ui.js"></script>
+<script src="../js/core/menus.js"></script>
 <script src="../js/core/engine-client.js"></script>
 <script src="../js/bench/bench-tests.js"></script>
 <script src="../js/bench/benchmark.js"></script>

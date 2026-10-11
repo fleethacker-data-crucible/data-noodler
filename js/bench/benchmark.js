@@ -2,7 +2,7 @@
 // Pick sizes, tests, worker counts and rows per batch (check boxes), Run: every checked test runs for every checked
 // size x rows per batch x worker count (1 .. the engine's max). Live cards show the step running; the table keeps every
 // result. Results + choices are saved in temp/bench/benchmark.json (gitignored) and come back when the page opens.
-// Save Report writes temp/bench/reports/benchmark-<time>.md. Wipe Test Data deletes temp/bench/data.
+// Save Report writes temp/bench/reports/benchmark-<time>.md. Utilities: Generate / Remove Test Data, Clear Results, Purge Memory.
 (() => {
   const { $, esc } = UI, T = BenchTests;
   const FILE = `${T.DIR}/benchmark.json`, DEFAULT_BATCH = 100000;
@@ -118,7 +118,7 @@
   $('run').onclick = UI.guard(async () => {
     if (running) return;
     running = true; stopped = false; runT0 = performance.now();
-    $('run').disabled = true; $('stop').disabled = false; ['make', 'report', 'clear', 'purge', 'wipe'].forEach(id => $(id).disabled = true);
+    $('run').disabled = true; $('stop').disabled = false; ['report', 'utils'].forEach(id => $(id).disabled = true);
     const total = st.sizes.length * st.batches.length * st.tests.length * st.threads.length; let done = 0;
     const prog = (label) => { $('cProg').textContent = `${done} / ${total}`; $('sProg').textContent = label; $('bar').style.width = `${(100 * done / total).toFixed(1)}%`; $('status').textContent = label; };
     const ctxBase = { call, job, stopped: () => stopped, say: t => prog(t) };
@@ -160,18 +160,18 @@
     } finally {
       live = null; running = false;
       await setBatch(DEFAULT_BATCH); await T.dropMem(call).catch(() => {});
-      $('stop').disabled = true; ['make', 'report', 'clear', 'purge', 'wipe'].forEach(id => $(id).disabled = false); plan(); save();
+      $('stop').disabled = true; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); save();
     }
   });
   $('stop').onclick = async () => { stopped = true; $('stop').disabled = true; $('status').textContent = 'Stopping…'; if (curJob) await Engine.cancel(curJob).catch(() => {}); };
   addEventListener('pagehide', () => { try { fetch('/api/engine/options', { method: 'POST', keepalive: true, headers: { 'X-DN-Token': window.DN_TOKEN || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ batchRows: DEFAULT_BATCH }) }); } catch {} });
 
   // ---- clear / wipe / report ----
-  $('clear').onclick = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); });
-  $('make').onclick = UI.guard(async () => {
+  const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); });
+  const doMake = UI.guard(async () => {
     if (running) throw new Error('Stop the run first.');
     if (!st.sizes.length) throw new Error('Check at least one size under Rows.');
-    running = true; ['run', 'make', 'report', 'clear', 'purge', 'wipe'].forEach(id => $(id).disabled = true); runT0 = performance.now();
+    running = true; ['run', 'report', 'utils'].forEach(id => $(id).disabled = true); runT0 = performance.now();
     try {
       for (let i = 0; i < st.sizes.length; i++) {
         const n = st.sizes[i], say = t => { $('status').textContent = t; $('sProg').textContent = t; log(t); };
@@ -181,20 +181,21 @@
       }
       $('cProg').textContent = `${st.sizes.length} / ${st.sizes.length}`; $('bar').style.width = '100%';
       log(`Test data ready for ${st.sizes.map(T.sizeLabel).join(', ')} rows (${fmtS(performance.now() - runT0)}).`, 'ok'); UI.toast('Test data ready', 'ok');
-    } finally { running = false; ['make', 'report', 'clear', 'purge', 'wipe'].forEach(id => $(id).disabled = false); plan(); }
+    } finally { running = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
   });
-  $('purge').onclick = UI.guard(async () => {
+  const doPurge = UI.guard(async () => {
     if (running) throw new Error('Stop the run first.');
     await T.dropMem(call);
     const r = await call('memory/purge', {});
     log(`Memory purged: ${r.tables} table(s), ${r.datasets} dataset(s) freed; engine holds ${UI.bytes(r.managed)}.`, 'ok'); UI.toast('Engine memory purged', 'ok');
   });
-  $('wipe').onclick = UI.guard(async () => {
-    if (!await UI.confirm('Delete every file the tests made (temp/bench/data)? Results and reports stay.', { danger: true, ok: 'Wipe' })) return;
+  const doWipe = UI.guard(async () => {
+    if (!await UI.confirm('Delete every file the tests made (temp/bench/data)? Results and reports stay.', { danger: true, ok: 'Remove' })) return;
     await T.dropMem(call);
     await DNFS.remove(T.DATA, { recursive: true }).catch(() => {});
-    log('Test data wiped.', 'ok'); UI.toast('Test data wiped', 'ok');
+    log('Test data removed.', 'ok'); UI.toast('Test data removed', 'ok');
   });
+  Menus.bind($('utils'), $('utilmenu'), act => ({ make: doMake, wipe: doWipe, clear: doClear, purge: doPurge })[act]?.());
   function markdown() {
     const rows = Object.values(results).sort((a, b) => a.n - b.n || a.batch - b.batch || testOrder(a.id) - testOrder(b.id)), ts = threadCols();
     const m = status || {};

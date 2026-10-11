@@ -331,6 +331,27 @@ function Handle-Ui($req, $res, $rel) {
             Send-Json $res $(if ($err) { @{ ok = $false; error = $err } } else { @{ ok = $true } })
         }
         'api/clear' { $log.Clear(); Send-Json $res @{ ok = $true } }
+        # Purge Temp Data: deletes everything in <root>	emp it can (files in use, e.g. the loaded engine DLL or an open
+        # app window's browser profile, are skipped). Purge Project Trash: deletes projects\.trash.
+        'api/purge' {
+            $body = Read-Json $req
+            $dir = if ($body.what -eq 'trash') { Join-Path $root 'projects\.trash' } elseif ($body.what -eq 'temp') { Join-Path $root 'temp' } else { $null }
+            if (-not $dir) { Send-Json $res @{ ok = $false; error = 'Unknown purge.' }; break }
+            $bytes = 0; $skipped = 0
+            if ($body.what -eq 'temp' -and $script:engine) { try { [void]$script:engine.CacheDrop($null) } catch {} }
+            if (Test-Path -LiteralPath $dir) {
+                foreach ($f in @(Get-ChildItem -LiteralPath $dir -Recurse -Force -File -ErrorAction SilentlyContinue)) {
+                    try { $len = $f.Length; Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop; $bytes += $len } catch { $skipped++ }
+                }
+                foreach ($d in @(Get-ChildItem -LiteralPath $dir -Recurse -Force -Directory -ErrorAction SilentlyContinue | Sort-Object { $_.FullName.Length } -Descending)) {
+                    try { Remove-Item -LiteralPath $d.FullName -Force -ErrorAction Stop } catch {}
+                }
+            }
+            $mb = [Math]::Round($bytes / 1MB, 1)
+            $what = if ($body.what -eq 'trash') { 'Project trash' } else { 'Temp data' }
+            Add-Log 'sys' "$what purged: $mb MB freed$(if ($skipped) { ", $skipped file(s) in use skipped" })."
+            Send-Json $res @{ ok = $true; mb = $mb; skipped = $skipped }
+        }
         # User list shared by the whole project: config/users.json (site pages read it at /config/users.json).
         'api/users' {
             $file = Join-Path $root 'config\users.json'

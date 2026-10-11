@@ -221,6 +221,8 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
           <button id="clear" hidden>Clear log</button>
           <button id="users">Manage Users</button>
           <button id="settings">Settings</button>
+          <button id="purgeTemp" title="Delete the app's temporary data (temp folder: spills, write staging, Benchmark data, caches). Files in use are skipped. Projects are never touched.">Purge Temp Data</button>
+          <button id="purgeTrash" title="Permanently delete every project in the project trash (projects/.trash)">Purge Project Trash</button>
         </div>
         <!-- Developer shortcuts (orange): this section goes away in production. -->
         <h2 class="actions-title dev-title">Dev Actions</h2>
@@ -467,6 +469,15 @@ $('open').onclick = async () => {
   const r = await api('open', { page: selPage });
   if (!r.ok) msg(r.error, false);
 };
+
+// Purge Temp Data / Purge Project Trash.
+async function purge(what, ask) {
+  if (!confirm(ask)) return;
+  const r = await api('purge', { what });
+  msg(r.ok ? `${what === 'trash' ? 'Project trash' : 'Temp data'} purged: ${r.mb} MB freed${r.skipped ? `, ${r.skipped} file(s) in use skipped` : ''}.` : r.error, r.ok);
+}
+$('purgeTemp').onclick = () => purge('temp', 'Delete all temporary data in the temp folder (Benchmark data and results, spills, caches)? Projects are not touched.');
+$('purgeTrash').onclick = () => purge('trash', 'Permanently delete every project in the project trash? This cannot be undone.');
 
 // Benchmark page (also in the Project Manager's Utilities menu).
 $('bench').onclick = async () => {
