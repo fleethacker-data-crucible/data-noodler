@@ -69,6 +69,28 @@ const BenchTests = (() => {
   // Is the base test table for n rows there?
   const hasData = n => exists(`${dirOf(n)}/base/dataset.json`);
   // Makes whatever test data for n rows is missing (not timed). say(text, rows) reports each step (rows it writes).
+  // Every test file that can be made: { key, n, label, path, exists }. key = 'dim' | '<n>:base|csv|parquet|sqlite'.
+  async function dataItems() {
+    const items = [{ key: 'dim', n: 0, label: 'Store table (10,000 rows, for joins)', path: `${DATA}/dim/dataset.json` }];
+    for (const n of SIZES) {
+      items.push({ key: `${n}:base`, n, label: `${sizeLabel(n)} rows: Arrow dataset (the table every test reads)`, path: `${dirOf(n)}/base/dataset.json` });
+      for (const f of ['csv', 'parquet', 'sqlite']) items.push({ key: `${n}:${f}`, n, label: `${sizeLabel(n)} rows: ${f === 'csv' ? 'CSV' : f === 'sqlite' ? 'SQLite' : 'Parquet'} file`, path: `${dirOf(n)}/src.${f}` });
+    }
+    await Promise.all(items.map(async i => { i.exists = await exists(i.path); }));
+    return items;
+  }
+  // Makes the picked items (keys) that are missing; a size's files need its Arrow dataset, so that is made first.
+  async function makeItems(keys, say, job) {
+    const want = new Set(keys);
+    if (want.size && !await exists(`${DATA}/dim/dataset.json`)) want.add('dim');
+    if (want.has('dim') && !await exists(`${DATA}/dim/dataset.json`)) { say('Making the store table (10,000 rows)', 10000); await job('write', { sql: dimSql, dest: `${DATA}/dim` }); }
+    for (const n of SIZES) {
+      const D = dirOf(n), fs = ['csv', 'parquet', 'sqlite'].filter(f => want.has(`${n}:${f}`));
+      if ((want.has(`${n}:base`) || fs.length) && !await exists(`${D}/base/dataset.json`)) { say(`Making ${sizeLabel(n)} rows of test data (Arrow)`, n); await job('write', { sql: baseSql(n), dest: `${D}/base` }); }
+      for (const f of fs)
+        if (!await exists(`${D}/src.${f}`)) { say(`Making the ${sizeLabel(n)} ${f.toUpperCase()} file`, n); await job('export', { sql: `SELECT * FROM read_dataset(${lit(`${D}/base`)})`, to: `${D}/src.${f}`, format: f, table: 't' }); }
+    }
+  }
   async function ensureData(n, say, job) {
     const D = dirOf(n);
     if (!await exists(`${DATA}/dim/dataset.json`)) { say('Making the store table (10,000 rows)', 10000); await job('write', { sql: dimSql, dest: `${DATA}/dim` }); }
@@ -159,5 +181,5 @@ const BenchTests = (() => {
   const metricsOf = id => id === 'heavy' ? HEAVY.map(([q, l]) => ({ id: q, label: l, kind: 'query' }))
     : id.startsWith('rw-') ? [{ id: `${id}:read`, kind: 'read' }, { id: `${id}:write`, kind: 'write' }] : [{ id, kind: TESTS.find(t => t.id === id).kind }];
 
-  return { memoryPlan, hasData, DIR, DATA, SIZES, BATCHES, TESTS, HEAVY, sizeLabel, ensureData, run, dropMem, metricsOf };
+  return { memoryPlan, hasData, dataItems, makeItems, DIR, DATA, SIZES, BATCHES, TESTS, HEAVY, sizeLabel, ensureData, run, dropMem, metricsOf };
 })();

@@ -169,9 +169,37 @@
   // ---- clear / wipe / report ----
   const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); });
   // Generate Test Data: every checked size, all workers, in a popup listing each file with its progress.
-  const doMake = UI.guard(async () => {
+  // First a check list of every test file (missing ones of the checked sizes ticked; ones already there are greyed and
+  // marked); resolves with the picked keys, or null when cancelled.
+  async function pickData(message) {
+    const items = await T.dataItems(), dlg = $('pickDlg'), list = $('pickList');
+    $('pickMsg').textContent = message || 'Pick the test files to make. Files already there are skipped.';
+    let html = '', grp = null;
+    for (const i of items) {
+      const g = i.n ? `${T.sizeLabel(i.n)} rows` : 'Shared';
+      if (g !== grp) { grp = g; html += `<div class="grp">${esc(g)}</div>`; }
+      const on = !i.exists && (i.n === 0 || st.sizes.includes(i.n));
+      html += `<label class="${i.exists ? 'have' : ''}"><input type="checkbox" data-k="${esc(i.key)}" ${on ? 'checked' : ''} ${i.exists ? 'disabled' : ''}>${esc(i.label)}<small>${i.exists ? 'already there' : ''}</small></label>`;
+    }
+    list.innerHTML = html;
+    const boxes = () => [...list.querySelectorAll('input:not(:disabled)')];
+    const count = () => { const n = boxes().filter(b => b.checked).length; $('pickCount').textContent = `${n} of ${boxes().length} missing file${boxes().length !== 1 ? 's' : ''} picked`; $('pickGo').disabled = !n; };
+    list.onchange = count;
+    $('pickAll').onclick = () => { boxes().forEach(b => b.checked = true); count(); };
+    $('pickNone').onclick = () => { boxes().forEach(b => b.checked = false); count(); };
+    count();
+    dlg.showModal();
+    return new Promise(res => {
+      const done = v => { dlg.close(); $('pickGo').onclick = $('pickCancel').onclick = dlg.oncancel = null; res(v); };
+      $('pickGo').onclick = () => done(boxes().filter(b => b.checked).map(b => b.dataset.k));
+      $('pickCancel').onclick = () => done(null);
+      dlg.oncancel = e => { e.preventDefault(); done(null); };
+    });
+  }
+  const doMake = UI.guard(async message => {
     if (running) throw new Error('Stop the run first.');
-    if (!st.sizes.length) throw new Error('Check at least one size under Rows.');
+    const keys = await pickData(typeof message === 'string' ? message : null);
+    if (!keys?.length) return;
     running = true; ['run', 'report', 'utils'].forEach(id => $(id).disabled = true); runT0 = performance.now();
     const dlg = $('genDlg'), list = $('genList'); list.innerHTML = ''; $('genMsg').textContent = ''; $('genClose').disabled = true;
     dlg.showModal();
@@ -197,10 +225,10 @@
     };
     try {
       await setBatch(DEFAULT_BATCH);
-      for (const n of st.sizes) await T.ensureData(n, say, genJob);
+      await T.makeItems(keys, say, genJob);
       finish();
       if (!list.children.length) list.innerHTML = '<div class="muted">All test data is already there.</div>';
-      $('genMsg').textContent = `Test data ready for ${st.sizes.map(T.sizeLabel).join(', ')} rows (${fmtS(performance.now() - runT0)}).`;
+      $('genMsg').textContent = `Test data ready (${fmtS(performance.now() - runT0)}).`;
       log($('genMsg').textContent, 'ok');
     } catch (e) { $('genMsg').textContent = `Failed: ${e.message}`; log(`Generate test data: ${e.message}`, 'err'); }
     finally { $('genClose').disabled = false; running = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
@@ -218,7 +246,7 @@
     await DNFS.remove(T.DATA, { recursive: true }).catch(() => {});
     log('Test data removed.', 'ok'); UI.toast('Test data removed', 'ok');
   });
-  Menus.bind($('utils'), $('utilmenu'), act => ({ make: doMake, wipe: doWipe, clear: doClear, purge: doPurge })[act]?.());
+  Menus.bind($('utils'), $('utilmenu'), act => ({ make: () => doMake(), wipe: doWipe, clear: doClear, purge: doPurge })[act]?.());
   function markdown() {
     const rows = Object.values(results).sort((a, b) => a.n - b.n || a.batch - b.batch || testOrder(a.id) - testOrder(b.id)), ts = threadCols();
     const m = status || {};
@@ -279,6 +307,6 @@
     pick($('pBatches'), 'Rows per batch', T.BATCHES.map(v => ({ v, l: `${T.sizeLabel(v)} rows${v === DEFAULT_BATCH ? ' (default)' : ''}`, short: T.sizeLabel(v) })), 'batches');
     $('sub').textContent = status ? `${status.workers} workers on ${status.cores} logical cores · memory budget ${UI.bytes(status.memory?.budget || 0)} of ${UI.bytes(status.memory?.totalPhys || 0)} RAM` : $('sub').textContent;
     render(); plan();
-    if (noData && await UI.confirm(`There is no test data generated. Do you want to generate test data now? (${st.sizes.map(T.sizeLabel).join(', ')} rows: the sizes checked under Rows.)`, { ok: 'Yes', cancel: 'No' })) doMake();
+    if (noData) doMake('There is no test data generated. Pick the test files to generate now, or Cancel.');
   })();
 })();
