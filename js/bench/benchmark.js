@@ -246,7 +246,10 @@
   });
 
   // ---- start ----
+  // The activity log starts empty on every load (also when the browser restores the page from its back/forward cache).
+  addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
   (async () => {
+    $('log').innerHTML = '';
     try { status = await Engine.status(); maxW = status.workers; } catch (e) { log(`Engine not reachable: ${e.message}`, 'err'); }
     const saved = await DNFS.readJSONOr(FILE, null).catch(() => null);
     if (saved?.settings) st = { ...st, ...saved.settings };
