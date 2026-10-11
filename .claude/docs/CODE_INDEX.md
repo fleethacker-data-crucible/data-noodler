@@ -31,7 +31,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 |---|---|
 | `Data Noodler.lnk` | Entry point, no console flash: `conhost --headless powershell ... .server/server.ps1` (absolute paths). |
 | `rebuild-shortcut.ps1` | Recreates `Data Noodler.lnk` for the folder it is in (after moving the app). |
-| `__app-package.ps1` / `.cmd`, `__app.manifest` | Pack the whole app into one text file / rebuild it from that file (data, `.md`, `temp/` are not packed). |
+| `__app-package.ps1` / `.cmd` | Pack the app into `Data_Noodler_YY_MMDD_HHMM.gz` (one Base64 text file inside; skips what `.gitignore` ignores) / rebuild it byte for byte from the newest package. |
 | `.server/server.ps1` | HTTP server: site, panel API, file API, engine routing, project trash, logging, browser launch. |
 | `.server/engine-loader.ps1` | `Load-DataEngine` (hash `engine/**/*.cs` → cached DLL in `temp\engine\`, else `Add-Type` compile), `New-DataEngine`. |
 | `.server/server.html` | Control panel UI (inline CSS + JS), 1200×800; status cards, Server/Dev Actions; engine check via `/api/engine`. |
@@ -106,6 +106,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `js/grid/data-grid.js` (+ `data-grid.css`, `data-grid-pkg.js`, `grid-remote.js`) | `DNGrid`: Dashboard Data Grid (sort / filter / search, export, pop-out); engine paging (`GridRemote`). |
 | `js/grid/data-table.js` (+ `html/table-pop.html`) | `DataTable`: Import / Transform preview tables (schema-table look; Search, Pop-out, Export). |
 | `js/d3studio/studio.js`, `d3-api.js`, `d3-assist.js`, `observable.js` | D3 Studio: editor, inputs, data from a CLEAN_ dataset via the engine, live code file, Save / Publish; D3 API list, suggestions / checks, Observable import. |
+| `html/chart-builder.html`, `js/chartbuilder/builder.js`, `templates.js` | Chart Builder: the simple chart maker (chart types, drag fields onto slots, colours, settings, optional code drawer). Saves the same chart packages as D3 Studio, plus chart.json `builder`. |
 | `js/vendor/apexcharts.min.js`, `apextree.min.js`, `d3.min.js` (v7.9.0) | Vendored libraries (offline; no CDN at runtime). |
 
 ### Pages (`html/`)

@@ -615,6 +615,15 @@ function Complete-StaticJobs {
 # --- import api (source files outside the project) ---
 . (Join-Path $here 'import-api.ps1')
 
+# --- Data Noodler.lnk is relative (empty Start in); only its icon needs a full path: point it at this folder's assets ---
+try {
+    $lnkPath = Join-Path $root 'Data Noodler.lnk'; $ico = Join-Path $root 'assets\client_favicon.ico'
+    if ((Test-Path -LiteralPath $lnkPath) -and (Test-Path -LiteralPath $ico)) {
+        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
+        if ($lnk.IconLocation -ne "$ico,0") { $lnk.IconLocation = "$ico,0"; $lnk.Save() }
+    }
+} catch { Add-Log 'server' "Shortcut icon not updated: $($_.Exception.Message)" }
+
 # --- one-time rename: data/staged -> data/imported in every project, trashed project and snapshot ---
 try {
     $projRoot = Join-Path $root 'projects'

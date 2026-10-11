@@ -21,6 +21,9 @@ projects/*
 *.arrow
 *.feather
 
-# Always tracked: the single-file app package
-!__app.manifest
+# App packages (__app-package.ps1 Pack)
+Data_Noodler_*.gz
 
+
+# Installed version marker (Data_Noodler_Install.ps1)
+version.txt

@@ -73,6 +73,7 @@
       <span class="dd-wrap"><button id="utils" class="ghost" title="Global tools (hold Shift for descriptions)">Utilities ▾</button>
         <div class="dd-menu right" id="utilmenu">
           <div data-act="benchmark">Benchmark<small>Engine speed tests: imports, exports, reads / writes in every format and heavy queries, by data size, rows per batch and number of workers. Results stay on the page; Save Report writes a Markdown report.</small></div>
+          <div data-act="chartbuilder">Chart Builder<small>Make a chart the simple way: pick a chart type, drag fields onto it, set colours. The code is there when you want it. Saves the same charts as D3 Studio.</small></div>
           <div data-act="d3studio">D3 Studio<small>Build D3 charts: code, sample data and a live preview. Save keeps a chart in progress; Publish puts it in the Dashboard's Charts list.</small></div>
         </div></span>
     </div>
@@ -282,7 +283,7 @@ const srv = op => fetch(`/api/${op}`, { method: 'POST', keepalive: true, headers
 srv('hello'); addEventListener('pagehide', () => srv('bye'));
 // Utilities: global tools (no project).
 Menus.sort($('utilmenu'));
-Menus.bind($('utils'), $('utilmenu'), act => { if (act === 'd3studio' || act === 'benchmark') Windows.open(act); });
+Menus.bind($('utils'), $('utilmenu'), act => { if (act === 'd3studio' || act === 'chartbuilder' || act === 'benchmark') Windows.open(act); });
 $('srvctl').onclick = () => fetch('/api/panel', { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});
 $('new').onclick = UI.guard(async () => {
   await UserPicker.load();

@@ -1,12 +1,12 @@
 // Global header. Runs first (in <head>) on the Project Manager page and every module page; each opens in its own window.
-// Adds the same top bar everywhere: logo with the module's initials, "Data Noodler", module · project,
+// Adds a top bar on the Project Manager only (modules have none, for more room): logo with the module's initials, "Data Noodler", module · project,
 // Server and Engine status, and a separator line. The page's own logo/title is hidden (theme.css html.embedded),
 // so its own header row is left as the page toolbar. No Back buttons.
 // Global: GlobalHeader.setInfo(title, project)   (ModulePage calls it once the project is loaded)
 (() => {
   const id = location.pathname.split('/').pop().replace(/\.html$/, '');
   const MODS = { project_manager: ['Project Management Module', 'PR'], import: ['Import', 'IM'], pipeline: ['Transform', 'PL'], dashboard: ['Dashboard', 'DA'],
-    publish: ['Publish', 'PU'], update: ['Update', 'UP'], 'd3-studio': ['D3 Studio', 'D3'] };
+    publish: ['Publish', 'PU'], update: ['Update', 'UP'], 'd3-studio': ['D3 Studio', 'D3'], 'chart-builder': ['Chart Builder', 'CB'] };
   const [label, initials] = MODS[id] || [document.title || id, id.slice(0, 2).toUpperCase()];
   document.documentElement.classList.add('embedded');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -18,6 +18,7 @@
       }
       const el = document.getElementById('gh-sub'); if (el) el.textContent = project ? `${title} · ${project}` : title;
       if (id === 'd3-studio') { document.title = 'D3 Studio'; return; }
+      if (id === 'chart-builder') { document.title = 'Chart Builder'; return; }
       document.title = project ? `${title} · ${project}` : id === 'project_manager' ? 'Project Manager' : `${title} · Data Noodler`;
     },
   };
@@ -29,12 +30,12 @@
       <div class="spacer"></div>
       <div class="gh-status"><div class="stat"><label>Web Server (PowerShell)</label><b id="gh-srv" class="wait">CONNECTING</b></div>
       <div class="stat"><label>Data Engine (C#)</label><b id="gh-eng" class="wait" title="Click to re-run the test">TESTING</b></div></div>`;
-    document.body.prepend(h);
+    if (id === 'project_manager') document.body.prepend(h);   // the header is on the Project Manager only; modules use the full window
     G.setInfo(label, null);
     const hdr = () => ({ 'X-DN-Token': window.DN_TOKEN || '', 'Content-Type': 'application/json' });
 
     async function server() {
-      const el = document.getElementById('gh-srv');
+      const el = document.getElementById('gh-srv') || {};
       try {
         // 3 s timeout: a request to a stopped server can hang instead of failing.
         const r = await fetch('/api/status', { headers: hdr(), cache: 'no-store', signal: AbortSignal.timeout(3000) });
@@ -46,7 +47,7 @@
       } catch { el.textContent = 'OFFLINE'; el.className = 'off'; el.title = 'The server is not responding.'; return false; }
     }
     async function engine() {
-      const el = document.getElementById('gh-eng'); el.textContent = 'TESTING'; el.className = 'wait';
+      const el = document.getElementById('gh-eng') || {}; el.textContent = 'TESTING'; el.className = 'wait';
       const t0 = performance.now();
       try {
         const r = await (await fetch('/api/engine/query', { method: 'POST', headers: hdr(), body: JSON.stringify({ sql: 'SELECT sum(range) AS s FROM range(1000000)' }) })).json();
@@ -56,17 +57,17 @@
         el.title = `Native engine ${s.version}: ${s.workers} workers on ${s.cores} cores, memory budget ${(s.memory.budget / 1073741824).toFixed(1)} GB, test ${Math.round(performance.now() - t0)} ms. Click to re-test.`;
       } catch (e) { el.textContent = 'OFFLINE'; el.className = 'off'; el.title = e.message; }
     }
-    document.getElementById('gh-eng').onclick = engine;
+    if (document.getElementById('gh-eng')) document.getElementById('gh-eng').onclick = engine;
     // Status every 2 s; when the server comes back, the engine is re-tested too.
     let wasOff = false;
     // Server down = engine down (it runs in the server and stops with it); back up = re-test the engine.
     const poll = async () => {
       const off = !(await server());
-      if (off && !wasOff) { const e = document.getElementById('gh-eng'); e.textContent = 'OFFLINE'; e.className = 'off'; e.title = 'The server is stopped.'; }
+      if (off && !wasOff) { const e = document.getElementById('gh-eng') || {}; e.textContent = 'OFFLINE'; e.className = 'off'; e.title = 'The server is stopped.'; }
       if (wasOff && !off) engine();
       wasOff = off;
     };
-    poll(); setInterval(poll, 2000); engine();
+    poll(); setInterval(poll, 2000); if (id === 'project_manager') engine();   // modules: the poll only keeps the theme in step
   });
 
   // Every activity log (.log): 5 lines, with a Show More / Show Less link above it. Show More grows the log down to
