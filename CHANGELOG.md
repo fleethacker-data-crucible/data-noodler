@@ -2,6 +2,14 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: Parallel full sort
+
+- ORDER BY over all rows sorts one piece per worker at the same time, then merges the pieces in pairs (each merge
+  also split across the workers), with a comparer that reads the key arrays directly. 5M rows by a mostly-unique text
+  key: 8.2 s -> 1.1 s (12 workers); same order as before (ties by row position). Uses every core the machine has
+  (workers = logical cores, up to 64). The Benchmark's fast steps repeat and keep the median; engine times keep
+  fractions of a millisecond.
+
 ## 2026-10-11: SQLite reads 3x faster
 
 - SQLite text is read through one reused buffer per reader and repeated values are shared (TextIntern), instead of

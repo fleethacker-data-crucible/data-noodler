@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace NativeDataEngine
 {
@@ -402,15 +403,98 @@ namespace NativeDataEngine
             int[] o = Order(cur, keys, limit);
             return cur.Take(o, o.Length);
         }
-        public static int[] Order(Batch all, List<SortKey> keys, long limit)
+        public static int[] Order(Batch all, List<SortKey> keys, long limit) { return Order(all, keys, limit, 1); }
+        // parallel > 1 and enough rows: the rows are cut into one piece per worker, the pieces are sorted at the same time,
+        // then merged in pairs, round by round; every merge is itself split along its output (merge path) so all workers
+        // stay busy to the end. Ties fall back to row position, so the order is exactly the one a single sort gives.
+        public static int[] Order(Batch all, List<SortKey> keys, long limit, int parallel)
         {
             Column[] kc = new Column[keys.Count];
-            for (int k = 0; k < kc.Length; k++) kc[k] = keys[k].E.Eval(all);
-            int[] idx = new int[all.Rows];
-            for (int i = 0; i < idx.Length; i++) idx[i] = i;
-            Array.Sort(idx, (x, y) => Cmp(kc, keys, x, y));
+            for (int k = 0; k < kc.Length; k++) { kc[k] = keys[k].E.Eval(all); string[] warm = kc[k].S; }   // text decoded once, before threads share it
+            int n = all.Rows;
+            int[] idx = new int[n];
+            for (int i = 0; i < n; i++) idx[i] = i;
+            Comparison<int> cmp = new KeyCompare(kc, keys).Compare;
+            int p = Math.Min(parallel, n / 50000);
+            if (p < 2) Array.Sort(idx, cmp);
+            else
+            {
+                int[] at = new int[p + 1];
+                for (int k = 0; k <= p; k++) at[k] = (int)((long)n * k / p);
+                ParallelOptions po = new ParallelOptions { MaxDegreeOfParallelism = p };
+                IComparer<int> cmpr = Comparer<int>.Create(cmp);
+                Parallel.For(0, p, po, k => Array.Sort(idx, at[k], at[k + 1] - at[k], cmpr));
+                int[] tmp = new int[n];
+                List<int> bounds = new List<int>(at);
+                while (bounds.Count > 2)
+                {
+                    int pairs = (bounds.Count - 1) / 2, segs = Math.Max(1, p / pairs);
+                    int[] src = idx, dst = tmp; List<int> b = bounds;
+                    Parallel.For(0, pairs * segs, po, t =>
+                    {
+                        int k = t / segs, sg = t % segs, lo = b[2 * k], mid = b[2 * k + 1], hi = b[2 * k + 2], len = hi - lo;
+                        MergePart(src, dst, lo, mid, hi, (int)((long)len * sg / segs), (int)((long)len * (sg + 1) / segs), cmp);
+                    });
+                    List<int> nb = new List<int>();
+                    for (int k = 0; k < pairs; k++) nb.Add(bounds[2 * k]);
+                    if ((bounds.Count - 1) % 2 == 1) { int b0 = bounds[bounds.Count - 2]; Array.Copy(src, b0, dst, b0, n - b0); nb.Add(b0); }   // odd piece out: copied as it is
+                    nb.Add(n);
+                    idx = dst; tmp = src; bounds = nb;
+                }
+            }
             if (limit >= 0 && limit < idx.Length) Array.Resize(ref idx, (int)limit);
             return idx;
+        }
+        // Output positions [d0, d1) of the merge of src[lo, mid) and src[mid, hi) into dst[lo + d0, lo + d1): the start in
+        // each half is found by binary search on the diagonal (take the right side only when strictly smaller).
+        static void MergePart(int[] src, int[] dst, int lo, int mid, int hi, int d0, int d1, Comparison<int> cmp)
+        {
+            int na = mid - lo, nb = hi - mid;
+            Func<int, int> split = d =>
+            {
+                int l = Math.Max(0, d - nb), h = Math.Min(d, na);
+                while (l < h) { int m = (l + h) >> 1; if (cmp(src[mid + d - m - 1], src[lo + m]) < 0) h = m; else l = m + 1; }
+                return l;
+            };
+            int i = lo + split(d0), j = mid + (d0 - (i - lo)), o = lo + d0, end = lo + d1;
+            while (o < end)
+            {
+                if (i < mid && (j >= hi || cmp(src[j], src[i]) >= 0)) dst[o++] = src[i++];
+                else dst[o++] = src[j++];
+            }
+        }
+        // The sort keys' arrays, read directly (no per-call type checks): same order as Cmp.
+        sealed class KeyCompare
+        {
+            readonly long[][] li; readonly double[][] fl; readonly string[][] st; readonly bool[][] bo, nu; readonly bool[] allNull, desc, nf;
+            readonly Column[] kc; readonly List<SortKey> keys;
+            public KeyCompare(Column[] kc, List<SortKey> keys)
+            {
+                this.kc = kc; this.keys = keys; int n = kc.Length;
+                li = new long[n][]; fl = new double[n][]; st = new string[n][]; bo = new bool[n][]; nu = new bool[n][]; allNull = new bool[n]; desc = new bool[n]; nf = new bool[n];
+                for (int k = 0; k < n; k++)
+                {
+                    Column c = kc[k]; allNull[k] = c.Type.Kind == Kind.Null; nu[k] = c.Nulls; desc[k] = keys[k].Desc; nf[k] = keys[k].NullsFirst;
+                    li[k] = c.I; fl[k] = c.F; st[k] = c.S; bo[k] = c.B;
+                }
+            }
+            public int Compare(int a, int b)
+            {
+                for (int k = 0; k < li.Length; k++)
+                {
+                    bool[] nn = nu[k];
+                    bool an = allNull[k] || (nn != null && nn[a]), bn = allNull[k] || (nn != null && nn[b]);
+                    if (an || bn) { if (an && bn) continue; int z = an ? 1 : -1; return nf[k] ? -z : z; }
+                    int r;
+                    if (li[k] != null) r = li[k][a].CompareTo(li[k][b]);
+                    else if (fl[k] != null) r = fl[k][a].CompareTo(fl[k][b]);
+                    else if (st[k] != null) r = string.CompareOrdinal(st[k][a], st[k][b]);
+                    else if (bo[k] != null) r = bo[k][a].CompareTo(bo[k][b]);
+                    else r = BCmp.Compare(kc[k], a, kc[k], b);
+                    if (r != 0) return desc[k] ? -r : r;
+                }
+                return a.CompareTo(b);
+            }
         }
         public override IEnumerable<Batch> Run(ExecCtx ctx)
         {
@@ -439,7 +523,7 @@ namespace NativeDataEngine
             // Full sort in memory first; too big for the memory budget -> sorted runs on disk, merged.
             MemoryLease full = new MemoryLease(ctx.Mem, "Sorting");
             Batch rows = null; int[] order = null;
-            try { rows = Collect.All(child, ctx, full); order = Order(rows, keys, topN); full.Add(order.Length * 4L); }
+            try { rows = Collect.All(child, ctx, full); order = Order(rows, keys, topN, ctx.Parallel); full.Add(order.Length * 4L); }
             catch (Exception e) { full.Dispose(); rows = null; order = null; if (!Spill.IsOom(e)) throw; }
             if (rows == null) { foreach (Batch b in External(ctx)) yield return b; yield break; }
             try
@@ -468,7 +552,7 @@ namespace NativeDataEngine
             {
                 if (cur.Count == 0) return;
                 Batch all = Batch.Concat(child.Schema, cur); cur.Clear(); bytes = 0;
-                int[] o = Order(all, keys, -1);
+                int[] o = Order(all, keys, -1, ctx.Parallel);
                 SpillFile f = dir.File(child.Schema);
                 for (int at = 0; at < o.Length; at += per) { int n = Math.Min(per, o.Length - at); int[] part = new int[n]; Array.Copy(o, at, part, 0, n); f.Append(all.Take(part, n)); }
                 f.Finish(); runs.Add(f);
