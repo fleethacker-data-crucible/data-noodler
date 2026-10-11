@@ -117,6 +117,16 @@ namespace NativeDataEngine
             int n = WinSQLite.sqlite3_column_bytes(st, i); byte[] b = new byte[n]; Marshal.Copy(p, b, 0, n);
             return Encoding.UTF8.GetString(b);
         }
+        // Text through a reused buffer, repeated values shared (one string per distinct value, not one per row).
+        public string Text(int i, ref byte[] buf, TextIntern ti)
+        {
+            IntPtr p = WinSQLite.sqlite3_column_text(st, i); if (p == IntPtr.Zero) return null;
+            int n = WinSQLite.sqlite3_column_bytes(st, i);
+            if (n == 0) return "";
+            if (buf.Length < n) buf = new byte[Math.Max(n, buf.Length * 2)];
+            Marshal.Copy(p, buf, 0, n);
+            return ti.Get(buf, 0, n);
+        }
         public string Blob(int i)
         {
             IntPtr p = WinSQLite.sqlite3_column_blob(st, i); int n = WinSQLite.sqlite3_column_bytes(st, i);
@@ -201,6 +211,8 @@ namespace NativeDataEngine
             using (SqliteStmt s = db.Prepare(sql))
             {
                 ColumnBuilder[] cb = New(); int rows = 0;
+                byte[] buf = new byte[256];
+                TextIntern[] ti = new TextIntern[w]; for (int c = 0; c < w; c++) ti[c] = new TextIntern();
                 while (s.Step())
                 {
                     for (int c = 0; c < w; c++)
@@ -222,7 +234,7 @@ namespace NativeDataEngine
                                 if (k == 1 || k == 2) cb[c].AddBool(s.Long(c) != 0);
                                 else { bool b; if (Values.ParseBool(s.Text(c) ?? "", out b)) cb[c].AddBool(b); else cb[c].AddNull(); }
                                 break;
-                            default: cb[c].AddString(k == 4 ? s.Blob(c) : s.Text(c)); break;
+                            default: cb[c].AddString(k == 4 ? s.Blob(c) : s.Text(c, ref buf, ti[c])); break;
                         }
                     }
                     if (++rows == per)

@@ -2,6 +2,11 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: SQLite reads 3x faster
+
+- SQLite text is read through one reused buffer per reader and repeated values are shared (TextIntern), instead of
+  two new arrays per value: 5M rows into memory 384k -> 1.18M rows/s on 12 workers (1 worker 207k -> 511k); same answers.
+
 ## 2026-10-11: Purge Memory frees everything
 
 - Idle worker threads kept a reference to the last work they ran (whose closure can reach whole tables), so after
