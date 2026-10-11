@@ -1,5 +1,5 @@
 # Compiles the C# engine (engine\**\*.cs) with Add-Type and loads it. Dot-sourced by server.ps1 and tests.
-# The compiled DLL is cached in %LOCALAPPDATA%\data-noodler\engine\ keyed by a hash of the sources, so a
+# The compiled DLL is cached in <root>\temp\engine\ keyed by a hash of the sources, so a
 # restart without source changes loads in well under a second. Only .NET Framework assemblies are referenced.
 # ASCII only (Windows PowerShell 5.1 reads .ps1 files as ANSI).
 
@@ -19,11 +19,19 @@ function Get-EngineSourceHash([string]$Root) {
     return @{ files = $files; hash = $h.Substring(0, 16) }
 }
 
+# Every temporary file of this process (compiler scratch files, .NET Path.GetTempPath) goes to <root>\temp\sys.
+function Use-RootTemp([string]$Root) {
+    $t = Join-Path $Root 'temp\sys'
+    New-Item -ItemType Directory -Force $t | Out-Null
+    $env:TEMP = $t; $env:TMP = $t
+}
+
 function Load-DataEngine {
     param([Parameter(Mandatory = $true)][string]$Root, [switch]$Force)
     if (-not $Force -and ('NativeDataEngine.DataEngine' -as [type])) { return 'already loaded' }
     $src = Get-EngineSourceHash $Root
-    $cacheDir = Join-Path $env:LOCALAPPDATA 'data-noodler\engine'
+    Use-RootTemp $Root
+    $cacheDir = Join-Path $Root 'temp\engine'
     New-Item -ItemType Directory -Force $cacheDir | Out-Null
     $dll = Join-Path $cacheDir "NativeDataEngine-$($src.hash).dll"
     if (-not $Force -and (Test-Path $dll)) {

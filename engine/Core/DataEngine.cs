@@ -41,8 +41,9 @@ namespace NativeDataEngine
             Pool = new WorkerPool(workers);
             Mem = new MemoryGuard(options);
             Resident = new ResidentDatasets(this);
-            SpillRoot = Path.Combine(string.IsNullOrEmpty(options.WorkspacePath) ? Path.Combine(Root, "temp") : Path.GetFullPath(options.WorkspacePath), "spill");
-            try { if (Directory.Exists(SpillRoot)) Directory.Delete(SpillRoot, true); } catch { }   // spills left by a previous run
+            Datasets.TempRoot = string.IsNullOrEmpty(options.WorkspacePath) ? Path.Combine(Root, "temp") : Path.GetFullPath(options.WorkspacePath);
+            SpillRoot = Path.Combine(Datasets.TempRoot, "spill");
+            Datasets.Sweep(SpillRoot); Datasets.Sweep(Path.Combine(Datasets.TempRoot, "write"));   // left by a crash
             EngineLog.Write("engine", "Native engine " + Version + ": " + workers + " workers (" + Environment.ProcessorCount + " cores), memory budget " + MemoryGuard.Mb(Mem.Budget) +
                 " of " + MemoryGuard.Mb(Mem.TotalPhys) + (Environment.Is64BitProcess ? "" : " (32-bit process: limited)"));
         }
@@ -380,7 +381,7 @@ namespace NativeDataEngine
             string to = PathGuard.Project(Root, toRel, false);
             format = (format ?? Path.GetExtension(to).TrimStart('.')).ToLowerInvariant();
             Directory.CreateDirectory(Path.GetDirectoryName(to));
-            string tmp = to + ".tmp-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string tmp = Datasets.Staging(to);
             return WithWiden(() =>
             {
                 QueryStmt q; Catalog cat;

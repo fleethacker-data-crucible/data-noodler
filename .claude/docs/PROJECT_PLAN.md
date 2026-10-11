@@ -12,7 +12,7 @@ Data Noodler is a fully local, self-contained data analytics app. It runs in the
 
 - **Self-contained and local.** No CDNs, no package managers, no network calls to outside services at runtime. Fonts are vendored; the data engine is C# source in `engine/`.
 - **Stack:** HTML, CSS and JavaScript for the UI, served by `.server/server.ps1`. PowerShell only on the server side. No admin rights needed.
-- **No executables, no WebAssembly, no third-party DLLs.** No `.exe`, no Node.js, no DuckDB. The data engine is plain C# (C# 5) compiled at server start by PowerShell 5.1 `Add-Type` (our own DLL, cached in `%LOCALAPPDATA%`), using only .NET Framework assemblies and Windows' `winsqlite3.dll`.
+- **No executables, no WebAssembly, no third-party DLLs.** No `.exe`, no Node.js, no DuckDB. The data engine is plain C# (C# 5) compiled at server start by PowerShell 5.1 `Add-Type` (our own DLL, cached in `temp\engine`), using only .NET Framework assemblies and Windows' `winsqlite3.dll`.
 - **Paths are relative to the project root**, never absolute, so the folder can move between machines.
 - **File access stays inside the project root.** The app uses `js/dn-fs.js` (`DNFS`) → `/api/fs/*`. Data gets into the project by upload or by copying it in manually.
 - **Modular code.** Small single-purpose files and modules with a narrow API each, so errors stay contained. No massive files. See `CODE_INDEX.md`. Support docs live in `.claude/docs/`.

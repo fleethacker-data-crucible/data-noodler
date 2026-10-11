@@ -9,7 +9,7 @@ DLLs, no installs, no admin rights).
 - Double-click **`Data Noodler.lnk`** (rebuild it with `rebuild-shortcut.ps1` if the folder moved).
 - Or run `powershell -NoProfile -ExecutionPolicy Bypass -File .server\server.ps1`.
 
-The server compiles the engine (`engine/**/*.cs`, cached as a DLL in `%LOCALAPPDATA%\data-noodler\engine\`) and opens the
+The server compiles the engine (`engine/**/*.cs`, cached as a DLL in `temp\engine\`) and opens the
 **Project Manager**. The red **Server Control** button opens the control panel (port 8079: status, engine check, live log).
 
 ## How data flows

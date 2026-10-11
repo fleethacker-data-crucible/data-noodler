@@ -54,6 +54,33 @@ namespace NativeDataEngine
 
     public static class Datasets
     {
+        // The app temp folder (<root>\temp, set by the engine). Every temporary file the engine makes goes here:
+        // write staging (temp\write), spills (temp\spill). Deleting it never touches a project.
+        public static string TempRoot;
+        // Where to build target before swapping it in: temp\write when on the same drive (so the swap is a rename),
+        // else beside the target (a user-chosen export path on another drive).
+        public static string Staging(string target)
+        {
+            string name = Path.GetFileName(target.TrimEnd('\\')) + "-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            if (TempRoot != null && string.Equals(Path.GetPathRoot(Path.GetFullPath(target)), Path.GetPathRoot(TempRoot), StringComparison.OrdinalIgnoreCase))
+            {
+                string dir = Path.Combine(TempRoot, "write"); Directory.CreateDirectory(dir);
+                return Path.Combine(dir, name);
+            }
+            return target.TrimEnd('\\') + ".tmp-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+        }
+        // Removes what a crash left in a temp sub-folder (only items older than a day: another engine may be using newer ones).
+        public static void Sweep(string dir)
+        {
+            try
+            {
+                if (!Directory.Exists(dir)) return;
+                DateTime old = DateTime.UtcNow.AddDays(-1);
+                foreach (string d in Directory.GetDirectories(dir)) if (Directory.GetLastWriteTimeUtc(d) < old) DatasetWriter.TryDelete(d);
+                foreach (string f in Directory.GetFiles(dir)) if (File.GetLastWriteTimeUtc(f) < old) { try { File.Delete(f); } catch { } }
+            }
+            catch { }
+        }
         // Data files of a dataset: one .arrow / .parquet file, or a folder (dataset.json / manifest.json order, else part files by name).
         public static List<string> Files(string full)
         {
@@ -100,7 +127,8 @@ namespace NativeDataEngine
         public DatasetWriter(string root, string destFull, Schema schema, bool arrow, int codec, long partBytes, long partRows)
         {
             this.root = root; dest = destFull.TrimEnd('\\'); this.schema = schema; this.arrow = arrow; this.codec = codec; this.partBytes = partBytes; this.partRows = partRows;
-            tmp = dest + ".tmp-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            Directory.CreateDirectory(Path.GetDirectoryName(dest));   // the swap renames into it
+            tmp = Datasets.Staging(dest);
             Directory.CreateDirectory(tmp);
         }
 
@@ -158,7 +186,7 @@ namespace NativeDataEngine
             File.Move(Path.Combine(tmp, "dataset.json.tmp"), Path.Combine(tmp, "dataset.json"));
 
             // Swap: dest -> dest.old, tmp -> dest, then remove the old one (and a legacy single-file dest.parquet).
-            string oldDir = dest + ".old-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            string oldDir = Datasets.Staging(dest);
             bool moved = false;
             if (Directory.Exists(dest)) { Retry(() => Directory.Move(dest, oldDir)); moved = true; }
             try { Retry(() => Directory.Move(tmp, dest)); }

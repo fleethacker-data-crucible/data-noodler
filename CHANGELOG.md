@@ -2,6 +2,15 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: All temporary data stays in <root>\temp
+
+- Nothing temporary is written outside the app folder: `temp\engine` (compiled engine cache, was %LOCALAPPDATA%),
+  `temp\browser` (app-window browser profiles, was %LOCALAPPDATA%), `temp\sys` (compiler scratch and .NET temp
+  files: the server sets TEMP/TMP), `temp\write` (datasets and exports are built here, then swapped in; was a
+  `.tmp-` folder beside the target inside the project), `temp\spill`, `temp\bench`. Deleting `temp` never touches a
+  project. Only a user-chosen export path on another drive still stages beside the file.
+- Crash leftovers in `temp\write` / `temp\spill` older than a day are removed when the engine starts.
+
 ## 2026-10-11: Queries spill to disk instead of running out of memory
 
 - **GROUP BY, sorts, window functions, joins** work in memory first. When one would go over the engine memory budget it

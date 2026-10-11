@@ -33,7 +33,7 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `rebuild-shortcut.ps1` | Recreates `Data Noodler.lnk` for the folder it is in (after moving the app). |
 | `__app-package.ps1` / `.cmd`, `__app.manifest` | Pack the whole app into one text file / rebuild it from that file (data, `.md`, `temp/` are not packed). |
 | `.server/server.ps1` | HTTP server: site, panel API, file API, engine routing, project trash, logging, browser launch. |
-| `.server/engine-loader.ps1` | `Load-DataEngine` (hash `engine/**/*.cs` → cached DLL in `%LOCALAPPDATA%\data-noodler\engine\`, else `Add-Type` compile), `New-DataEngine`. |
+| `.server/engine-loader.ps1` | `Load-DataEngine` (hash `engine/**/*.cs` → cached DLL in `temp\engine\`, else `Add-Type` compile), `New-DataEngine`. |
 | `.server/server.html` | Control panel UI (inline CSS + JS), 1200×800; status cards, Server/Dev Actions; engine check via `/api/engine`. |
 | `.server/import-api.ps1` | Files outside the project: `/api/import/probe` (dead-drive timeouts), `read`, `copy` (Import "Copy into project"). |
 | `.server/settings.json` | `port`, `portMode`, `browser`, `theme`, `fileThreads`, `engineWorkers` (≤64), `engineMemory` (share of RAM). |

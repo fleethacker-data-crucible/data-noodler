@@ -18,6 +18,9 @@ trap { Show-Fatal "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineN
 $script:loadMs = 0
 $here = $PSScriptRoot
 $root = (Resolve-Path (Join-Path $here '..')).Path
+# Temporary files of this process (Add-Type compiler scratch, .NET temp) stay in the project: <root>\temp\sys.
+$env:TEMP = Join-Path $root 'temp\sys'; $env:TMP = $env:TEMP
+New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 $uiPort = 8079
 $settingsFile = Join-Path $here 'settings.json'
 $logFile = Join-Path $here ('logs\Data_Noodler_Server_Logs_{0:yyyy_MM_dd_HHmmss}.log' -f (Get-Date))
@@ -846,8 +849,8 @@ function Open-App($exe, $url, $profileName, [int]$Width = 0, [int]$Height = 0) {
     $h = [int]($wa.Height * 0.95); $w = [Math]::Min([int]($h * 1.6), $wa.Width)
     if ($Width -gt 0) { $w = [Math]::Min($Width, $wa.Width); $h = [Math]::Min($Height, $wa.Height) }
     $x = $wa.X + [int](($wa.Width - $w) / 2); $y = $wa.Y + [int](($wa.Height - $h) / 2)
-    # Profiles live outside the project; flags keep them minimal (no component downloads, cache, sync, extensions).
-    $dir = Join-Path $env:LOCALAPPDATA "data-noodler\$profileName"
+    # Profiles live in <root>\temp\browser (all generated data stays in the project's temp folder); flags keep them minimal (no component downloads, cache, sync, extensions).
+    $dir = Join-Path $root "temp\browser\$profileName"
     # The browser remembers the last app-window size and ignores --window-size; forget it so the fixed size applies.
     $pref = Join-Path $dir 'Default\Preferences'
     if (Test-Path $pref) {
@@ -914,7 +917,7 @@ $uiUrl = "http://localhost:$uiPort/"
 $browser = (Find-Browser 'edge'), (Find-Browser 'chrome') | Where-Object { $_ } | Select-Object -First 1
 $script:panelBeat = $null
 function Open-Panel {
-    $dir = Join-Path $env:LOCALAPPDATA 'data-noodler\.profile'
+    $dir = Join-Path $root 'temp\browser\.profile'
     if ($script:panelBeat -and ((Get-Date) - $script:panelBeat).TotalSeconds -lt 5) { Raise-Window "$dir`"" }   # already open
     elseif ($browser) { Open-App $browser $uiUrl '.profile' -Width 1200 -Height 800 | Out-Null }
     else { Start-Process $uiUrl }

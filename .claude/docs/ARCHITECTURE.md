@@ -28,13 +28,13 @@ Data Noodler.lnk
 3. Kills a stale instance via `.server/.pid`, writes its own PID.
 4. Clears leftover `temp/upload-*.tmp`.
 5. One `HttpListener` listens on **two ports**: **8079** = control panel, **site port** = the app (started/stopped from the panel).
-6. **Engine:** `.server/engine-loader.ps1` hashes `engine/**/*.cs`; a cached DLL `%LOCALAPPDATA%\data-noodler\engine\NativeDataEngine-<hash>.dll`
+6. **Engine:** `.server/engine-loader.ps1` hashes `engine/**/*.cs`; a cached DLL `temp\engine\NativeDataEngine-<hash>.dll`
    is loaded if present, else the sources are compiled with `Add-Type -CompilerParameters` (`/optimize+`, ~0.5 s) into that DLL.
    Then `New-DataEngine` creates the one `NativeDataEngine.DataEngine` (workers, memory guard). A compile error is logged and
    the site still runs (engine calls answer 503).
 7. Starts the site and opens `$entryPage` (Project Manager). The panel is NOT opened at startup: the red **Server Control**
    button in the Project Manager calls `POST /api/panel` (`Open-Panel`: opens it, or raises it if already open; `--app` window,
-   own profile in `%LOCALAPPDATA%\data-noodler\.profile`).
+   own profile in `temp\browser\.profile`).
 8. Main loop: one request at a time on the main thread, except plain static files (runspace pool) and engine calls (engine threads).
    Each loop pass also moves engine log lines into the server log (`Read-EngineLog`).
 
@@ -103,6 +103,7 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
   **Subqueries** (scalar, `EXISTS`, `IN (SELECT)`, `ANY/SOME/ALL`; correlated on equality conditions) are rewritten by
   `Planner.Unnest` into hidden helper joins (CROSS JOIN when uncorrelated, LEFT JOIN on the correlation keys), so they run
   in parallel like any join. Recursive CTEs run round by round (`RecursiveOp`, working table `WorkSource`).
+- **Temp folder**: every temporary file stays in `<root>\temp` (engine DLL cache `engine`, browser profiles `browser`, TEMP/TMP `sys`, write staging `write`, spills `spill`, Benchmark `bench`). Safe to delete when the server is stopped.
 - **Spill** (`Query/Spill.cs`): GROUP BY, sort, window and INNER / LEFT join build sides run in memory; one that would
   pass the memory budget re-runs with its input in pieces on disk (hash partitions by key, or sorted runs merged) and
   works each piece in memory. Spill folders live in `temp\spill` and are deleted at query end.
