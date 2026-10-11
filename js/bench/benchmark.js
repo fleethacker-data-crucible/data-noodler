@@ -60,6 +60,21 @@
     if (running) $('cTime').textContent = fmtS(performance.now() - runT0);
   }, 500);
 
+  // ---- progress bar ----
+  // The bar = (steps done + the step running) / steps. Inside a step, part(a, b, rows, expectMs) marks the share [a, b]
+  // being worked: an engine job moves it by its rows processed (out of rows); a call with no progress of its own
+  // (queries, loads into memory) moves it by elapsed time against expectMs, easing toward b until it returns.
+  const P = { on: false, done: 0, total: 1, a: 0, b: 1, rows: 0, expect: 1000, t0: 0, frac: null };
+  function steps(done, total) { P.on = true; P.done = done; P.total = Math.max(1, total); part(0, 1, 0); paintBar(); }
+  function part(a, b, rows, expectMs) { P.a = a; P.b = b; P.rows = rows || 0; P.expect = Math.max(200, expectMs || (rows ? rows / 3e6 * 1000 : 1000)); P.t0 = performance.now(); P.frac = null; }
+  function paintBar() {
+    if (!P.on) return;
+    const f = P.frac != null ? P.frac : 0.95 * (1 - Math.exp(-(performance.now() - P.t0) / P.expect));
+    const inner = P.a + (P.b - P.a) * Math.max(0, Math.min(1, f));
+    $('bar').style.width = `${(100 * Math.min(1, (P.done + inner) / P.total)).toFixed(1)}%`;
+  }
+  setInterval(paintBar, 100);
+
   // ---- engine calls with live numbers ----
   let live = null;   // { kind, n, label, t0 } for the step running (sync calls tick the elapsed time)
   setInterval(() => { if (live && !live.job) card(live.kind, performance.now() - live.t0, null, `${live.label} · running…`); }, 100);
@@ -75,6 +90,7 @@
         await new Promise(r => setTimeout(r, 100));
         j = await Engine.call('job?id=' + encodeURIComponent(j.jobId), undefined, 'GET');
         if (live) { live.job = true; card(live.kind, j.elapsedMs, j.rowsProcessed, `${live.label} · ${UI.num(j.rowsProcessed)} rows`); }
+        P.frac = P.rows ? j.rowsProcessed / P.rows : (j.progress ?? P.frac);
       }
       return j;
     } finally { curJob = null; }
@@ -120,13 +136,19 @@
     running = true; stopped = false; runT0 = performance.now();
     $('run').disabled = true; $('stop').disabled = false; ['report', 'utils'].forEach(id => $(id).disabled = true);
     const total = st.sizes.length * st.batches.length * st.tests.length * st.threads.length; let done = 0;
-    const prog = (label) => { $('cProg').textContent = `${done} / ${total}`; $('sProg').textContent = label; $('bar').style.width = `${(100 * done / total).toFixed(1)}%`; $('status').textContent = label; };
-    const ctxBase = { call, job, stopped: () => stopped, say: t => prog(t) };
+    const prog = (label) => { $('cProg').textContent = `${done} / ${total}`; $('sProg').textContent = label; $('status').textContent = label; };
+    const ctxBase = { call, job, part, stopped: () => stopped, say: t => prog(t) };
+    // Test data made during a run: the bar shows that file's progress, then goes back to the run's.
+    const prep = (t, rows) => { prog(t); log(t); steps(0, 1); part(0, 1, rows); };
+    // Loading the table into memory before the memory / query tests (not timed): the bar shows that load, then the step.
+    ctxBase.loading = rows => { steps(0, 1); part(0, 1, 0, rows / 5e6 * 1000); };
+    ctxBase.loaded = () => steps(done, total);
     try {
       for (const n of st.sizes) {
         if (stopped) break;
         await setBatch(DEFAULT_BATCH);
-        await T.ensureData(n, t => { prog(t); log(t); }, job);
+        await T.ensureData(n, prep, job);
+        steps(done, total);
         for (const b of st.batches) {
           if (stopped) break;
           await setBatch(b);
@@ -135,7 +157,7 @@
             for (const w of st.threads) {
               if (stopped) break;
               const label = `${test.label} · ${T.sizeLabel(n)} rows · ${T.sizeLabel(b)} per batch · ${w} worker${w > 1 ? 's' : ''}`;
-              prog(label);
+              prog(label); steps(done, total);
               for (const m of T.metricsOf(id)) { const k = keyOf(m.id, n, b); results[k] ||= { id: m.id, label: m.label || test.label, kind: m.kind, test: id, n, batch: b, cells: {} }; results[k].cells[w] = { running: true }; }
               render();
               live = { kind: test.kind === 'both' ? 'read' : test.kind, label: test.label, t0: performance.now() };
@@ -149,7 +171,7 @@
                 for (const m of T.metricsOf(id)) { const k = keyOf(m.id, n, b); if (results[k].cells[w]?.running) results[k].cells[w] = { err: msg }; }
                 if (!stopped) log(`${label}: ${msg}`, 'err');
               }
-              live = null; for (const k of Object.keys(last)) card(k, ...last[k]); done++; render(); save();
+              live = null; for (const k of Object.keys(last)) card(k, ...last[k]); done++; steps(done, total); render(); save();
             }
           }
         }
@@ -158,7 +180,7 @@
       prog(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtMs(performance.now() - runT0)}.`);
       log(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtMs(performance.now() - runT0)}.`, stopped ? 'warn' : 'ok');
     } finally {
-      live = null; running = false;
+      live = null; running = false; P.on = false;
       await setBatch(DEFAULT_BATCH); await T.dropMem(call).catch(() => {});
       $('stop').disabled = true; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); save();
     }
@@ -202,14 +224,13 @@
     if (!keys?.length) return;
     // Progress on the page: the progress bar, Progress / Elapsed cards, status line and activity log.
     running = true; ['run', 'report', 'utils'].forEach(id => $(id).disabled = true); runT0 = performance.now();
-    let step = 0, total = 0, label = '';
-    const steps = keys.length;
-    const show = (f, extra) => {
-      $('bar').style.width = `${(100 * Math.min(1, (step - 1 + f) / Math.max(1, steps))).toFixed(1)}%`;
-      $('cProg').textContent = `${Math.max(0, step - 1)} / ${steps}`; $('sProg').textContent = label;
+    let step = 0, label = '';
+    const nSteps = await T.stepsFor(keys);   // files to make, counting the Arrow tables picked files need
+    const show = extra => {
+      $('cProg').textContent = `${Math.max(0, step - 1)} / ${nSteps}`; $('sProg').textContent = label;
       $('status').textContent = extra ? `${label} · ${extra}` : label;
     };
-    const say = (t, rows) => { if (step) log(`${label}: done`, 'ok'); step++; total = rows || 0; label = t; log(t); show(0); };
+    const say = (t, rows) => { if (step) log(`${label}: done`, 'ok'); step++; label = t; log(t); steps(step - 1, nSteps); part(0, 1, rows); show(); };
     const genJob = async (op, body) => {
       let j = await Engine.call(op, { ...body, workers: maxW }); curJob = j.jobId;
       try {
@@ -217,7 +238,8 @@
           if (j.state === 'failed' || j.state === 'cancelled') throw new Error(j.error?.message || `Job ${j.state}`);
           await new Promise(r => setTimeout(r, 150));
           j = await Engine.call('job?id=' + encodeURIComponent(j.jobId), undefined, 'GET');
-          show(total ? Math.min(1, j.rowsProcessed / total) : (j.progress || 0), `${UI.num(j.rowsProcessed)} rows · ${fmtS(j.elapsedMs)}`);
+          P.frac = P.rows ? j.rowsProcessed / P.rows : (j.progress ?? P.frac);
+          show(`${UI.num(j.rowsProcessed)} rows · ${fmtS(j.elapsedMs)}`);
         }
         return j;
       } finally { curJob = null; }
@@ -226,11 +248,11 @@
       await setBatch(DEFAULT_BATCH);
       await T.makeItems(keys, say, genJob);
       if (step) log(`${label}: done`, 'ok');
-      $('bar').style.width = '100%'; $('cProg').textContent = `${steps} / ${steps}`;
+      steps(nSteps, nSteps); $('cProg').textContent = `${nSteps} / ${nSteps}`;
       const m = step ? `Test data ready (${fmtS(performance.now() - runT0)}).` : 'All picked test data is already there.';
       $('status').textContent = m; $('sProg').textContent = m; log(m, 'ok'); UI.toast(m, 'ok');
     } catch (e) { $('status').textContent = `Generate test data failed: ${e.message}`; log(`Generate test data: ${e.message}`, 'err'); }
-    finally { running = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
+    finally { running = false; P.on = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
   });
   const doPurge = UI.guard(async () => {
     if (running) throw new Error('Stop the run first.');

@@ -91,6 +91,17 @@ const BenchTests = (() => {
         if (!await exists(`${D}/src.${f}`)) { say(`Making the ${sizeLabel(n)} ${f.toUpperCase()} file`, n); await job('export', { sql: `SELECT * FROM read_dataset(${lit(`${D}/base`)})`, to: `${D}/src.${f}`, format: f, table: 't' }); }
     }
   }
+  // How many files makeItems(keys) will make (picked missing files + the Arrow tables they need + the store table).
+  async function stepsFor(keys) {
+    const want = new Set(keys); let k = 0;
+    if (want.size && !await exists(`${DATA}/dim/dataset.json`)) k++;
+    for (const n of SIZES) {
+      const fs = ['csv', 'parquet', 'sqlite'].filter(f => want.has(`${n}:${f}`));
+      if ((want.has(`${n}:base`) || fs.length) && !await exists(`${dirOf(n)}/base/dataset.json`)) k++;
+      for (const f of fs) if (!await exists(`${dirOf(n)}/src.${f}`)) k++;
+    }
+    return k;
+  }
   async function ensureData(n, say, job) {
     const D = dirOf(n);
     if (!await exists(`${DATA}/dim/dataset.json`)) { say('Making the store table (10,000 rows)', 10000); await job('write', { sql: dimSql, dest: `${DATA}/dim` }); }
@@ -123,25 +134,32 @@ const BenchTests = (() => {
     const m = (mid, label, kind, ms, rows = n) => ({ id: mid, label, kind, ms, rows });
     const t = TESTS.find(x => x.id === id);
     const fmt = id.split('-')[1];
+    const part = ctx.part || (() => {});
     if (id.startsWith('import-')) {
+      part(0, 1, n);
       const j = await job('write', { sql: `SELECT * FROM ${src[fmt]}`, dest: `${D}/out/import_${fmt}`, workers });
       return [m(id, t.label, 'read', j.elapsedMs)];
     }
     if (id.startsWith('export-')) {
+      part(0, 1, n);
       const j = await job('export', { sql: `SELECT * FROM ${base}`, to: `${D}/out/export.${fmt}`, format: fmt, table: 't', workers });
       return [m(id, t.label, 'write', j.elapsedMs)];
     }
     if (id === 'rw-mem') {
       await ensureMem(ctx);
       const cols = 'count(*), max(id), max(order_date), max(order_ts), sum(store_id), max(store_key), max(customer), max(region), max(category), sum(qty), sum(price), sum(discount), sum(cost), sum(CASE WHEN is_online THEN 1 ELSE 0 END), sum(rating), max(note), sum(amount)';
+      part(0, 0.5, 0, n / 20e6 * 1000);
       const r = await call('query', { sql: `SELECT ${cols} FROM bench_m`, workers });
+      part(0.5, 1, 0, n / 50e6 * 1000);
       const w = await call('cache/load', { name: 'bench_m2', sql: 'SELECT * FROM bench_m', workers });
       await call('cache/drop', { name: 'bench_m2' });
       return [m('rw-mem:read', 'Read (memory)', 'read', r.ms), m('rw-mem:write', 'Write (memory)', 'write', w.ms)];
     }
     if (id.startsWith('rw-')) {
       await call('cache/drop', { name: 'bench_m' }); memFor = null;   // room for the copy being read (reloaded when needed)
+      part(0, 0.5, 0, n / ({ csv: 1.2e6, parquet: 8e6, arrow: 5e6, sqlite: 1e6 }[fmt]) * 1000);
       const r = await call('cache/load', { name: 'bench_r', sql: `SELECT * FROM ${src[fmt]}`, workers });
+      part(0.5, 1, n);
       try {
         const w = fmt === 'arrow' ? await job('write', { sql: 'SELECT * FROM bench_r', dest: `${D}/out/rw_arrow`, workers })
           : await job('export', { sql: 'SELECT * FROM bench_r', to: `${D}/out/rw.${fmt}`, format: fmt, table: 't', workers });
@@ -152,8 +170,9 @@ const BenchTests = (() => {
     if (id === 'heavy') {
       await ensureMem(ctx);
       const out = [];
-      for (const [qid, label, sql0] of HEAVY) {
+      for (const [qi, [qid, label, sql0]] of HEAVY.entries()) {
         if (ctx.stopped()) break;
+        part(qi / HEAVY.length, (qi + 1) / HEAVY.length, 0, n / (qid === 'q-sort' || qid === 'q-window' ? 2e6 : 15e6) * 1000);
         ctx.say(`${label} (${sizeLabel(n)} rows, ${workers} worker${workers > 1 ? 's' : ''})`);
         const sql = sql0 || `SELECT id, customer FROM bench_m ORDER BY customer, id LIMIT 10 OFFSET ${Math.max(0, n - 10)}`;
         try { const r = await call('query', { sql, workers }); out.push(m(qid, label, 'query', r.ms)); }
@@ -169,11 +188,13 @@ const BenchTests = (() => {
   async function ensureMem(ctx) {
     if (memFor === ctx.n) return;
     ctx.say(`Loading ${sizeLabel(ctx.n)} rows into engine memory (not timed)`);
+    ctx.loading?.(ctx.n);
     await ctx.call('cache/drop', { name: 'bench_m' }).catch(() => {});
     memFor = null;
     await ctx.call('cache/load', { name: 'bench_m', sql: `SELECT * FROM read_dataset(${lit(`${dirOf(ctx.n)}/base`)})` });
     await ctx.call('cache/load', { name: 'bench_d', sql: `SELECT * FROM read_dataset(${lit(`${DATA}/dim`)})` });
     memFor = ctx.n;
+    ctx.loaded?.();
   }
   async function dropMem(call) { memFor = null; for (const t of ['bench_m', 'bench_m2', 'bench_r', 'bench_d']) await call('cache/drop', { name: t }).catch(() => {}); }
 
@@ -181,5 +202,5 @@ const BenchTests = (() => {
   const metricsOf = id => id === 'heavy' ? HEAVY.map(([q, l]) => ({ id: q, label: l, kind: 'query' }))
     : id.startsWith('rw-') ? [{ id: `${id}:read`, kind: 'read' }, { id: `${id}:write`, kind: 'write' }] : [{ id, kind: TESTS.find(t => t.id === id).kind }];
 
-  return { memoryPlan, hasData, dataItems, makeItems, DIR, DATA, SIZES, BATCHES, TESTS, HEAVY, sizeLabel, ensureData, run, dropMem, metricsOf };
+  return { memoryPlan, hasData, dataItems, makeItems, stepsFor, DIR, DATA, SIZES, BATCHES, TESTS, HEAVY, sizeLabel, ensureData, run, dropMem, metricsOf };
 })();
