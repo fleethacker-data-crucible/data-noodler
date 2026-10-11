@@ -24,5 +24,3 @@ projects/*
 # Always tracked: the single-file app package
 !__app.manifest
 
-# Downloaded by tools/make-sales-parquet.ps1 (DuckDB CLI)
-tools/duckdb/

@@ -11,8 +11,7 @@ Newest first. Dates are commit dates.
 - **LIKE / ILIKE:** patterns of text and `%` (`'%abc%'`, `'abc%'`, ...) are matched without a regex (text searches on
   2M rows: 3.4 s -> 0.1 s); `_` patterns still use the regex, which now anchors at the true end (`LIKE 'abc'` no longer
   matches `'abc'` + newline).
-- `tools/make-sales-data.ps1`: 50-column chart-friendly sales data (trend, seasonality, best sellers) as Parquet
-  (Snappy) or CSV via the DuckDB CLI; `make-sales-parquet.ps1` finds `tools/duckdb` again.
+- Removed the `tools/` folder (DuckDB test-data scripts, dev only) and `html/apex-test.html` (unlinked dev page).
 
 ## 2026-10-10: Arrow engine (branch `dev-engine-validation`)
 
