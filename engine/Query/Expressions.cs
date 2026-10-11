@@ -329,12 +329,12 @@ namespace NativeDataEngine
     {
         public override void Refs(HashSet<int> s) { x.Refs(s); pat.Refs(s); }
 
-        readonly BExpr x, pat; readonly bool not, ci; Regex fixedRx;
+        readonly BExpr x, pat; readonly bool not, ci; Regex fixedRx; LikeMatch fast;
         public BLike(BExpr x, BExpr pat, bool not, bool ci)
         {
             this.x = BCast.To(x, DataType.Varchar); this.pat = BCast.To(pat, DataType.Varchar); this.not = not; this.ci = ci; Type = DataType.Bool;
             BLit l = this.pat as BLit;
-            if (l != null && l.Value != null) fixedRx = Make((string)l.Value, ci);
+            if (l != null && l.Value != null) { fast = LikeMatch.Of((string)l.Value, ci); if (fast == null) fixedRx = Make((string)l.Value, ci); }
         }
         public static Regex Make(string p, bool ci)
         {
@@ -343,20 +343,71 @@ namespace NativeDataEngine
             {
                 if (ch == '%') sb.Append(".*"); else if (ch == '_') sb.Append('.'); else sb.Append(Regex.Escape(ch.ToString()));
             }
-            sb.Append('$');
+            sb.Append(@"\z");   // the very end (a plain $ would also match before a trailing newline)
             return new Regex(sb.ToString(), RegexOptions.Singleline | RegexOptions.CultureInvariant | (ci ? RegexOptions.IgnoreCase : RegexOptions.None));
         }
         public override Column Eval(Batch b)
         {
-            Column c = x.Eval(b); Column pc = fixedRx == null ? pat.Eval(b) : null;
+            Column c = x.Eval(b); Column pc = fixedRx == null && fast == null ? pat.Eval(b) : null;
             Column o = new Column(DataType.Bool, b.Rows);
+            string[] s = c.S;
             for (int i = 0; i < b.Rows; i++)
             {
                 if (c.IsNull(i) || (pc != null && pc.IsNull(i))) { o.SetNull(i); continue; }
+                if (fast != null) { o.B[i] = fast.Match(s[i]) != not; continue; }
                 Regex rx = fixedRx ?? Make(pc.S[i], ci);
-                o.B[i] = rx.IsMatch(c.S[i]) != not;
+                o.B[i] = rx.IsMatch(s[i]) != not;
             }
             return o;
+        }
+    }
+
+    // LIKE / ILIKE patterns made of text and % only (no _): the pieces are found in order without a regex. ILIKE
+    // compares characters the way the regex (IgnoreCase | CultureInvariant) does: each side lowered with the invariant
+    // culture, so the answers are the same; ASCII letters take a fast path.
+    public sealed class LikeMatch
+    {
+        readonly string[] segs; readonly bool start, end, ci; readonly int minLen;
+        LikeMatch(string[] segs, bool start, bool end, bool ci) { this.segs = segs; this.start = start; this.end = end; this.ci = ci; foreach (string g in segs) minLen += g.Length; }
+        public static LikeMatch Of(string p, bool ci)
+        {
+            if (p.IndexOf('_') >= 0) return null;
+            string[] parts = p.Split('%');
+            List<string> segs = new List<string>();
+            foreach (string g in parts) segs.Add(ci ? Lower(g) : g);
+            return new LikeMatch(segs.ToArray(), !p.StartsWith("%"), !p.EndsWith("%") || p.Length == 0, ci);
+        }
+        static string Lower(string g) { char[] a = g.ToCharArray(); for (int i = 0; i < a.Length; i++) a[i] = Fold(a[i]); return new string(a); }
+        static char Fold(char ch) { return ch < 128 ? (ch >= 'A' && ch <= 'Z' ? (char)(ch + 32) : ch) : char.ToLowerInvariant(ch); }
+        bool At(string s, int at, string g)
+        {
+            if (!ci) return string.CompareOrdinal(s, at, g, 0, g.Length) == 0;
+            for (int k = 0; k < g.Length; k++) if (Fold(s[at + k]) != g[k]) return false;
+            return true;
+        }
+        int Find(string s, string g, int from, int limit)   // first index >= from where g fits entirely before limit, or -1
+        {
+            if (g.Length == 0) return from;
+            if (!ci) { int r = s.IndexOf(g, from, limit - from, StringComparison.Ordinal); return r; }
+            char g0 = g[0];
+            for (int i = from; i + g.Length <= limit; i++) if (Fold(s[i]) == g0 && At(s, i, g)) return i;
+            return -1;
+        }
+        public bool Match(string s)
+        {
+            if (s.Length < minLen) return false;
+            int n = segs.Length;
+            if (n == 1) return s.Length == segs[0].Length && At(s, 0, segs[0]);   // no %: whole text
+            int pos = 0, limit = s.Length;
+            if (start) { if (!At(s, 0, segs[0])) return false; pos = segs[0].Length; }
+            if (end) { string last = segs[n - 1]; if (s.Length - last.Length < pos || !At(s, s.Length - last.Length, last)) return false; limit = s.Length - last.Length; }
+            for (int k = start ? 1 : 0; k < (end ? n - 1 : n); k++)
+            {
+                int at = Find(s, segs[k], pos, limit);
+                if (at < 0) return false;
+                pos = at + segs[k].Length;
+            }
+            return true;
         }
     }
 

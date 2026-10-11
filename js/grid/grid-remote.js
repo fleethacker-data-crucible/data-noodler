@@ -7,7 +7,8 @@
 //     where = SQL from the Dashboard's Filter widgets.
 const GridRemote = (() => {
   const PAGE = 100, MORE = 100;   // first 100 rows, then the next 100 each time the reader nears the end
-  const NUM = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, BOOL = /BOOL/i;
+  const BLOCK = 1000;             // sorted grids: rows fetched per request (each request is a full top-N over the data)
+  const NUM = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, BOOL = /BOOL/i, DATE = /^(DATE|TIMESTAMP)/i;
   const qid = c => `"${String(c).replace(/"/g, '""')}"`;
   const str = v => `'${String(v ?? '').replace(/'/g, "''")}'`;
 
@@ -40,8 +41,22 @@ const GridRemote = (() => {
     const parts = o.where ? [`(${o.where})`] : [];
     for (const [key, f] of s.filters || []) parts.push(`(${term({ key, ...f }, types)})`);
     const q = String(s.quick ?? '').trim();
-    if (q) parts.push(`(${o.cols.map(c => `CAST(${qid(c)} AS VARCHAR) ILIKE ${str(`%${q}%`)}`).join(' OR ')})`);
+    if (q) {
+      // Only columns whose text could contain q (same rows as searching them all, far less work: numbers / dates /
+      // flags are not turned into text for every row when q cannot match them).
+      const look = o.cols.filter(c => canHold(types.get(c) || '', q));
+      parts.push(look.length ? `(${look.map(c => `CAST(${qid(c)} AS VARCHAR) ILIKE ${str(`%${q}%`)}`).join(' OR ')})` : 'FALSE');
+    }
     return parts.join(' AND ');
+  }
+  // Can a value of this type, as text, contain q (case-insensitive)? Numbers print as digits . - + E (and nan / inf),
+  // dates / timestamps as digits - : . and space, flags as true / false.
+  function canHold(type, q) {
+    const t = q.toLowerCase();
+    if (BOOL.test(type)) return 'true'.includes(t) || 'false'.includes(t);
+    if (NUM.test(type)) return /^[0-9.+\-e]+$/.test(t) || 'nan'.includes(t) || '-inf'.includes(t);
+    if (DATE.test(type)) return /^[0-9\-:. ]+$/.test(t);
+    return true;
   }
   const orderOf = s => s.sort ? ` ORDER BY ${qid(s.sort.key)}${s.sort.dir === 'desc' ? ' DESC' : ''} NULLS LAST` : '';
 
@@ -55,17 +70,32 @@ const GridRemote = (() => {
     const page = (where, order, offset, n) => run(`SELECT ${select} FROM ${from}${where ? ` WHERE ${where}` : ''}${order} LIMIT ${n} OFFSET ${offset}`);
     const count = async where => +Object.values((await run(`SELECT count(*) AS n FROM ${from}${where ? ` WHERE ${where}` : ''}`))[0] || {})[0] || 0;
     let total = 0;
+    // Sorted: rows come BLOCK at a time into buf (rows buf.at .. buf.at + buf.rows.length of this query) and the grid's
+    // pages are served from it, so scrolling a sorted grid runs one sort per 1,000 rows instead of one per 100.
+    let buf = null;   // { key, at, rows, end } end = the query has no rows after these
+    const fetch = async (where, order, key, at, n) => {
+      if (!order) { const rows = await page(where, order, at, n); return { rows, done: rows.length < n }; }
+      if (!buf || buf.key !== key || at < buf.at || at >= buf.at + buf.rows.length) {
+        if (buf && buf.key === key && buf.end && at >= buf.at + buf.rows.length) return { rows: [], done: true };
+        const rows = await page(where, order, at, BLOCK);
+        buf = { key, at, rows, end: rows.length < BLOCK };
+      }
+      const from = at - buf.at, rows = buf.rows.slice(from, from + n);
+      return { rows, done: buf.end && from + n >= buf.rows.length };
+    };
     g.provider = {
       async load(s) {
-        const where = whereOf(s, o, types), order = orderOf(s);
-        const [rows, n] = await timed(() => Promise.all([page(where, order, 0, PAGE), count(where)]));
-        total = n; o.onCount?.(n, rows.length, stat);
-        return { rows, total: n, done: rows.length < PAGE };
+        const where = whereOf(s, o, types), order = orderOf(s), key = where + order;
+        buf = null;
+        const [r, n] = await timed(() => Promise.all([fetch(where, order, key, 0, PAGE), count(where)]));
+        total = n; o.onCount?.(n, r.rows.length, stat);
+        return { rows: r.rows, total: n, done: r.done };
       },
       async more(s, at) {
-        const rows = await timed(() => page(whereOf(s, o, types), orderOf(s), at, MORE));
-        o.onCount?.(total, at + rows.length, stat);
-        return { rows, done: rows.length < MORE };
+        const where = whereOf(s, o, types), order = orderOf(s);
+        const r = await timed(() => fetch(where, order, where + order, at, MORE));
+        o.onCount?.(total, at + r.rows.length, stat);
+        return r;
       },
     };
   }

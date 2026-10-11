@@ -2,6 +2,18 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: Data Grid and LIKE speed
+
+- **Data Grid, sorted:** rows are fetched 1,000 at a time and pages served from that, so scrolling a sorted grid runs
+  one sort per 1,000 rows instead of one per 100 (24 pages: about 0.3 s on 2M rows).
+- **Data Grid search:** only columns whose text could hold the search term are searched (numbers / dates / true-false
+  skipped when they cannot match); same rows as before.
+- **LIKE / ILIKE:** patterns of text and `%` (`'%abc%'`, `'abc%'`, ...) are matched without a regex (text searches on
+  2M rows: 3.4 s -> 0.1 s); `_` patterns still use the regex, which now anchors at the true end (`LIKE 'abc'` no longer
+  matches `'abc'` + newline).
+- `tools/make-sales-data.ps1`: 50-column chart-friendly sales data (trend, seasonality, best sellers) as Parquet
+  (Snappy) or CSV via the DuckDB CLI; `make-sales-parquet.ps1` finds `tools/duckdb` again.
+
 ## 2026-10-10: Arrow engine (branch `dev-engine-validation`)
 
 - **Arrow IPC is the working format.** Import (Stage) and Transform (Build Output Dataset) write datasets as
