@@ -14,11 +14,23 @@ Newest first. Dates are commit dates.
   shared by every window, checked against the files on every query (never stale), least recently used dropped when the
   in-memory share (60% of the engine budget) is full. API: `GET /api/engine/memory`, `POST memory/load`, `memory/drop`;
   client `Engine.memory`.
-- **Dashboard** uses the engine's resident datasets instead of its own per-page in-memory tables.
-- **Speed:** see `ref-docs/arrow after action report.md` (old vs new engine, rows/s per step).
+  Mostly-distinct text is kept in memory as Arrow UTF-8 buffers and decoded per query (no millions of long-lived strings
+  for the garbage collector); resident sources skip the columns a query does not read.
+- **Dashboard** uses the engine's resident datasets instead of its own per-page in-memory tables; every module page
+  starts loading its project's datasets when it opens.
+- **Faster engine paths:** shared strings for repeated text (`TextIntern`: Arrow reads, CSV reads, memory);
+  zero-copy CSV field parser with exact int / decimal / date fast paths; one correctly rounded decimal parser for CSV,
+  casts and SQL literals (.NET Framework's `double.Parse` can be one bit off) and number text checked with it;
+  `ORDER BY … LIMIT` finds each unit's top rows on the workers; CSV export formats batches on the workers; window
+  functions group partitions by hash and compute them in parallel (casts / defaults once, not per partition).
+- **Speed (10M rows, 12 cores):** 2.6× faster overall than the old engine; CSV import 5.4×, ORDER BY … LIMIT 6.8×,
+  window functions 7.4×, CSV export 4.3×, joins 2.2–2.3×, scans 4.4–4.5×. Full table: `arrow after action report.md`.
 - `EngineOptions.DatasetFormat` (`arrow` | `parquet`) and `ResidentFraction` (0 = off) for benchmarks.
-- New tests: `tests/arrow-format.ps1`, `tests/bench-engine.ps1`, `tests/bench-compare.ps1`.
-- Removed the unused vendored `js/vendor/apex-grid/` (the Data Grid is our own renderer since 3d0933a).
+- New tests: `tests/arrow-format.ps1` (Arrow = Parquet answers, memory = disk answers), `tests/csv-compare.ps1` +
+  `csv-diff.ps1` (old vs new engine on tricky CSVs and window queries), `tests/bench-engine.ps1` + `bench-compare.ps1`
+  (old vs new speed) + `bench-report.py` / `.html` (comparison page).
+- Removed the unused vendored `js/vendor/apex-grid/` (the Data Grid is our own renderer since 3d0933a) and unused engine
+  methods (`Parser.ParseExpr`, `ParseOrder`, `MemoryGuard.WaitForRoom`, `Job.SetBytes`, SQLite `Decl`).
 - Docs: README, CHANGELOG added; ARCHITECTURE, CODE_INDEX, PROJECT_PLAN brought up to date.
 
 ## 2026-10-09

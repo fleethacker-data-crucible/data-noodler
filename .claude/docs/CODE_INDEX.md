@@ -129,7 +129,8 @@ CSS/JS) and `.server/server.ps1` (split into dot-sourced parts if it grows, like
 | `tools/make-sales-parquet.ps1` | Dev only: makes a big Parquet test file with the DuckDB CLI (downloaded into `tools/duckdb/`, not part of the app). |
 | `config/users.json`, `config/engine-profile.json` | Shared users; saved engine profile. |
 | `projects/<folder>/` | Projects (`data/raw`, `data/staged/<ds>/`, `data/source/<ds>/`, `pipeline/`, `dashboard/`, `publish/`, `archives/`, `logs/`). |
-| `ref-docs/` | SQL cheatsheets (test source), engine / D3 Studio design reviews, the Arrow after-action report. |
+| `ref-docs/` | SQL cheatsheets (test source), engine / D3 Studio design reviews. |
+| `arrow after action report.md` | Report of the Arrow engine work: what changed, old vs new speed, what is left. |
 
 ## Request flow
 

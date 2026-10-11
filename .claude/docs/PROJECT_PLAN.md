@@ -59,7 +59,7 @@ projects/
 - **Reads:** CSV (zero-copy field parser, type inference, widening), Arrow IPC, Parquet (Snappy/GZIP/none; ZSTD rejected: re-import), SQLite (`winsqlite3.dll`). Sources outside the project are read in place, read-only.
 - **Queries:** DuckDB-style SQL subset (joins, GROUP BY ALL, windows, CTEs, UNION) and declarative widget queries; parallel by row group on min(64, cores) workers; results are the same for any worker count.
 - **Memory guard:** budget = 50% of RAM (`engineMemory`); sort/join/group/window state is reserved against it and fails with `QUERY_OUT_OF_MEMORY` instead of filling RAM; readers pause when free RAM is low.
-- **Known limits:** no disk spilling yet (big sorts/joins must fit the budget), results reach the browser as JSON (capped rows; Arrow IPC to the browser not built), no Excel. Speed per step: `ref-docs/arrow after action report.md` (`tests/bench-compare.ps1`).
+- **Known limits:** no disk spilling yet (big sorts/joins must fit the budget), results reach the browser as JSON (capped rows; Arrow IPC to the browser not built), no Excel. Speed per step: `arrow after action report.md` (`tests/bench-compare.ps1`).
 
 ## Phases
 

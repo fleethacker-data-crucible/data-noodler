@@ -140,12 +140,13 @@ namespace NativeDataEngine
 
         string[] DecodeUtf8()
         {
-            string[] o = new string[Length]; TextIntern shared = new TextIntern();
+            // Only mostly-distinct text is kept as bytes, so no sharing here: one string per value.
+            string[] o = new string[Length]; byte[] u = Utf8; int[] f = Offs; bool[] nl = Nulls;
             for (int i = 0; i < Length; i++)
             {
-                if (Nulls != null && Nulls[i]) continue;
-                int a = Offs[i], n = Offs[i + 1] - a;
-                o[i] = n == 0 ? "" : shared.Get(Utf8, a, n);
+                if (nl != null && nl[i]) continue;
+                int a = f[i], n = f[i + 1] - a;
+                o[i] = n == 0 ? "" : Encoding.UTF8.GetString(u, a, n);
             }
             return o;
         }
