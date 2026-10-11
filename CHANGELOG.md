@@ -2,6 +2,13 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: Purge Memory frees everything
+
+- Idle worker threads kept a reference to the last work they ran (whose closure can reach whole tables), so after
+  Purge Memory up to several hundred MB stayed in use until the workers ran something new. Workers now drop their
+  work item as soon as it finishes: 5M rows loaded + copied + queried, then purged: 731 MB -> 178 MB (the server
+  process itself; managed memory 586 MB -> 7 MB).
+
 ## 2026-10-11: SQLite export on all workers
 
 - **SQLite export** (5M rows: 345k -> about 1M rows/s, same rows, same order): rows are cut into 64k-row slices; every

@@ -78,13 +78,22 @@ namespace NativeDataEngine
         private void Loop()
         {
             onWorker = true;
-            foreach (WorkItem item in queue.GetConsumingEnumerable())
+            // The item is run in its own method and dropped before waiting for the next one: an idle worker must not keep
+            // its last work alive (its closure can reach whole tables of batches), or Purge Memory cannot free it.
+            WorkItem item;
+            while (queue.TryTake(out item, Timeout.Infinite))
             {
-                Interlocked.Increment(ref busy);
-                try { item.Action(); }
-                catch (Exception e) { EngineLog.Write("err", "Worker: " + e.Message); }
-                finally { Interlocked.Decrement(ref busy); }
+                Run(item);
+                item = null;
             }
+        }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        void Run(WorkItem item)
+        {
+            Interlocked.Increment(ref busy);
+            try { item.Action(); }
+            catch (Exception e) { EngineLog.Write("err", "Worker: " + e.Message); }
+            finally { Interlocked.Decrement(ref busy); }
         }
 
         // Runs fn(0..count-1) on the pool, at most maxParallel at a time, and hands back results in order
