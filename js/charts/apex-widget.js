@@ -1,11 +1,11 @@
-// Widget packages (widgets/<id>/widget.json + spec.json) drawn with ApexCharts / ApexGrid / ApexTree
-// (js/widgets/apex-render.js). Globals: ApexWidget, WidgetRegistry. Needs the Apex libraries and js/dn-fs.js.
+// Chart packages (d3-studio/<dev|live>/<id>/chart.json + spec.json) and the built-in Data Grid, drawn by D3Render / ApexCharts / DNGrid
+// (js/charts/apex-render.js). Globals: ApexWidget, ChartRegistry. Needs the Apex libraries and js/dn-fs.js.
 //   "$kind" in spec.json: 'apexcharts' | 'apexgrid' | 'apextree' (default: apexcharts).
 //
 // spec.json (the default look; never holds query data): an Apex options object, plus
 //   "data":  [{ key, label, role: 'dimension' | 'measure' | 'fields', agg, optional }] (optional; default inputs per chart type)
 //   "query": { sort: 'desc' | 'asc' | 'label', top } (optional): default order / number of categories
-// Manifest (widget.json): { id, name, description, version, kind, spec, inputs, options }
+// Manifest (chart.json): { id, name, description, version, kind, spec, inputs, options }
 //   options: [{ path, label, group, type: 'color' | 'number' | 'boolean' | 'select' | 'text', default, min, max, step, choices, show }]
 // Dashboard widget using a package: { id, type: 'widget', pkg, title, dataset, x, y, w, h,
 //   inputs: { <key>: { col, agg } }, opts: { <path>: value }, sort, top, limit }
@@ -205,7 +205,7 @@ const ApexWidget = (() => {
     return out;
   }
 
-  // ---- style: a widget's ONLY style is its own sheet, widgets/<id>/style.css (widget.json "style"). ----
+  // ---- style: a package's ONLY style is its own sheet (chart.json "style"; the Data Grid: js/grid/data-grid.css). ----
   // The part before "/* ===== SHADOW ===== */" goes into the page once per widget package, scoped by the class
   // dn-w-<id> on the box the widget is drawn in; the rest goes into the widget's shadow roots (Data Grid).
   // Chart / tree colours are --w-* variables set in that sheet (read by theme(el)); nothing else styles a widget.
@@ -215,7 +215,7 @@ const ApexWidget = (() => {
   function useStyle(m, el, doc = el?.ownerDocument || document) {
     if (!m) return;
     // ".WIDGET" in the sheet = this package's box, so a sheet copied to a new widget folder works there unchanged.
-    const sid = `dn-w-style-${cls(m.id)}`, page = cssParts(m.styleCss).page.replace(/\.WIDGET\b/g, '.' + cls(m.id));
+    const sid = `dn-w-style-${cls(m.id)}`, page = cssParts(m.styleCss).page.replace(/\.(CHART|GRID|WIDGET)\b/g, '.' + cls(m.id));
     let st = doc.getElementById(sid);
     if (!st) { st = Object.assign(doc.createElement('style'), { id: sid }); doc.head.append(st); }
     if (st.textContent !== page) st.textContent = page;
@@ -240,46 +240,48 @@ const ApexWidget = (() => {
   // ---- draw into el: an ApexCharts chart of the same type is updated in place (bars / lines animate to the new values) ----
   const size = el => { const cs = getComputedStyle(el); return [Math.max(60, Math.floor(el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight))), Math.max(60, Math.floor(el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)))]; };
   function dispose(el) { if (el?._inst) { ApexRender.dispose(el._inst); el._inst = null; } }
+  // Charts (kind d3): what the code gets as `inputs`: each input variable with its label and the TABLE.FIELD it is linked to.
+  const chartInputs = (m, w) => Object.fromEntries(inputsOf(m).map(i => { const b = binding(m, w, i); return [i.key, { key: i.key, label: labelOf(m, i), role: i.role, agg: i.role === 'measure' ? b.agg || i.agg || 'sum' : undefined, field: w.dataset && b.col ? `${w.dataset}.${b.col}` : '' }]; }));
   // rows: objects from the query, or rows keyed by input key when opts.sample. columns: [{ name, type }] (dates, grid types).
-  // remote: Data Grid rows come from the engine page by page (js/widgets/grid-remote.js), rows is then empty.
+  // remote: Data Grid rows come from the engine page by page (js/grid/grid-remote.js), rows is then empty.
   async function render(el, m, spec, w, rows, { sample = false, columns = [], remote = null, more = null, total = null } = {}) {
     const [W, H] = size(el), data = sample ? rows : shape(m, w, rows, columns);
     const s = applied(m, spec, w), type = `${m.kind}:${s.chart?.type || ''}`;
     const f = fieldsOf(m), names = sample ? Object.keys(data[0] || {}) : f ? binding(m, w, f).cols || [] : [];
-    const reuse = m.kind === 'apexcharts' && el._inst && el._type === type && el._inst.el?.isConnected;
+    // Apex charts update in place; a D3 chart keeps its box so D3Render can animate from the old drawing to the new one.
+    const reuse = (m.kind === 'apexcharts' && el._inst && el._type === type && el._inst.el?.isConnected) || (m.kind === 'd3' && el._type === type && el.firstElementChild && !el.querySelector(':scope > .note'));
     if (!reuse) {
       dispose(el); el.innerHTML = '';
       const box = document.createElement('div'); box.style.cssText = 'width:100%;height:100%;overflow:hidden'; el.append(box);
     }
     el._type = type;
     useStyle(m, el);
-    el._inst = await ApexRender.render(m.kind, el.firstElementChild, s, inputsOf(m), data, W, H, theme(el), { live: !sample, names, columns, prev: reuse ? el._inst : null, remote, more, total, wid: m.id, renderer: m.renderer, code: m.codeJs });
+    el._inst = await ApexRender.render(m.kind, el.firstElementChild, s, inputsOf(m), data, W, H, theme(el), { live: !sample, names, columns, prev: reuse ? el._inst : null, remote, more, total, wid: m.id, renderer: m.renderer, code: m.codeJs, chartInputs: m.kind === 'd3' ? chartInputs(m, w) : null });
     return el._inst;
   }
 
-  return { AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, axisOf, labelOf, autoBind, hasTop, ready, query, objects, shape, render, dispose, theme, useStyle, cssParts, getAt, setAt, binding, sortOf, topOf };
+  return { chartInputs, AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, axisOf, labelOf, autoBind, hasTop, ready, query, objects, shape, render, dispose, theme, useStyle, cssParts, getAt, setAt, binding, sortOf, topOf };
 })();
 
-// Packages in the global widgets/ folder: a folder with a valid widget.json is a widget.
-// Packages the Dashboard can add, LIVE folders only: WIDGETS (widget-studio/live/<id>/, any kind but d3) and CHARTS
-// (D3 Studio's published charts, d3-studio/live/<folder>/, kind d3; id "chart-<folder>", m.chart = true).
-// m.dir = the package folder. Work in progress (the dev folders) is never listed here: scan(<dev>) is for the studios.
-const WidgetRegistry = (() => {
-  const ROOT = 'widget-studio/live', WIDGETS_DEV = 'widget-studio/dev', CHARTS_DEV = 'd3-studio/dev', CHARTS_LIVE = 'd3-studio/live';
+// Chart packages: a folder with a valid chart.json (D3 Studio: d3-studio/dev/<id>/ = work in progress, d3-studio/live/<id>/
+// = published). The Dashboard lists LIVE charts only (id "chart-<folder>", m.chart = true), plus the built-in Data Grid
+// (js/grid/data-grid-pkg.js, id "data-grid") so grids already on a dashboard keep drawing. m.dir = the package folder.
+const ChartRegistry = (() => {
+  const CHARTS_DEV = 'd3-studio/dev', CHARTS_LIVE = 'd3-studio/live', MANIFEST = 'chart.json';
   let cache = null;
   const valid = m => m && typeof m.id === 'string' && m.name && !!ApexWidget.KINDS[m.kind];
-  // Every package folder under root (a folder with a valid widget.json). prefix = id prefix (charts).
+  // Every package folder under root (a folder with a valid chart.json). prefix = id prefix.
   async function scan(root, { prefix = '', only = null } = {}) {
     const out = [];
     for (const e of (await DNFS.list(root).catch(() => [])).filter(e => e.dir && !e.name.startsWith('_'))) {
       try {
-        const dir = `${root}/${e.name}`, m = await DNFS.readJSON(`${dir}/widget.json`);
+        const dir = `${root}/${e.name}`, m = await DNFS.readJSON(`${dir}/${MANIFEST}`);
         if (!valid(m) || (only && !only(m))) continue;
         m.id = prefix + e.name; m.folder = e.name; m.dir = dir;   // the folder name is the id
         m.specJson = await DNFS.readJSON(`${dir}/${m.spec || 'spec.json'}`);
-        // The package's own style sheet (widget.json "style"): its whole look, the same wherever it is drawn.
+        // The chart's own style sheet (chart.json "style"): its whole look, the same wherever it is drawn.
         if (m.style) m.styleCss = await DNFS.readText(`${dir}/${m.style}`).catch(() => '');
-        // Charts (D3): their code (widget.json "code") and sample rows (widget.json "sample", drawn until a dataset is connected).
+        // Its code (chart.json "code") and sample rows (chart.json "sample", D3 Studio only).
         if (m.code) m.codeJs = await DNFS.readText(`${dir}/${m.code}`).catch(() => '');
         if (m.sample) m.sampleRows = await DNFS.readJSON(`${dir}/${m.sample}`).catch(() => []);
         out.push(m);
@@ -289,27 +291,12 @@ const WidgetRegistry = (() => {
   }
   async function list(fresh = false) {
     if (cache && !fresh) return cache;
-    const [widgets, charts] = await Promise.all([scan(ROOT, { only: m => m.kind !== 'd3' }), scan(CHARTS_LIVE, { prefix: 'chart-', only: m => m.kind === 'd3' })]);
+    const charts = await scan(CHARTS_LIVE, { prefix: 'chart-', only: m => m.kind === 'd3' });
     charts.forEach(m => { m.chart = true; });
-    return (cache = [...widgets, ...charts].sort((a, b) => a.name.localeCompare(b.name)));
+    const grid = typeof DataGrid !== 'undefined' ? [await DataGrid.pkg()] : [];
+    return (cache = [...charts, ...grid].sort((a, b) => a.name.localeCompare(b.name)));
   }
   const get = async id => (await list()).find(m => m.id === id);
-  const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'widget';
-  async function save(manifest, spec) {
-    const { specJson, styleCss: _s, codeJs: _c, sampleRows: _r, ...m } = manifest;
-    m.spec = 'spec.json'; m.version = (+m.version || 0) + 1; m.updated = new Date().toISOString();
-    // Every widget has its own style sheet (its only style): a new one starts from a widget of the same kind.
-    if (!m.style || !(await DNFS.exists(`${ROOT}/${m.id}/${m.style}`))) {
-      const like = (await list()).find(x => x.kind === m.kind && x.styleCss && x.id !== m.id);
-      m.style = 'style.css';
-      await DNFS.write(`${ROOT}/${m.id}/style.css`, like?.styleCss || `/* ${m.name || m.id}: the ONE place this widget's look is set. .WIDGET = its box. */\n\n/* ===== PAGE ===== */\n`);
-    }
-    await DNFS.writeJSON(`${ROOT}/${m.id}/spec.json`, spec);
-    await DNFS.remove(`${ROOT}/${m.id}/render.js`).catch(() => {});
-    await DNFS.writeJSON(`${ROOT}/${m.id}/widget.json`, m);
-    cache = null;
-    return m;
-  }
-  async function remove(id) { await DNFS.remove(`${ROOT}/${id}`, { recursive: true }); cache = null; }
-  return { ROOT, WIDGETS_DEV, CHARTS_DEV, CHARTS_LIVE, scan, list, get, save, remove, slug };
+  const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'chart';
+  return { CHARTS_DEV, CHARTS_LIVE, MANIFEST, scan, list, get, slug };
 })();

@@ -49,7 +49,7 @@
   .wd .rz[data-dir="ne"] { top: 0; right: 0; cursor: nesw-resize; } .wd .rz[data-dir="nw"] { top: 0; left: 0; cursor: nwse-resize; }
   .wd .rz[data-dir="se"] { bottom: 0; right: 0; cursor: nwse-resize; } .wd .rz[data-dir="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
   .wd:hover .rz[data-dir="se"] { background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); }
-  /* Add widget popup: categories (collapsible, arrow far left), 8 tiles per row; tile = 100 x 80 picture + name under it. */
+  /* Add chart popup: categories (collapsible, arrow far left), 8 tiles per row; tile = 100 x 80 picture + name under it. */
   .wpick { position: fixed; inset: 0; z-index: 60; background: #0008; display: grid; place-items: center; }
   .wpick[hidden] { display: none; }
   .wp-box { width: min(944px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 12px 40px #0008; }
@@ -78,7 +78,6 @@
     <div class="brand"><span class="logo">DN</span><div><h1 id="title">Dashboard</h1><div class="sub" id="sub"></div></div></div>
     <div class="row hdr-tools" id="tools">
       <button id="addChart" class="ghost" title="Add a chart (D3 Studio's published charts)">Charts</button>
-      <button id="add" class="ghost" title="Add a widget">Widgets</button>
       <div class="dd-wrap"><button id="opts" class="ghost">Options ▾</button>
         <div class="dd-menu" id="optmenu">
           <div data-act="size">Size Window<small>Resize the window so the grid fills it edge to edge (16:9)</small></div>
@@ -89,16 +88,16 @@
     <div class="spacer"></div>
   </header>
   <div class="dd-menu ctxmenu" id="ctxmenu">
-  <div data-act="settings">Widget Settings<small>Open the settings window for this widget</small></div>
-  <div data-act="grid">Data Grid<small>Open the rows under this widget in a Data Grid window</small></div>
-  <div data-act="refresh">Refresh<small>Re-run this widget (ignores the cache)</small></div>
-  <div data-act="delete" class="danger last">Delete widget<small>Remove it from the dashboard</small></div>
+  <div data-act="settings"><span id="ctxSet">Widget Settings</span><small>Open the settings window for this <span class="ctxWhat">widget</span> (data fields, options)</small></div>
+  <div data-act="grid">Data Grid<small>Open the rows under this <span class="ctxWhat">widget</span> in a Data Grid window</small></div>
+  <div data-act="refresh">Refresh<small>Re-run this <span class="ctxWhat">widget</span> (ignores the cache)</small></div>
+  <div data-act="delete" class="danger last"><span id="ctxDel">Delete widget</span><small>Remove it from the dashboard</small></div>
 </div>
 <div class="canvas-wrap" id="wrap"><div class="canvas" id="canvas"></div></div>
 </div>
 <div class="wpick" id="wpick" hidden>
   <div class="wp-box">
-    <div class="wp-head"><b id="wp-title">Add widget</b><span class="spacer"></span>
+    <div class="wp-head"><b id="wp-title">Add chart</b><span class="spacer"></span>
       <button id="wp-close" class="ghost small">Close</button></div>
     <div class="wp-body" id="wp-body"></div>
   </div>
@@ -112,20 +111,21 @@
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
-<script src="../js/widgets/color-picker.js"></script>
+<script src="../js/charts/color-picker.js"></script>
 <script src="../js/vendor/apexcharts.min.js"></script>
 <script src="../js/vendor/apextree.min.js"></script>
 <script src="../js/vendor/d3.min.js"></script>
-<script src="../js/widgets/d3-render.js"></script>
+<script src="../js/charts/d3-render.js"></script>
 <script src="../js/core/windows.js"></script>
-<script src="../js/widgets/apex-render.js"></script>
-<script src="../js/widgets/apex-options.js"></script>
-<script src="../js/widgets/apex-widget.js"></script>
-<script src="../js/widgets/grid-remote.js"></script>
-<script src="../js/widgets/widget-settings.js"></script>
+<script src="../js/charts/apex-render.js"></script>
+<script src="../js/charts/apex-options.js"></script>
+<script src="../js/charts/apex-widget.js"></script>
+<script src="../js/grid/data-grid-pkg.js"></script>
+<script src="../js/grid/grid-remote.js"></script>
+<script src="../js/charts/chart-settings.js"></script>
 <script>
 // Dashboard canvas. State: <project>/dashboard/dashboard.json = { version: 3, cols, rows, widgets: [...] }
-// Every widget is a package from the widgets/ folder (ApexCharts / ApexGrid / ApexTree; js/widgets/apex-widget.js). Positions / sizes are
+// Every widget is a package from the widgets/ folder (ApexCharts / ApexGrid / ApexTree; js/charts/apex-widget.js). Positions / sizes are
 // in grid cells; drag the header to move, an edge to resize (both snap to the grid). Right-click a widget > Widget Settings opens its settings
 // (always in the Pop-out Settings window: html/dashboard-settings.html via window.DashBridge).
 const { $, esc } = UI;
@@ -134,14 +134,16 @@ let G = 20;                                     // cell size, px (fitGrid: large
 const SIZE = [16, 9], MIN = [4, 3];             // new widget: 16:9 tile
 let ctx, dash = { version: 3, widgets: [] }, selId = null;
 const results = new Map();                      // id -> last result (redraw on resize without re-querying)
-// Packages: widgets (widget-studio/live/) and charts (d3-studio/live/).
+// Packages: published charts (d3-studio/live/) and the built-in Data Grid (js/grid/data-grid-pkg.js).
 let pkgs = new Map();
 const pkgOf = w => pkgs.get(w.pkg);
 const isReady = w => { const m = pkgOf(w); return !!m && ApexWidget.ready(m, w); };
-const queryOf = w => { const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found (widget-studio/live/ or d3-studio/live/).`); return ApexWidget.query(m, { ...w, where: whereOf(w) }); };
+const queryOf = w => { const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found (d3-studio/live/).`); return ApexWidget.query(m, { ...w, where: whereOf(w) }); };
 // ---- Filter widgets: w.filters = [{ col, label, sort }], w.sel = { col: value }. Every selection is ANDed into the WHERE of each
 // widget on the same dataset (a Filter's own dropdown ignores its own field so its list stays complete).
 const isFilter = w => pkgOf(w)?.kind === 'filter';
+const isChart = w => pkgOf(w)?.kind === 'd3';   // D3 Studio charts: inputs linked as TABLE.FIELD (Chart Settings)
+const setName = w => isChart(w) ? 'Chart Settings' : 'Widget Settings';
 const qid = c => `"${String(c).replace(/"/g, '""')}"`;
 const lit = v => v === null ? null : typeof v === 'number' ? String(v) : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : `'${String(v).replace(/'/g, "''")}'`;
 const cond = (c, v) => v === null ? `${qid(c)} IS NULL` : typeof v === 'string' ? `CAST(${qid(c)} AS VARCHAR) = ${lit(v)}` : `${qid(c)} = ${lit(v)}`;
@@ -160,8 +162,11 @@ function paint(el, w, r) {
 }
 const FILE = () => `${ctx.dir}/dashboard/dashboard.json`;
 const cachePath = w => `${ctx.dir}/data/cache/widget-${w.id}.json`;
-const dsOf = name => (ctx.cfg.datasets || []).find(d => d.name === name);
-const readyDs = () => (ctx.cfg.datasets || []).filter(d => Projects.stageOf(d) === 'source');   // data/source only
+const dsOf = name => srcDs.find(d => d.name === name) || (ctx.cfg.datasets || []).find(d => d.name === name);
+// Ready datasets = the ones that exist in <project>/data/source right now (read from disk on load and Refresh: Projects.sourceDatasets).
+let srcDs = [];
+const readyDs = () => srcDs;
+const loadSrc = async () => { srcDs = await Projects.sourceDatasets(ctx.folder, ctx.cfg); };
 const byId = id => dash.widgets.find(w => w.id === id);
 const saveNow = async () => { dash.updated = new Date().toISOString(); await DNFS.writeJSON(FILE(), dash); };
 const save = UI.debounce(() => saveNow().catch(e => UI.toast(`Could not save the dashboard: ${e.message}`, 'err')), 400);
@@ -213,17 +218,17 @@ function draw(w, fresh = false) {
     const body = el.querySelector('.wb'), meta = el.querySelector('.wh small');
     results.delete(w.id);
     const fail = h => { ApexWidget.dispose(body); body.innerHTML = h; meta.textContent = ''; };
-    if (!pkgOf(w)) return fail(`<div class="note err">Widget package "${esc(w.pkg)}" not found (widget-studio/live/ or d3-studio/live/).</div>`);
+    if (!pkgOf(w)) return fail(`<div class="note err">Chart "${esc(w.pkg)}" not found (d3-studio/live/): publish it in D3 Studio, or delete it here.</div>`);
     if (pkgOf(w).kind === 'apexgrid' && isReady(w)) { try { await drawGrid(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
     if (isFilter(w) && isReady(w)) { try { await drawFilter(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
-    if (!isReady(w) && pkgOf(w).sampleRows?.length) {   // D3 widget not connected yet: its sample data until it is
-      try { await ApexWidget.render(body, pkgOf(w), pkgOf(w).specJson, w, pkgOf(w).sampleRows, { sample: true }); meta.textContent = 'sample data · Right-click > Widget Settings to connect'; }
+    if (!isReady(w) && isChart(w)) {   // a chart not linked yet: drawn with no data (its axes / grid) until its fields are linked
+      try { await ApexWidget.render(body, pkgOf(w), pkgOf(w).specJson, w, [], { sample: true }); meta.textContent = 'no data · Right-click > Chart Settings to link the fields'; }
       catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); }
       return;
     }
     if (!isReady(w)) {
       ApexWidget.dispose(body); meta.textContent = '';
-      body.innerHTML = `<div class="note">${!w.dataset ? 'Right-click > Widget Settings to choose a dataset' : 'Right-click > Widget Settings to connect the data inputs'}</div>`;
+      body.innerHTML = `<div class="note">${!w.dataset ? `Right-click > ${setName(w)} to choose a dataset` : `Right-click > ${setName(w)} to connect the data inputs`}</div>`;
       return;
     }
     if (!body._inst) body.innerHTML = '<div class="note">Loading…</div>';   // a chart already there stays until the new values animate in
@@ -265,7 +270,7 @@ async function drawFilter(w, body, meta) {
   meta.textContent = `${count.toLocaleString()} rows · ${UI.ms(performance.now() - t0)}`;
 }
 // Data Grid: rows come from the engine 100 at a time (more on scroll); its search / filters / sort / pages run as engine
-// queries on all workers against the dataset's in-memory table (js/widgets/grid-remote.js), narrowed by the Filter widgets.
+// queries on all workers against the dataset's in-memory table (js/grid/grid-remote.js), narrowed by the Filter widgets.
 async function drawGrid(w, body, meta) {
   const m = pkgOf(w), d = dsOf(w.dataset), f = ApexWidget.inputsOf(m).find(i => i.role === 'fields');
   const cols = ApexWidget.binding(m, w, f).cols || [];
@@ -305,7 +310,7 @@ function fitCanvas() {
   const c = $('canvas');
   c.style.width = `${COLS * G}px`; c.style.height = `${ROWS * G}px`;
   c.querySelector('.hint')?.remove();
-  if (!dash.widgets.length) c.insertAdjacentHTML('beforeend', '<div class="hint">Empty dashboard. Use Add widget to place a chart or table.</div>');
+  if (!dash.widgets.length) c.insertAdjacentHTML('beforeend', '<div class="hint">Empty dashboard. Use Charts to place a chart.</div>');
 }
 function renderAll(fresh = false) {
   const c = $('canvas');
@@ -342,7 +347,7 @@ $('canvas').addEventListener('pointerdown', ev => {
       if (dir.includes('n')) y = Math.max(0, Math.min(bottom - MIN[1], start.y + dy));
       Object.assign(w, { x, y, w: x2 - x, h: y2 - y });
       place(ghost, w); place(el, w);   // the widget follows the snapped box
-      const r = results.get(w.id); if (r) liveRedraw(el.querySelector('.wb'), w, r);   // charts redraw live to the new size
+      const r = results.get(w.id); if (r) liveRedraw(el.querySelector('.wb'), w, r); else if (isChart(w) && !isReady(w)) draw(w);   // charts redraw live to the new size
     }
   };
   const onUp = () => {
@@ -369,16 +374,15 @@ $('canvas').addEventListener('grid-export', e => UI.toast(`Export to .${e.detail
 // Every menu here lists its items alphabetically (A to Z, by the item name without its tip).
 document.querySelectorAll('.dd-menu').forEach(Menus.sort);
 
-// ---- Add popup (Charts button = D3 Studio's published charts, Widgets button = widget-studio/live/): its packages by category
+// ---- Add popup (Charts button = D3 Studio's published charts): by category
 // (collapsible; the open ones are remembered), 8 tiles per row.
 // Tile = the package's thumb.svg (D3 Studio saves one) or a blank 100 x 80 placeholder, name under it. Click = add it.
 const WP_OPEN = 'dn-dashboard-picker-open';
 const catOf = m => m.category || { apexgrid: 'Tables', filter: 'Controls' }[m.kind] || 'Other';
 function pickerOpen() { try { return JSON.parse(localStorage.getItem(WP_OPEN)) || {}; } catch { return {}; } }
-let pickCharts = false;   // which list the popup shows
+const pickCharts = true;   // the popup lists D3 Studio's published charts (no widgets)
 function drawPicker() {
   const open = pickerOpen(), cats = new Map();
-  $('wp-title').textContent = pickCharts ? 'Add chart' : 'Add widget';
   for (const m of [...pkgs.values()].filter(m => !!m.chart === pickCharts).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))) { const c = catOf(m); if (!cats.has(c)) cats.set(c, []); cats.get(c).push(m); }
   $('wp-body').innerHTML = [...cats].sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b)).map(([c, list]) =>
     `<div class="wp-cat ${open[c] !== false ? 'open' : ''}" data-cat="${esc(c)}"><div class="wp-ch">${Icons.caret(0, 'wp-arrow')}<b>${esc(c)}</b><small>${list.length}</small></div>
@@ -388,8 +392,7 @@ function drawPicker() {
 }
 const showPicker = UI.guard(async () => { $('wpick').hidden = false; drawPicker(); await loadPkgs(); drawPicker(); });   // picks up packages added to widgets/ meanwhile
 const hidePicker = () => { $('wpick').hidden = true; };
-$('add').onclick = ev => { ev.stopPropagation(); $('optmenu').classList.remove('open'); pickCharts = false; showPicker(); };
-$('addChart').onclick = ev => { ev.stopPropagation(); $('optmenu').classList.remove('open'); pickCharts = true; showPicker(); };
+$('addChart').onclick = ev => { ev.stopPropagation(); $('optmenu').classList.remove('open'); showPicker(); };
 $('wp-close').onclick = hidePicker;
 $('wpick').addEventListener('click', ev => { if (ev.target === $('wpick')) hidePicker(); });
 $('wp-body').addEventListener('click', ev => {
@@ -426,7 +429,8 @@ function sizeWindow() {
 }
 const addWidget = UI.guard(async pid => {
   const m = pkgs.get(pid), ds = readyDs(); if (!m) return;
-  const w = { id: crypto.randomUUID().slice(0, 8), type: 'widget', pkg: m.id, title: '', dataset: ds.length === 1 ? ds[0].name : '',
+  // A chart starts with no data (its fields are linked in Chart Settings); a widget gets the only dataset at once.
+  const w = { id: crypto.randomUUID().slice(0, 8), type: 'widget', pkg: m.id, title: '', dataset: ds.length === 1 && m.kind !== 'd3' ? ds[0].name : '',
     // A new widget always opens in the middle of the grid (and on top: select() below).
     x: Math.floor((COLS - SIZE[0]) / 2), y: Math.floor((ROWS - SIZE[1]) / 2), w: SIZE[0], h: SIZE[1], inputs: {}, opts: {} };
   clamp(w);
@@ -437,7 +441,7 @@ const addWidget = UI.guard(async pid => {
   document.querySelector(`.wd[data-id="${w.id}"]`).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   ctx.log(`Widget added: ${m.name}`);
 });
-const refreshAll = UI.guard(async () => { await ctx.reload(); renderAll(true); await Projects.touchModule(ctx.folder, 'dashboard'); });
+const refreshAll = UI.guard(async () => { await ctx.reload(); await loadSrc(); renderAll(true); await Projects.touchModule(ctx.folder, 'dashboard'); });
 
 // ---- settings: always in the Pop-out Settings window (html/dashboard-settings.html), which reads / writes the selected
 // widget through window.DashBridge. Selecting a widget opens the window when it is not open yet.
@@ -463,14 +467,16 @@ function select(id) {
   selId = id;
   toFront(byId(id));
   document.querySelectorAll('.wd').forEach(e => e.classList.toggle('sel', e.dataset.id === id));
-  if (popped()) pop.DNSettings?.show();   // the settings window follows the selection once it is open (right click > Widget Settings)
+  if (popped()) pop.DNSettings?.show();   // the settings window follows the selection once it is open (right click > Widget / Chart Settings)
 }
 const look = w => { const r = results.get(w.id), el = document.querySelector(`.wd[data-id="${w.id}"] .wb`); if (r && el) liveRedraw(el, w, r); };
 window.DashBridge = {
   state() {
     const w = byId(selId); if (!w) return null;
-    const ds = readyDs().map(d => d.name); if (w.dataset && !ds.includes(w.dataset)) ds.push(w.dataset);
-    return { w, m: pkgOf(w), columns: w.dataset ? dsOf(w.dataset)?.columns || [] : null, datasets: ds, title: titleOf(w), pkgName: pkgOf(w)?.name || w.pkg };
+    const ds = readyDs().map(d => d.name);   // only datasets that exist in data/source (a deleted one is not offered)
+    // tables: every ready dataset's columns (charts link each input to TABLE.FIELD).
+    return { w, m: pkgOf(w), columns: w.dataset ? dsOf(w.dataset)?.columns || [] : null, datasets: ds, title: titleOf(w), pkgName: pkgOf(w)?.name || w.pkg,
+      chart: isChart(w), tables: Object.fromEntries(readyDs().map(d => [d.name, d.columns || []])) };
   },
   change(w, kind, live) { if (kind === 'look') { look(w); if (!live) save(); } else changed(w); },
   setTitle(w, v) { w.title = v; changed(w, false); },
@@ -489,7 +495,7 @@ window.DashBridge = {
 };
 // Right-click > Data Grid: the rows under the widget in their own window (one window per widget).
 const openDrill = UI.guard(async w => {
-  if (!w.dataset || !dsOf(w.dataset)) throw new Error('Pick a dataset for this widget first (Widget Settings).');
+  if (!w.dataset || !dsOf(w.dataset)) throw new Error(isChart(w) ? 'Link the chart\'s fields first (Chart Settings).' : 'Pick a dataset for this widget first (Widget Settings).');
   await ensureMem(w.dataset);
   const W = 1200, H = 750, g = open(`dashboard-grid.html?id=${encodeURIComponent(w.id)}`, `dn-grid-${w.id}`, `popup,width=${W},height=${H}`);
   if (!g) UI.toast('The Data Grid window was blocked by the browser. Allow pop-ups for this site.', 'err'); else g.focus();
@@ -502,11 +508,14 @@ function changed(w, query = true) {
   if (query) isFilter(w) ? rerunAll(w) : rerun(w);
 }
 addEventListener('keydown', e => { if (e.key === 'Escape' && !document.querySelector('dialog[open]')) { $('ctxmenu').classList.remove('open'); select(null); } });
-// ---- right-click menu on a widget: Widget Settings (opens the settings window), Refresh, Delete ----
+// ---- right-click menu on a widget: Widget Settings / Chart Settings (opens the settings window), Refresh, Delete ----
 let ctxId = null;
 $('canvas').addEventListener('contextmenu', ev => {
   const el = ev.target.closest('.wd'); if (!el) return;
   ev.preventDefault(); ctxId = el.dataset.id; select(ctxId);
+  const cw = byId(ctxId), what = cw && isChart(cw) ? 'chart' : 'widget';
+  $('ctxSet').textContent = cw ? setName(cw) : 'Widget Settings'; $('ctxDel').textContent = `Delete ${what}`;
+  document.querySelectorAll('#ctxmenu .ctxWhat').forEach(e => { e.textContent = what; });
   const m = $('ctxmenu'); Menus.closeAll(); Menus.tips(m, false); m.classList.add('open');
   const x = Math.min(ev.clientX, innerWidth - m.offsetWidth - 4), y = Math.min(ev.clientY, innerHeight - m.offsetHeight - 4);
   m.style.left = `${Math.max(0, x)}px`; m.style.top = `${Math.max(0, y)}px`;
@@ -533,15 +542,17 @@ const delWidget = UI.guard(async w => {
   ctx.log(`Widget deleted: ${titleOf(w)}`);
 });
 
-// Add lists = every package in widget-studio/live/ (Widgets) and d3-studio/live/ (Charts) with a valid widget.json.
+// Add list = every chart in d3-studio/live/ with a valid chart.json (+ the built-in Data Grid for grids already placed).
 async function loadPkgs() {
-  const list = await WidgetRegistry.list(true);
+  const list = await ChartRegistry.list(true);
   pkgs = new Map(list.map(m => [m.id, m]));
 }
 // Window resized: redraw charts at their new pixel size (from the last result, no re-query).
 // The canvas area changed size (window resize, header added): re-fit the grid, move / redraw the widgets.
-// Live while resizing: grid + widget boxes every frame; charts redraw once the size settles.
-const repaint = UI.debounce(() => dash.widgets.forEach(w => { const e = document.querySelector(`.wd[data-id="${w.id}"] .wb`), r = results.get(w.id); if (e && r) paint(e, w, r); }), 120);
+// Live while resizing: grid, boxes and charts every frame (charts follow the new size at once).
+// Every frame while the window resizes (refit is frame-throttled): charts follow the new size live, no wait.
+// A chart with no fields linked yet (no result) is drawn empty at the new size.
+const repaint = () => dash.widgets.forEach(w => { const e = document.querySelector(`.wd[data-id="${w.id}"] .wb`), r = results.get(w.id); if (e && r) paint(e, w, r); else if (e && isChart(w) && !isReady(w)) draw(w); });
 let fitFrame = 0;
 function refit() {
   if (!fitGrid()) return;
@@ -561,6 +572,7 @@ if (document.readyState === 'loading') addEventListener('DOMContentLoaded', moun
 (async () => {
   try {
     ctx = await ModulePage.init('dashboard', 'Dashboard');
+    await loadSrc();
     mountTools(); fitGrid();
     await loadPkgs();
     const raw = await DNFS.readJSONOr(FILE(), null);

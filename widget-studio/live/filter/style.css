@@ -1,8 +1,0 @@
-/* Filter widget: the ONE place its look is set. .WIDGET = this widget's box (class dn-w-<folder name>).
-   The Dashboard draws its dropdowns (.flt); colours default to the app theme (css/theme.css). */
-
-/* ===== PAGE ===== */
-.WIDGET .flt { display: flex; flex-wrap: wrap; gap: 8px 12px; align-content: flex-start; height: 100%; overflow: hidden; cursor: default; }
-.WIDGET .flt label { display: flex; flex-direction: column; gap: 3px; min-width: 140px; flex: 1 1 160px; color: var(--text-2); font-size: 12px; }
-.WIDGET .flt select { width: 100%; }
-.WIDGET .flt .clr { align-self: flex-end; }

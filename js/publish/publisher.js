@@ -26,10 +26,10 @@ const Publisher = (() => {
   let renderers;
   const addScript = src => new Promise((res, rej) => document.head.append(Object.assign(document.createElement('script'), { src, async: false, onload: res, onerror: () => rej(new Error(`Could not load ${src}`)) })));
   const loadRenderers = () => renderers ||= (async () => {
-    if (typeof ApexRender === 'undefined') await addScript('/js/widgets/apex-render.js');
+    if (typeof ApexRender === 'undefined') await addScript('/js/charts/apex-render.js');
     await Promise.all([typeof ApexCharts === 'undefined' && '/js/vendor/apexcharts.min.js', typeof ApexTree === 'undefined' && '/js/vendor/apextree.min.js',
-      typeof d3 === 'undefined' && '/js/vendor/d3.min.js', typeof D3Render === 'undefined' && '/js/widgets/d3-render.js',
-      typeof ApexWidget === 'undefined' && '/js/widgets/apex-widget.js', typeof Pptx === 'undefined' && '/js/core/pptx.js', typeof Pdf === 'undefined' && '/js/core/pdf.js']
+      typeof d3 === 'undefined' && '/js/vendor/d3.min.js', typeof D3Render === 'undefined' && '/js/charts/d3-render.js',
+      typeof ApexWidget === 'undefined' && '/js/charts/apex-widget.js', typeof DataGrid === 'undefined' && '/js/grid/data-grid-pkg.js', typeof Pptx === 'undefined' && '/js/core/pptx.js', typeof Pdf === 'undefined' && '/js/core/pdf.js']
       .filter(Boolean).map(addScript));
   })().catch(e => { renderers = null; throw e; });
 
@@ -67,7 +67,7 @@ const Publisher = (() => {
     if (!dash) throw new Error('No dashboard yet. Build one in the Dashboard module first.');
     if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
     // Each widget is drawn here at its dashboard size and embedded as static markup: the page needs no JavaScript.
-    const pkgs = new Map((await WidgetRegistry.list(true)).map(m => [m.id, m]));
+    const pkgs = new Map((await ChartRegistry.list(true)).map(m => [m.id, m]));
     const COLS = dash.cols || 48, ROWS = dash.rows || 27, CELL = 30, cards = [], charts = [];
     const host = Object.assign(document.createElement('div'), { style: 'position:fixed;left:-99999px;top:0' }); document.body.append(host);
     try {

@@ -14,5 +14,9 @@
       "axis": "y",
       "agg": "sum"
     }
-  ]
+  ],
+  "query": {
+    "sort": "desc",
+    "top": 20
+  }
 }

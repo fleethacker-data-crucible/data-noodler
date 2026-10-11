@@ -1,7 +1,7 @@
-// Data Grid widget renderer (widget.json "renderer"): our own table, no ApexGrid. One real <table> inside one native
+// Data Grid renderer (js/grid/data-grid-pkg.js "renderer"): our own table, no ApexGrid. One real <table> inside one native
 // scroller (like the app's schema tables), so vertical and sideways scrolling are the browser's own and the styling
 // covers every column. Only the rows on screen (+ a margin) are in the page; they are redrawn in blocks of 10 rows.
-// Its look: style.css in this folder only. Global: DNGrid.
+// Its look: js/grid/data-grid.css only. Global: DNGrid.
 //   DNGrid.create(box, { names, columns, rows, remote, more, total, props, columnDefaults, popped, onPop }) -> grid
 //     more(offset) -> { rows, done } (optional, local grids): the next block of rows near the end; total = all rows.
 //     names = the column keys; columns = [{ name, type }] (types); rows = objects (local grid) or empty with
@@ -21,7 +21,7 @@ window.DNGrid = (() => {
     boolean: [['true', 'True'], ['false', 'False'], ['empty', 'Empty'], ['notEmpty', 'Not empty']] };
   const NOVAL = new Set(['empty', 'notEmpty', 'true', 'false']);
 
-  // One filter on a local row value (the engine grids do the same in SQL: js/widgets/grid-remote.js).
+  // One filter on a local row value (the engine grids do the same in SQL: js/grid/grid-remote.js).
   function test(v, f, type) {
     const c = f.condition, blank = v == null || v === '';
     if (c === 'empty') return blank;

@@ -128,8 +128,22 @@ const Projects = (() => {
     return save(cfg);
   }
   const dir = folder => `${ROOT}/${folder}`;
+  // The cleaned datasets that really exist: every folder in <project>/data/source with a dataset.json (read from disk, so a
+  // dataset deleted or renamed outside the app is never offered). Columns / version / rows come from its dataset.json;
+  // other fields from the project's record of it, if any. cfg = the project config (read when not given).
+  async function sourceDatasets(folder, cfg) {
+    cfg ||= await get(folder).catch(() => ({}));
+    const root = `${ROOT}/${folder}/data/source`, out = [];
+    for (const e of (await DNFS.list(root).catch(() => [])).filter(e => e.dir)) {
+      const path = `${root}/${e.name}`, man = await DNFS.readJSON(`${path}/dataset.json`).catch(() => null);
+      if (!man) continue;
+      const rec = (cfg.datasets || []).find(d => d.path === path) || {};
+      out.push({ ...rec, name: rec.name || man.name || e.name, path, stage: 'source', columns: man.columns || rec.columns || [], version: man.version ?? rec.version, rowCount: man.rowCount ?? rec.rowCount });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
   // 'staged' | 'source' (older records have no stage: taken from the path; pipeline outputs are 'source').
   const stageOf = d => d.stage || (d.source?.kind !== 'pipeline' && d.path.includes('/data/staged/') ? 'staged' : 'source');
 
-  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, trashList, restore, emptyTrash, touchModule, upsertDataset, dir, stageOf };
+  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, label, slug, validName, list, get, save, create, update, rename, trash, trashList, restore, emptyTrash, touchModule, upsertDataset, dir, stageOf, sourceDatasets };
 })();

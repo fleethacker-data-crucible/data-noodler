@@ -17,6 +17,7 @@
         document.title = 'Import'; return;
       }
       const el = document.getElementById('gh-sub'); if (el) el.textContent = project ? `${title} · ${project}` : title;
+      if (id === 'd3-studio') { document.title = 'D3 Studio'; return; }
       document.title = project ? `${title} · ${project}` : id === 'project_manager' ? 'Project Manager' : `${title} · Data Noodler`;
     },
   };

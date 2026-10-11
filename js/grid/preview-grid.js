@@ -1,5 +1,5 @@
-// Data preview tables (Import, Transform and its pop-out) drawn as the Data Grid widget package (kind apexgrid, our own renderer).
-// Needs dn-fs.js, ui.js, apex-render.js, apex-options.js, apex-widget.js (the grid itself: widgets/data-grid/grid.js). Global: PreviewGrid.
+// Data preview tables (Import, Transform and its pop-out) drawn as the built-in Data Grid (kind apexgrid, our own renderer).
+// Needs dn-fs.js, ui.js, apex-render.js, apex-options.js, apex-widget.js, js/grid/data-grid-pkg.js (the grid itself: js/grid/data-grid.js). Global: PreviewGrid.
 //   PreviewGrid.show(el, cols, rows, { total, more })   cols = column names, rows = arrays (an engine result); el gets a .pgrid box
 //     more(offset) -> rows (arrays) after the first ones: the grid asks for the next 100 as the reader nears the end;
 //     total = all rows of the query (when known).
@@ -8,7 +8,7 @@ const PreviewGrid = (() => {
   let seq = 0;
   const PAGE = 100;   // rows per block
   async function show(el, cols, rows, { total = null, more = null } = {}) {
-    const n = ++seq, m = (await WidgetRegistry.list().catch(() => [])).find(x => x.kind === 'apexgrid');
+    const n = ++seq, m = await DataGrid.pkg().catch(() => null);
     if (n !== seq) return;   // a newer preview started meanwhile
     if (!m) return UI.dataTable(el, cols, rows);
     let box = el.querySelector(':scope > .pgrid');
@@ -20,8 +20,7 @@ const PreviewGrid = (() => {
   }
   // Data for a popped-out grid window (html/grid-pop.html: win.DNGridShow(d)) showing another preview in place.
   async function popData(cols, rows, { total = null, more = null, title = '' } = {}) {
-    const m = (await WidgetRegistry.list().catch(() => [])).find(x => x.kind === 'apexgrid');
-    if (!m) throw new Error('No Data Grid widget package in widgets/.');
+    const m = await DataGrid.pkg();
     const next = more && (async at => { const r = await more(at); return { rows: ApexWidget.objects({ cols, rows: r }), done: r.length < PAGE || (total != null && at + r.length >= total) }; });
     return { s: m.specJson, rows: ApexWidget.objects({ cols, rows }), names: [...cols], columns: [], more: next, total, wid: m.id, title };
   }

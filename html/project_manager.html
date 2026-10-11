@@ -72,7 +72,6 @@
       <span class="dd-wrap"><button id="utils" class="ghost" title="Global tools (hold Shift for descriptions)">Utilities ▾</button>
         <div class="dd-menu right" id="utilmenu">
           <div data-act="d3studio">D3 Studio<small>Build D3 charts: code, sample data and a live preview. Save keeps a chart in progress; Publish puts it in the Dashboard's Charts list.</small></div>
-          <div data-act="widgetstudio" class="off">Widget Studio<small>Build widgets that combine several things (charts, filters, tables) in one box for the Dashboard's Widgets list. Coming soon.</small></div>
         </div></span>
       <button id="srvctl" class="danger" title="Open the server control panel">Server Control</button>
     </div>
@@ -280,7 +279,7 @@ const tagsOf = s => (s || '').split(',').map(t => t.trim()).filter(Boolean);
 // This window owns the server: closing it stops the server (a reload says hello within 4 s and cancels that).
 const srv = op => fetch(`/api/${op}`, { method: 'POST', keepalive: true, headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});
 srv('hello'); addEventListener('pagehide', () => srv('bye'));
-// Utilities: global tools (no project). Widget Studio is not built yet (its item is greyed out and does nothing).
+// Utilities: global tools (no project).
 Menus.sort($('utilmenu'));
 Menus.bind($('utils'), $('utilmenu'), act => { if (act === 'd3studio') Windows.open('d3studio'); });
 $('srvctl').onclick = () => fetch('/api/panel', { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});

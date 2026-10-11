@@ -96,7 +96,7 @@ button.ghost { background: var(--sel); color: var(--text); }
 button.ghost:disabled { color: var(--muted); }
 button.danger { background: var(--err); }
 button.go { background: var(--save); }   /* green = Save buttons only */
-button.small { height: 21px; padding: 0 8px; font-size: 12px; }
+button.small { height: 21px; padding: 0 8px 2px; font-size: 12px; }
 
 /* Drop-down menus, every page (js/core/menus.js): .dd-wrap > button + .dd-menu (.open = shown).
    Items: <div data-act>Name<small>tip</small></div>; tips only while Shift is held (.tips). .off = not available yet,
@@ -306,6 +306,9 @@ dialog { overflow: visible; }
 .sqled-tip { position: absolute; z-index: 6; max-width: 420px; padding: 6px 10px; border-radius: 4px; font: 12.5px/1.4 system-ui, sans-serif; color: #fff; pointer-events: none; box-shadow: 0 6px 18px rgba(0,0,0,.4); white-space: normal; }
 .sqled-tip.bad { background: #6b1414; border: 1px solid #a32626; }
 .sqled-tip.warn { background: #7a4a0c; border: 1px solid #b06d16; }
+.sqled-tip.info { background: var(--panel); color: var(--text); border: 1px solid var(--border); }   /* hover help (D3 names) */
+.sqled.ro .sqled-ta { caret-color: transparent; cursor: default; }
+.sqled-pop small { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sqled-gut .bad { color: var(--err); font-weight: 700; }
 .sqled-pop { position: absolute; z-index: 5; min-width: 220px; max-height: 240px; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.35); }
 .sqled-pop div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 8px; cursor: pointer; }

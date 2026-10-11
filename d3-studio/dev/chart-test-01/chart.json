@@ -1,0 +1,119 @@
+{
+  "id": "chart-test-01",
+  "name": "chart-test-01",
+  "description": "",
+  "category": "Bar",
+  "version": 1,
+  "kind": "d3",
+  "spec": "spec.json",
+  "style": "style.css",
+  "code": "d3-code.js",
+  "sample": "sample.json",
+  "thumb": "thumb.svg",
+  "inputs": [
+    {
+      "key": "x",
+      "label": "X Axis",
+      "role": "dimension",
+      "axis": "x"
+    },
+    {
+      "key": "y",
+      "label": "Y Axis",
+      "role": "measure",
+      "axis": "y",
+      "agg": "sum"
+    }
+  ],
+  "options": [
+    {
+      "path": "colors.0",
+      "label": "Colour 1",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.1",
+      "label": "Colour 2",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.2",
+      "label": "Colour 3",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.3",
+      "label": "Colour 4",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.4",
+      "label": "Colour 5",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.5",
+      "label": "Colour 6",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.6",
+      "label": "Colour 7",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.7",
+      "label": "Colour 8",
+      "group": "Colours",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "grid.y",
+      "label": "Horizontal grid lines",
+      "group": "Grid",
+      "type": "boolean",
+      "default": true,
+      "show": true
+    },
+    {
+      "path": "grid.x",
+      "label": "Vertical grid lines",
+      "group": "Grid",
+      "type": "boolean",
+      "default": false,
+      "show": true
+    }
+  ],
+  "studio": {
+    "project": "staggs-test",
+    "table": "CLEAN_EMPLOYEE_HOURS",
+    "links": {
+      "x": "CLEAN_EMPLOYEE_HOURS.MONTH",
+      "y": "CLEAN_EMPLOYEE_HOURS.LABOR_COST"
+    }
+  },
+  "updated": "2026-10-10T18:31:07.934Z"
+}

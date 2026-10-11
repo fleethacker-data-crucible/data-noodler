@@ -1,5 +1,5 @@
 // Bar chart. data = rows ({ x, y }: d.x = X Axis, d.y = Y Axis), el = the box, W x H = its size in px, colors = the 8 chart colours.
-const margin = { top: 12, right: 12, bottom: 28, left: 44 };
+const margin = { top: opts.values ? 26 : 12, right: 12, bottom: 28, left: 44 };
 const x = d3.scaleBand().domain(data.map(d => d.x)).range([margin.left, W - margin.right]).padding(0.2);
 const y = d3.scaleLinear().domain([0, d3.max(data, d => d.y) || 1]).nice().range([H - margin.bottom, margin.top]);
 
@@ -14,6 +14,12 @@ svg.append('g').selectAll('rect').data(data).join('rect')
     .attr('x', d => x(d.x)).attr('y', d => y(d.y))
     .attr('width', x.bandwidth()).attr('height', d => y(0) - y(d.y))
     .attr('rx', 2).attr('fill', (d, i) => colors[0]);
+// Value numbers (Settings: opts.values): centred on each bar, baseline 10px above its top.
+// opts.mirrorDecimals on = the value exactly as in the data (all its decimals), off = whole numbers.
+const valueText = d => opts.mirrorDecimals ? String(d.y) : d3.format('.0f')(d.y);
+if (opts.values) svg.append('g').attr('text-anchor', 'middle').attr('font-size', 11).attr('fill', theme.text)
+    .selectAll('text').data(data).join('text')
+    .attr('x', d => x(d.x) + x.bandwidth() / 2).attr('y', d => y(d.y) - 10).text(valueText);
 svg.append('g').attr('transform', `translate(0,${H - margin.bottom})`).call(d3.axisBottom(x).tickSizeOuter(0));
 svg.append('g').attr('transform', `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5))
     .call(g => g.select('.domain').remove());

@@ -1,6 +1,6 @@
 // ApexCharts / ApexGrid / ApexTree drawing for widget packages (used by ApexWidget.render). Global: ApexRender.
 // Needs js/vendor/apexcharts.min.js and apextree.min.js; a missing library only breaks the widgets of that kind. Data Grids
-// are drawn by their own package renderer (widgets/<id>/grid.js), not by Apex.
+// are drawn by their own renderer (js/grid/data-grid.js), not by Apex.
 //
 // spec.json = the library's own options (paste a demo's options object), plus "$kind" and "data" (the inputs).
 //   Without a dataset (sample preview) the spec is drawn as-is, with its own series / labels / categories
@@ -94,13 +94,13 @@ const ApexRender = (() => {
     return t;
   }
 
-  // ---- Data Grid: drawn by the widget's own renderer (widgets/<id>/grid.js, widget.json "renderer"; global DNGrid),
-  // loaded once per window. No ApexGrid. Its look is the widget's style.css only.
+  // ---- Data Grid: drawn by its own renderer (js/grid/data-grid.js, the package's "renderer"; global DNGrid),
+  // loaded once per window. No ApexGrid. Its look is js/grid/data-grid.css only.
   const loads = new WeakMap();   // window -> Map(src -> promise)
   function loadRenderer(doc, wid, file) {
     const win = doc.defaultView;
     let m = loads.get(win); if (!m) loads.set(win, m = new Map());
-    const src = `/widget-studio/live/${encodeURIComponent(wid || 'data-grid')}/${file || 'grid.js'}`;
+    const src = file && file.startsWith('/') ? file : '/js/grid/data-grid.js';
     if (!m.has(src)) m.set(src, new Promise((res, rej) => {
       const s = Object.assign(doc.createElement('script'), { src, onload: res, onerror: () => rej(new Error(`Could not load the grid renderer ${src}.`)) });
       doc.head.append(s);
@@ -142,9 +142,9 @@ const ApexRender = (() => {
   }
 
   // el: an empty box; rows keyed by input key (grid: by column name). live = rows come from a dataset (else the spec's own data).
-  async function render(kind, box, s, ins, rows, W, H, th, { live, names = [], columns = [], prev = null, remote = null, more = null, total = null, popped = false, wid = '', renderer = '', code = '' }) {
+  async function render(kind, box, s, ins, rows, W, H, th, { live, names = [], columns = [], prev = null, remote = null, more = null, total = null, popped = false, wid = '', renderer = '', code = '', chartInputs = null }) {
     if (kind === 'apexgrid') return grid(box, s, rows, names, columns, remote, popped, wid, renderer, more, total);
-    if (kind === 'd3') { need(typeof D3Render === 'undefined' ? undefined : D3Render, 'D3Render (js/widgets/d3-render.js)'); return D3Render.draw(box, code, rows, { W, H, colors: D3Render.colorsOf(s, th), opts: strip(s), theme: th }); }
+    if (kind === 'd3') { need(typeof D3Render === 'undefined' ? undefined : D3Render, 'D3Render (js/charts/d3-render.js)'); return D3Render.draw(box, code, rows, { W, H, colors: D3Render.colorsOf(s, th), opts: strip(s), theme: th, inputs: chartInputs || Object.fromEntries(ins.map(i => [i.key, { key: i.key, label: i.label || i.key, role: i.role, agg: i.agg, field: '' }])) }); }
     await document.fonts?.load(`11px ${th.font.split(',')[0]}`).catch(() => {});   // Exo 2 loaded before Apex measures label widths
     if (kind === 'apexcharts') return chart(box, s, ins, rows, W, H, th, live, prev);
     if (kind === 'apextree') return tree(box, s, ins, rows, W, H, th, live);

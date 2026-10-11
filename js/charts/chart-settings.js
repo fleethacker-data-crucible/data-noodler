@@ -1,14 +1,16 @@
-// Settings body for a dashboard widget, built from its package manifest. Global: WidgetSettings.
-//   WidgetSettings.render(el, { manifest, w, columns, onChange(kind, live), only })
+// Settings body for a dashboard widget, built from its package manifest. Global: ChartSettings.
+//   ChartSettings.render(el, { manifest, w, columns, onChange(kind, live), only })
 //     w        = dashboard widget ({ inputs, opts, limit }); values are written into it
 //     columns  = [{ name, type }] of the chosen dataset (null = no dataset: data inputs are hidden)
 //     only     = a group name: render just that group's rows (no collapsible wrapper); omitted = every group, collapsible
 //     kind     = 'data' (re-run the query) | 'look' (redraw only)
-//   WidgetSettings.tree(args) -> [{ name, count, items: [{ label, path }] }]   the groups (Inputs first) for a tree view
+//     tables   = { <dataset>: [{ name, type }] } every ready dataset (charts, kind d3: each input is linked to TABLE.FIELD,
+//                all from one table, which becomes w.dataset; no fields linked = no dataset = the chart draws empty)
+//   ChartSettings.tree(args) -> [{ name, count, items: [{ label, path }] }]   the groups (Inputs first) for a tree view
 // Filter widgets (kind 'filter'): w.filters = [{ col, label, sort: 'asc' | 'desc' | 'count' }], w.showCounts, w.maxValues;
 // the selected values live in w.sel = { <col>: value } (set from the dropdowns on the dashboard).
 // Every row carries data-path (option path, or "in:<key>" for an input) so a tree can jump to it.
-const WidgetSettings = (() => {
+const ChartSettings = (() => {
   const OPEN = new Set(['Inputs']);   // groups the user opened (kept across re-renders)
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const section = (name, body, count) => `<details class="ws-grp" data-g="${esc(name)}" ${OPEN.has(name) ? 'open' : ''}><summary>${Icons.caret()}${esc(name)}<small>${count}</small></summary><div class="ws-gb">${body}</div></details>`;
@@ -22,12 +24,13 @@ const WidgetSettings = (() => {
   }
 
   const SORTS = [['asc', 'Ascending (A to Z)'], ['desc', 'Descending (Z to A)'], ['count', 'Most rows first']];
-  function tree({ manifest: m, w, columns }) {
+  const isChart = (m, tables) => m.kind === 'd3' && !!tables;
+  function tree({ manifest: m, w, columns, tables }) {
     if (m.kind === 'filter') return columns ? [{ name: 'Filter fields', count: (w.filters || []).length, items: (w.filters || []).map((f, k) => ({ label: f.label || f.col || 'Field', path: `f:${k}` })) },
       { name: 'Filter options', count: 2, items: [{ label: 'Show row counts', path: 'f:counts' }, { label: 'Max values', path: 'f:max' }] }] : [];
     const out = [];
     const ins = ApexWidget.inputsOf(m);
-    if (columns) out.push({ name: 'Inputs', count: ins.length, items: ins.map(i => ({ label: ApexWidget.labelOf(m, i), path: `in:${i.key}` })) });
+    if (columns || isChart(m, tables)) out.push({ name: 'Inputs', count: ins.length, items: ins.map(i => ({ label: ApexWidget.labelOf(m, i), path: `in:${i.key}` })) });
     for (const [g, list] of optionGroups(m)) out.push({ name: g, count: list.length, items: list.map(k => ({ label: m.options[k].label, path: m.options[k].path })) });
     return out;
   }
@@ -38,7 +41,29 @@ const WidgetSettings = (() => {
     const valOf = o => o.path in w.opts ? w.opts[o.path] : o.default;
     const A = ApexWidget, ins = A.inputsOf(m), parts = [];
     if (m.kind === 'filter') return filterSettings(el, args);
-    if (columns) {
+    const chart = isChart(m, args.tables);
+    if (chart) {
+      // Charts: each input variable = TABLE.FIELD (one table for all, like SQL FROM).
+      const tabs = Object.entries(args.tables), cur = w.dataset || '';
+      let h = `<div class="muted ws-from">${cur ? `FROM <b>${esc(cur)}</b>: every input reads this table. A field of another table switches the chart to it (the other inputs are cleared).` : 'No fields linked: the chart shows its axes / grid only. Link each input to a TABLE.FIELD.'}</div>`;
+      if (!tabs.length) h += '<div class="muted">No ready datasets in this project. Use Import Directly, or run the Transform on staged data.</div>';
+      for (const i of ins) {
+        const b = A.binding(m, w, i), isM = i.role === 'measure';
+        const ok = c => !isM || ['count', 'count_distinct', 'min', 'max'].includes(b.agg) || NUMERIC.test(c.type);
+        const now = cur && b.col ? `${cur}.${b.col}` : '';
+        h += `<div class="ws-in" data-k="${esc(i.key)}" data-path="in:${esc(i.key)}">
+          <div class="ws-inh"><b>${esc(A.labelOf(m, i))}</b><small>${isM ? 'measure' : 'dimension'} · d.${esc(i.key)}</small></div>
+          <select class="ws-src"><option value="">${isM && b.agg === 'count' ? 'All rows (count)' : i.optional ? 'None' : 'Not linked: pick TABLE.FIELD…'}</option>${tabs.map(([t, cols]) => `<optgroup label="${esc(t)}">${cols.filter(ok).map(c => `<option value="${esc(`${t}.${c.name}`)}" ${`${t}.${c.name}` === now ? 'selected' : ''}>${esc(`${t}.${c.name}`)}</option>`).join('')}</optgroup>`).join('')}</select>
+          ${isM ? `<select class="ws-agg">${A.AGGS.map(a => `<option value="${a}" ${a === b.agg ? 'selected' : ''}>${A.AGG_LABEL[a]}</option>`).join('')}</select>` : ''}
+        </div>`;
+      }
+      if (A.hasTop(m)) {
+        const s = A.sortOf(m, w);
+        h += `<label class="field">Order<select id="wsSort">${[['desc', 'Largest first'], ['asc', 'Smallest first'], ['label', 'By X (A to Z, dates in order)']].map(([v, l]) => `<option value="${v}" ${v === s ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="field">Max X values<input id="wsTop" type="number" min="1" max="100000" value="${A.topOf(m, w)}"></label>`;
+      }
+      parts.push(['Inputs', h, ins.length]);
+    } else if (columns) {
       let h = '';
       for (const i of ins) {
         const b = A.binding(m, w, i), isM = i.role === 'measure';
@@ -93,6 +118,14 @@ const WidgetSettings = (() => {
     el.querySelectorAll('.ws-in').forEach(r => {
       const i = ins.find(x => x.key === r.dataset.k), cur = () => (w.inputs[i.key] ||= { col: '', agg: i.agg });
       r.querySelector('.ws-col')?.addEventListener('change', e => { cur().col = e.target.value; onChange('data'); });
+      // Chart: TABLE.FIELD. Another table = the chart reads that table now (the other inputs' fields are cleared).
+      r.querySelector('.ws-src')?.addEventListener('change', e => {
+        const v = e.target.value, at = v.indexOf('.'), t = at > 0 ? v.slice(0, at) : '', c = at > 0 ? v.slice(at + 1) : '';
+        if (t && t !== w.dataset) { for (const k of Object.keys(w.inputs)) if (k !== i.key) w.inputs[k] = { ...w.inputs[k], col: '' }; w.dataset = t; }
+        cur().col = c;
+        if (!Object.values(w.inputs).some(x => x?.col)) w.dataset = '';
+        onChange('data'); render(el, args);
+      });
       r.querySelector('.ws-agg')?.addEventListener('change', e => { cur().agg = e.target.value; onChange('data'); render(el, args); });
       const fl = r.querySelector('.ws-fields');
       if (fl) {
@@ -103,7 +136,7 @@ const WidgetSettings = (() => {
       }
     });
     el.querySelector('#wsSort')?.addEventListener('change', e => { w.sort = e.target.value; onChange('data'); });
-    el.querySelector('#wsTop')?.addEventListener('input', e => { w.top = Math.max(1, Math.min(1000, +e.target.value || 20)); onChange('data'); });
+    el.querySelector('#wsTop')?.addEventListener('input', e => { w.top = Math.max(1, Math.min(chart ? 100000 : 1000, +e.target.value || 20)); onChange('data'); });
   }
   // ---- filter widget: the fields with a dropdown each, their order; Add field / remove ----
   function filterSettings(el, args) {

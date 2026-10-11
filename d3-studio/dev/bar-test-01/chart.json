@@ -1,9 +1,9 @@
 {
-  "id": "bar-chart-vertical",
-  "name": "Bar Chart (Vertical)",
-  "description": "Standard vertical bar chart.",
+  "id": "bar-test-01",
+  "name": "bar-test-01",
+  "description": "",
   "category": "Bar",
-  "version": 1,
+  "version": 2,
   "kind": "d3",
   "spec": "spec.json",
   "style": "style.css",
@@ -103,9 +103,14 @@
       "label": "Vertical grid lines",
       "group": "Grid",
       "type": "boolean",
-      "default": true,
+      "default": false,
       "show": true
     }
   ],
-  "updated": "2026-10-09T19:02:49.844Z"
+  "studio": {
+    "project": "",
+    "table": "",
+    "links": {}
+  },
+  "updated": "2026-10-10T17:55:23.635Z"
 }

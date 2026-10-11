@@ -9,6 +9,10 @@
 //   Suggestions from the first letter typed (fields / datasets white, SQL keywords / functions blue); Ctrl+Space lists
 //   everything. Typing "name." (a table, or an alias from FROM / JOIN) lists its fields, narrowed as you type.
 //   ed.value / ed.value = 'SELECT *\nFROM t'   ed.insert(text)   ed.focus()
+//   lang 'js' (D3 Studio): the same error marks and flashes; complete({ text, pos, word, dot, force }) -> [[text, kind, info]]
+//     gives the suggestions (after a letter or a dot), hover(text, pos) -> info text for the word under the mouse,
+//     vars() -> Set of the page's own variable names (purple), d3names() -> Set of D3 exports (d3.<name> blue).
+//   readOnly: shown and coloured, not editable (D3 Studio's generated variables).
 const SqlEditor = (() => {
   const KW = ('select from where group by having order limit offset join inner left right full outer cross on using as and or not in is null ' +
     'between like ilike case when then else end distinct all union with asc desc nulls first last cast try_cast true false exclude filter over ' +
@@ -27,7 +31,7 @@ const SqlEditor = (() => {
   const isW = c => /[A-Za-z0-9_]/.test(c || '');
 
   // lang 'json' / 'js': JSON or JavaScript colours, no completion.
-  function mount(el, { onChange = () => {}, words = () => ({ tables: [], columns: [] }), lang = 'sql', check = null, onCheck = () => {} } = {}) {
+  function mount(el, { onChange = () => {}, words = () => ({ tables: [], columns: [] }), lang = 'sql', check = null, onCheck = () => {}, complete = null, hover = null, vars = null, d3names = null, readOnly = false } = {}) {
     el.classList.add('sqled');
     el.innerHTML = `<div class="sqled-gut"></div><div class="sqled-body"><pre class="sqled-hl" aria-hidden="true"></pre>` +
       `<textarea class="sqled-ta" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" wrap="off"></textarea></div><div class="sqled-pop" hidden></div><div class="sqled-tip" hidden></div>` +
@@ -36,7 +40,9 @@ const SqlEditor = (() => {
       `<button type="button" class="f-next" title="Next (Enter)">&#8595;</button><span class="f-n"></span>` +
       `<input class="f-r" type="text" placeholder="Replace" spellcheck="false"><button type="button" class="f-one" title="Replace this match (Enter)">Replace</button>` +
       `<button type="button" class="f-all" title="Replace every match">All</button><button type="button" class="f-x" title="Close (Esc)">&#215;</button></div>`;
+    if (readOnly) el.classList.add('ro');
     const ta = el.querySelector('textarea'), hl = el.querySelector('.sqled-hl'), gut = el.querySelector('.sqled-gut'), pop = el.querySelector('.sqled-pop'), tip = el.querySelector('.sqled-tip');
+    if (readOnly) ta.readOnly = true;
     let items = [], pick = 0, chosen = false;   // chosen: user moved through the list (then Enter accepts)
     let errs = [], checkT, checkSeq = 0;
     const was = new Map();   // line -> error state at the last paint ('warn' | 'bad'): a change flashes
@@ -77,56 +83,67 @@ const SqlEditor = (() => {
       clearTimeout(flashT); flashT = setTimeout(() => { flashes = flashes.filter(f => f.until > Date.now()); paint(); }, ms + 20);
     }
 
-    function paintJson(t) {
-      let out = '', m;
-      const re = /("(?:[^"\\]|\\.)*"?)(\s*:)?|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|\b(true|false|null)\b|([\s\S])/g;
+    // Tokens per language: [[index, text, html]]. The error / flash / statement colours are added on top (paint()).
+    function tokJson(t) {
+      const out = [], re = /("(?:[^"\\]|\\.)*"?)(\s*:)?|(-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|\b(true|false|null)\b|([\s\S])/g;
+      let m;
       while ((m = re.exec(t))) {
         const [s, str, colon, num, lit] = m;
-        if (str) out += `<span class="${colon ? 't-kw' : 't-str'}">${esc(str)}</span>${colon || ''}`;
-        else if (num) out += `<span class="t-num">${s}</span>`;
-        else if (lit) out += `<span class="t-fn">${s}</span>`;
-        else out += esc(s);
+        if (str) { out.push([m.index, str, `<span class="${colon ? 't-kw' : 't-str'}">${esc(str)}</span>`]); if (colon) out.push([m.index + str.length, colon, colon]); }
+        else out.push([m.index, s, num ? `<span class="t-num">${s}</span>` : lit ? `<span class="t-fn">${s}</span>` : esc(s)]);
       }
       return out;
     }
     const JS_KW = new Set('const let var function return if else for while do switch case break continue new this typeof instanceof of in class extends async await try catch finally throw default import export delete void yield'.split(' '));
-    // bad: [{ ta, tb }] error ranges, drawn dark grey (their whole line gets a dark red bar, see paint()).
-    function paintJs(t, bad = []) {
-      let out = '', m;
+    // JS: keywords blue, d3 green, d3.<name> blue (left white when D3 has no such name), the chart's own variables (vars()) purple.
+    function tokJs(t) {
+      const out = [], v = vars ? vars() : null, api = d3names ? d3names() : null;
       const re = /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|("(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?|`(?:[^`\\]|\\.)*`?)|(\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([A-Za-z_$][\w$]*)|([\s\S])/g;
+      // The two code tokens before this one (comments and spaces skipped): "x." / "d3." before a word makes it a property.
+      // (Not the raw text: a comment ending in a full stop must not turn the next line's const into a property.)
+      let m, p1 = '', p2 = '';
       while ((m = re.exec(t))) {
         const [s, com, str, num, word] = m;
         let h;
         if (com) h = `<span class="t-com">${esc(com)}</span>`;
         else if (str) h = `<span class="t-str">${esc(str)}</span>`;
         else if (num) h = `<span class="t-num">${s}</span>`;
-        else if (word) h = JS_KW.has(word) ? `<span class="t-kw">${word}</span>` : /^(true|false|null|undefined)$/.test(word) ? `<span class="t-fn">${word}</span>` : word === 'd3' ? `<span class="t-tb">${word}</span>` : esc(word);
-        else h = esc(s);
-        out += s !== '\n' && bad.some(x => x.ta < m.index + s.length && x.tb > m.index) ? `<span class="t-jserr">${h}</span>` : h;
+        else if (word) {
+          const dotted = p1 === '.', afterD3 = dotted && p2 === 'd3';
+          h = JS_KW.has(word) && !dotted ? `<span class="t-kw">${word}</span>` : /^(true|false|null|undefined)$/.test(word) ? `<span class="t-fn">${word}</span>`
+            : word === 'd3' && !dotted ? `<span class="t-tb">${word}</span>` : afterD3 && api ? (api.has(word) ? `<span class="t-fn">${word}</span>` : esc(word))
+            : !dotted && v && v.has(word) ? `<span class="t-ty">${word}</span>` : esc(word);
+        } else h = esc(s);
+        out.push([m.index, s, h]);
+        if (!com && s.trim()) { p2 = p1; p1 = s; }
+      }
+      return out;
+    }
+    function tokSql(t) {
+      // Source tables and their aliases (FROM / JOIN name [AS] alias) are coloured as tables (green).
+      const tables = new Set([...words().tables.map(x => x.toLowerCase()), ...aliases(words().fields || {}).keys()]);
+      const out = [], re = /(--[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|('(?:[^']|'')*'?)|("(?:[^"]|"")*"?)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)|([\s\S])/g;
+      let m;
+      while ((m = re.exec(t))) {
+        const [s, com, str, qid, num, id] = m;
+        let h;
+        if (com) h = `<span class="t-com">${esc(s)}</span>`;
+        else if (str) h = `<span class="t-str">${esc(s)}</span>`;
+        else if (qid) h = `<span class="t-id">${esc(s)}</span>`;
+        else if (num) h = `<span class="t-num">${s}</span>`;
+        else if (id) {
+          const w = id.toLowerCase(), next = t.slice(re.lastIndex).match(/^\s*\(/);
+          h = KWS.has(w) ? `<span class="t-kw">${s}</span>` : FNS.has(w) && next ? `<span class="t-fn">${s}</span>` : TYS.has(w) ? `<span class="t-ty">${s}</span>` : tables.has(w) ? `<span class="t-tb">${s}</span>` : esc(s);
+        } else h = esc(s);
+        out.push([m.index, s, h]);
       }
       return out;
     }
     let marks = [];   // { a, b, st, msg } for this paint (hover reads it)
+    // The same for every language: on the caret's line an error is dark orange (its statement dark grey), elsewhere dark red;
+    // turning orange / red flashes that colour twice, a fixed error flashes green twice and fades out.
     function paint() {
-      if (lang === 'js') {
-        // Errors: the bad line gets a dark red bar, the error itself dark grey; hovering the line shows the message.
-        const t = ta.value, cs = getComputedStyle(hl), lh = parseFloat(cs.lineHeight) || 20, padT = parseFloat(cs.paddingTop) || 0;
-        marks = errs.filter(e => e.pos >= 0).map(e => {
-          const [a, b] = span(t, e), ls = t.lastIndexOf('\n', a - 1) + 1, le = t.indexOf('\n', a) < 0 ? t.length : t.indexOf('\n', a);
-          return { a: ls, b: le + 1, ta: a, tb: b, L: lineOf(t, a), st: 'bad', msg: e.message };
-        });
-        const bad = new Set(marks.map(x => x.L));
-        hl.innerHTML = findMarks() + [...bad].map(L => `<div class="sqled-bar" style="top:${padT + (L - 1) * lh}px;height:${lh}px"></div>`).join('') + paintJs(t, marks) + '\n';
-        gut.innerHTML = Array.from({ length: t.split('\n').length }, (_, i) => bad.has(i + 1) ? `<span class="bad">${i + 1}</span>` : i + 1).join('<br>');
-        return sync();
-      }
-      if (lang !== 'sql') {
-        hl.innerHTML = findMarks() + paintJson(ta.value) + '\n';
-        gut.innerHTML = Array.from({ length: ta.value.split('\n').length }, (_, i) => i + 1).join('<br>');
-        return sync();
-      }
-      // Source tables and their aliases (FROM / JOIN name [AS] alias) are coloured as tables (green).
-      const t = ta.value, tables = new Set([...words().tables.map(x => x.toLowerCase()), ...aliases(words().fields || {}).keys()]);
+      const t = ta.value;
       marks = errs.filter(e => e.pos >= 0).map(e => { const [a, b] = span(t, e); return { a, b, st: stateOf(t, a), msg: e.message }; });
       // A line that turns orange or red flashes that colour twice (per line, so typing on an orange line does not keep flashing).
       const lineSt = new Map(); for (const m of marks) lineSt.set(lineOf(t, m.a), m.st);
@@ -142,30 +159,18 @@ const SqlEditor = (() => {
       }
       const now = Date.now(), fl = flashes.filter(f => f.until > now);
       const badLines = new Set(marks.filter(m => m.st === 'bad').map(m => lineOf(t, m.a)));
-      // Plain colouring first, then wrap characters in error / flash spans (per character range, so words stay whole).
-      let out = '', m;
-      const re = /(--[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|('(?:[^']|'')*'?)|("(?:[^"]|"")*"?)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)|([\s\S])/g;
       const cls = (a, b) => {
         const mk = marks.find(x => x.a < b && x.b > a), f = fl.find(x => x.a < b && x.b > a);
         return [a < sB && b > sA && 't-stmt', mk && 't-err-' + mk.st, f && f.cls].filter(Boolean).join(' ');
       };
-      while ((m = re.exec(t))) {
-        const [s, com, str, qid, num, id] = m;
-        let h;
-        if (com) h = `<span class="t-com">${esc(s)}</span>`;
-        else if (str) h = `<span class="t-str">${esc(s)}</span>`;
-        else if (qid) h = `<span class="t-id">${esc(s)}</span>`;
-        else if (num) h = `<span class="t-num">${s}</span>`;
-        else if (id) {
-          const w = id.toLowerCase(), next = t.slice(re.lastIndex).match(/^\s*\(/);
-          h = KWS.has(w) ? `<span class="t-kw">${s}</span>` : FNS.has(w) && next ? `<span class="t-fn">${s}</span>` : TYS.has(w) ? `<span class="t-ty">${s}</span>` : tables.has(w) ? `<span class="t-tb">${s}</span>` : esc(s);
-        } else h = esc(s);
-        const c = s === '\n' ? '' : s.trim() ? cls(m.index, m.index + s.length) : (m.index < sB && m.index >= sA ? 't-stmt' : '');   // spaces: only the statement grey
+      // Plain colouring first, then error / flash spans around each token (so words stay whole).
+      let out = '';
+      for (const [i, s, h] of (lang === 'sql' ? tokSql : lang === 'js' ? tokJs : tokJson)(t)) {
+        const c = s === '\n' ? '' : s.trim() ? cls(i, i + s.length) : (i < sB && i >= sA ? 't-stmt' : '');   // spaces: only the statement grey
         out += c ? `<span class="${c}">${h}</span>` : h;
       }
       hl.innerHTML = findMarks() + out + '\n';
-      const n = t.split('\n').length;
-      gut.innerHTML = Array.from({ length: n }, (_, i) => badLines.has(i + 1) ? `<span class="bad">${i + 1}</span>` : i + 1).join('<br>');
+      gut.innerHTML = Array.from({ length: t.split('\n').length }, (_, i) => badLines.has(i + 1) ? `<span class="bad">${i + 1}</span>` : i + 1).join('<br>');
       sync();
     }
     function sync() { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; gut.scrollTop = ta.scrollTop; }
@@ -244,7 +249,21 @@ const SqlEditor = (() => {
       const fields = words().fields || {}, tb = aliases(fields).get(name);
       return tb ? fields[tb] || [] : null;
     }
+    // JS: complete({ text, pos, word, dot, force }) -> [[text, kind, info]] (the page knows its names: D3, the chart's variables).
+    // From the first letter typed, and after a dot; Ctrl+Space lists everything here.
+    function suggestJs(force) {
+      if (!complete || readOnly) return close();
+      const { a, w } = wordAt(), dot = ta.value[a - 1] === '.';
+      if ((!w && !dot && !force) || /^\d/.test(w)) return close();
+      const lw = w.toLowerCase(), seen = new Set();
+      items = (complete({ text: ta.value, pos: a, word: w, dot, force }) || [])
+        .filter(([t]) => { const k = t.toLowerCase(); if (!k.startsWith(lw) || t === w || seen.has(t)) return false; seen.add(t); return true; }).slice(0, 300);
+      if (!items.length) return close();
+      pick = 0; chosen = !!force; renderPop();
+      const { x, y } = caretXY(); pop.style.left = Math.max(0, x) + 'px'; pop.style.top = y + 'px'; pop.hidden = false;
+    }
     function suggest(force) {
+      if (lang === 'js') return suggestJs(force);
       if (lang !== 'sql') return;
       const { w } = wordAt(), lw = w.toLowerCase(), df = dotFields();
       if (df !== undefined) {
@@ -266,12 +285,13 @@ const SqlEditor = (() => {
       const { x, y } = caretXY(); pop.style.left = Math.max(0, x) + 'px'; pop.style.top = y + 'px'; pop.hidden = false;
     }
     // Fields white, datasets / aliases green, SQL keywords and functions blue (css/theme.css .sqled-pop .sql / .tb).
-    function renderPop() { pop.innerHTML = items.map(([t, k], i) => `<div class="${[i === pick && 'sel', (k === 'keyword' || k === 'function') && 'sql', (k === 'dataset' || k === 'alias') && 'tb'].filter(Boolean).join(' ')}" data-i="${i}"><span>${esc(t)}</span><small>${k}</small></div>`).join(''); pop.querySelector('.sel')?.scrollIntoView({ block: 'nearest' }); }
+    // JS kinds: keyword / function / method blue, d3 green, the chart's variables and fields white; the info text on the right.
+    function renderPop() { pop.innerHTML = items.map(([t, k, info], i) => `<div class="${[i === pick && 'sel', ['keyword', 'function', 'method'].includes(k) && 'sql', ['dataset', 'alias', 'd3'].includes(k) && 'tb'].filter(Boolean).join(' ')}" data-i="${i}"><span>${esc(t)}</span><small>${esc(info || k)}</small></div>`).join(''); pop.querySelector('.sel')?.scrollIntoView({ block: 'nearest' }); }
     function close() { pop.hidden = true; items = []; }
     function accept(i = pick) {
       const it = items[i]; if (!it) return;
       const { a } = wordAt(); ta.setSelectionRange(a, ta.selectionStart);
-      insert(it[1] === 'function' ? it[0] + '(' : it[0]); close();
+      insert((it[1] === 'function' || it[1] === 'method') && ta.value[ta.selectionEnd] !== '(' ? it[0] + '(' : it[0]); close();
     }
     pop.addEventListener('mousedown', ev => { const d = ev.target.closest('[data-i]'); if (d) { ev.preventDefault(); accept(+d.dataset.i); } });
 
@@ -286,8 +306,10 @@ const SqlEditor = (() => {
     }
     ta.addEventListener('mousemove', ev => {
       const p = posAt(ev), mk = p >= 0 && marks.find(x => p >= x.a && p < x.b);
-      if (!mk) { tip.hidden = true; return; }
-      tip.className = 'sqled-tip ' + (mk.st === 'bad' ? 'bad' : 'warn'); tip.textContent = mk.msg; tip.hidden = false;
+      // No error here: hover(text, pos) may explain the word under the mouse (D3 names in the D3 Studio).
+      const info = !mk && p >= 0 && hover ? hover(ta.value, p) : null;
+      if (!mk && !info) { tip.hidden = true; return; }
+      tip.className = 'sqled-tip ' + (mk ? mk.st === 'bad' ? 'bad' : 'warn' : 'info'); tip.textContent = mk ? mk.msg : info; tip.hidden = false;
       const er = el.getBoundingClientRect();
       tip.style.left = Math.min(ev.clientX - er.left + 12, er.width - tip.offsetWidth - 4) + 'px'; tip.style.top = (ev.clientY - er.top + 18) + 'px';
     });
@@ -305,7 +327,7 @@ const SqlEditor = (() => {
         ev.preventDefault();
         if (ev.shiftKey || ta.value.slice(ta.selectionStart, ta.selectionEnd).includes('\n')) indentLines(ev.shiftKey);
         else insert(IND);
-      } else if (ev.key === 'Enter' && !ev.ctrlKey) {
+      } else if (ev.key === 'Enter' && !ev.ctrlKey && !readOnly) {
         ev.preventDefault();
         const line = ta.value.slice(lineStart(ta.selectionStart), ta.selectionStart), ind = line.match(/^[ \t]*/)[0];
         insert('\n' + ind + ((lang === 'sql' ? /\(\s*$/ : /[{[(]\s*$/).test(line) ? IND : ''));
@@ -314,7 +336,7 @@ const SqlEditor = (() => {
     });
     ta.addEventListener('input', ev => {
       if (quiet) return; changed();
-      if (ev.inputType && ev.inputType.startsWith('insert') && ev.data && /[A-Za-z0-9_.]/.test(ev.data)) suggest();
+      if (ev.inputType && ev.inputType.startsWith('insert') && ev.data && /[A-Za-z0-9_.$]/.test(ev.data)) suggest();
       else if (ev.inputType === 'deleteContentBackward' && !pop.hidden) suggest(); else close();
     });
     ta.addEventListener('scroll', sync);
@@ -395,6 +417,11 @@ const SqlEditor = (() => {
       else if (e.key === 'Escape' && !fb.hidden) { e.preventDefault(); closeFind(); }
     });
     ta.addEventListener('input', () => { if (!fb.hidden) { findAll(); paint(); } });
+    // The browser can put text back into the box itself (page restore after F5 / Back) without an input event: then the
+    // colours, the error check and the page's onChange would be for the old text. Catch up whenever that happened.
+    const resync = () => { if (ta.value !== prev) changed(); };
+    for (const ev of ['pageshow', 'load', 'focus']) addEventListener(ev, () => setTimeout(resync));
+    setTimeout(resync); setTimeout(resync, 300);
     paint();
 
     return {
