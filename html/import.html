@@ -53,8 +53,8 @@
         <section>
           <h2>Raw source files</h2>
           <div class="row"><button id="pick">Browse</button><button id="fromPath" class="ghost">From Path</button></div>
-          <input id="file" type="file" multiple hidden accept=".csv,.tsv,.txt,.parquet,.sqlite,.sqlite3,.db">
-          <div class="drop" id="drop">Drop CSV, Parquet or SQLite files here</div>
+          <input id="file" type="file" multiple hidden accept=".csv,.tsv,.txt,.parquet,.arrow,.feather,.sqlite,.sqlite3,.db">
+          <div class="drop" id="drop">Drop CSV, Parquet, Arrow or SQLite files here</div>
           <div class="imode" id="imode">
             <label title="Browse, drop and From Path put a copy of the file in the project's data/raw folder"><input type="radio" name="imode" value="copy"> Copy raw files to project</label>
             <label title="From Path reads the file where it is (nothing is copied); Update reads it there again"><input type="radio" name="imode" value="link"> Link to raw file's location</label>
@@ -79,7 +79,7 @@
             <div style="width:25px"></div>
             <div class="stats"><div class="stat"><label>Rows</label><b id="rowCount">-</b></div><div class="stat"><label>Columns</label><b id="colCount">-</b></div></div>
           </div>
-          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)">Stage</button><button id="delDs" class="danger" hidden>Delete</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
+          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Arrow in data/staged (input for Transform)">Stage</button><button id="delDs" class="danger" hidden>Delete</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
           <div class="progress"><i id="bar"></i></div>
           <div class="log" id="log"></div>
           <h2 class="hw">Preview</h2>
@@ -189,7 +189,7 @@ drop.ondrop = UI.guard(async ev => { ev.preventDefault(); drop.classList.remove(
 $('sources').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-p]'); if (!el) return;
   const path = el.dataset.p;
-  if (!Engine.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet or SQLite.', 'err');
+  if (!Engine.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet, Arrow or SQLite.', 'err');
   // Already staged from this file: open that dataset (its saved choices, Update) instead of a new Stage.
   const d = staged(await ctx.reload()).find(x => x.source?.path === path);
   if (d) return openDataset(d);
@@ -214,7 +214,7 @@ async function reader(src) {
 }
 // Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
 async function openReader(c, open) {   // c.table / c.ds + c.apply (a staged dataset: its saved column choices)
-  $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Stage</b> to convert this raw source (.csv, .sqlite or .parquet) into a Parquet dataset optimized for use in this project.`;
+  $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Stage</b> to convert this raw source (.csv, .sqlite, .parquet or .arrow) into an Arrow dataset (the fast working format of this project; Parquet / CSV / SQLite are for export).`;
   $('empty').hidden = true; $('editor').hidden = false; live('Reading source…');
   const r = await open();
   cur = { ...c, reader: r };
@@ -223,10 +223,10 @@ async function openReader(c, open) {   // c.table / c.ds + c.apply (a staged dat
   if (c.table && r.tables.includes(c.table)) $('table').value = c.table;
   // Delete: the staged dataset shown, or a raw file in data/raw (a linked file outside the project is never deleted).
   $('delDs').hidden = !c.ds && !c.path;
-  $('delDs').title = c.ds ? `Delete the staged dataset ${c.ds} and its Parquet files` : `Delete the raw file ${c.label} from data/raw`;
+  $('delDs').title = c.ds ? `Delete the staged dataset ${c.ds} and its data files` : `Delete the raw file ${c.label} from data/raw`;
   // A staged dataset: the button re-runs its import (same name, its saved choices or any made now) instead of a new Stage.
   $('import').textContent = c.ds ? 'Update' : 'Stage';
-  $('import').title = c.ds ? `Read the source again and replace ${c.ds} with the column choices above` : 'Apply the column choices above and save the dataset as Parquet in data/staged (input for Pipeline)';
+  $('import').title = c.ds ? `Read the source again and replace ${c.ds} with the column choices above` : 'Apply the column choices above and save the dataset as Arrow in data/staged (input for Transform)';
   await listSources(); await listDatasets();
   await loadTable(c.table && r.tables.includes(c.table) ? c.table : r.tables[0]);
 }
@@ -267,7 +267,7 @@ $('extGo').onclick = UI.guard(async () => {
   const src = $('extPath').value = unquote($('extPath').value);
   if (!X.isPath(src)) throw new Error('Enter a full path like X:\\folder\\file.csv or \\\\server\\share\\file.csv.');
   const name = X.name(src), k = Engine.kind(name);
-  if (!k) throw new Error('Unsupported file type. Use CSV, Parquet or SQLite.');
+  if (!k) throw new Error('Unsupported file type. Use CSV, Parquet, Arrow or SQLite.');
   $('extGo').disabled = true;
   try {
     extMsg('Checking source…');
@@ -311,7 +311,7 @@ async function loadTable(table) {
   $('colCount').textContent = cols.length; $('rowCount').textContent = '…';
   // The grid asks for the next 100 rows as the reader nears the end.
   PreviewGrid.show($('preview'), p.cols, p.rows, { more: async at => (await Engine.query(`SELECT * FROM ${src} LIMIT 100 OFFSET ${at}`, { workers: 1 })).rows }).catch(e => UI.toast(e.message, 'err'));
-  // Row count: the engine splits the work across its workers (Parquet row groups); no % is known, so the bar runs busy.
+  // Row count: the engine splits the work across its workers (row groups / batches); no % is known, so the bar runs busy.
   live(null); const st = ctx.step('Counting rows…'); $('bar').parentElement.classList.add('busy');
   // Rows shows "Calculating" with 1-4 dots cycling every 500 ms.
   let dots = 0; const calc = () => $('rowCount').textContent = 'Calculating' + '.'.repeat(dots++ % 4 + 1);
@@ -382,9 +382,9 @@ async function checkTypes() {
 $('validate').onclick = UI.guard(checkTypes);
 
 // ---- import ----
-// Every dataset is Parquet; Import is the only module that reads CSV / SQLite.
+// Every dataset is Arrow (the working format; Parquet / CSV / SQLite only on export); Import is the only module that reads raw files.
 //   Stage:           column choices applied (keep, rename, retype) -> data/staged/  (Pipeline works on it)
-// The engine streams the source into a partitioned Parquet dataset folder (part-NNNNNN.parquet + dataset.json),
+// The engine streams the source into a partitioned Arrow dataset folder (part-NNNNNN.arrow + dataset.json),
 // written to a temp folder and swapped in only when complete, so a failed import keeps the previous version.
 // One live line at the top of the activity log for work in progress (null removes it).
 function live(msg) {
@@ -417,7 +417,7 @@ async function runImport(direct) {
   const t0 = performance.now(), bar = p => $('bar').style.width = `${Math.round(p)}%`;
   $('import').disabled = true; bar(5);
   try {
-    const wst = ctx.step('Writing Parquet…');
+    const wst = ctx.step('Writing Arrow…');
     const w = await Engine.write({ sql: `SELECT ${select} FROM ${cur.src}`, dest, meta: { source: cur.ext?.src || cur.path } }, j => {
       if (j.progress != null) bar(5 + 85 * j.progress);
       wst.set(`${j.stage || 'Working'}… ${UI.num(j.rowsProcessed)} of ${UI.num(cur.rows)} rows${j.progress != null ? ` (${Math.round(100 * j.progress)}%)` : ''}`);
@@ -465,14 +465,14 @@ $('datasets').onclick = UI.guard(async ev => {
 $('delDs').onclick = UI.guard(async () => {
   if (!cur?.ds && cur?.path) return delRaw(cur.path);
   const d = (await ctx.reload()).datasets.find(x => x.name === cur?.ds); if (!d) return;
-  if (!await UI.confirm(`Delete dataset "${d.name}" and its Parquet ${d.parts ? 'parts' : 'file'}?`, { danger: true, ok: 'Delete' })) return;
-  await DNFS.remove(d.path, { recursive: !/\.parquet$/.test(d.path) }).catch(() => {});
+  if (!await UI.confirm(`Delete dataset "${d.name}" and its data ${d.parts ? 'parts' : 'file'}?`, { danger: true, ok: 'Delete' })) return;
+  await DNFS.remove(d.path, { recursive: !/\.(parquet|arrow)$/.test(d.path) }).catch(() => {});
   await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(x => x.name !== d.name) });
   ctx.log(`Deleted dataset ${d.name}`);
   cur = null; $('editor').hidden = true; $('empty').hidden = false;
   await listDatasets(); tried.clear(); await autoOpen();
 });
-// A raw file in data/raw (staged datasets made from it keep their Parquet data; Update then needs the file again).
+// A raw file in data/raw (staged datasets made from it keep their data; Update then needs the file again).
 async function delRaw(path) {
   const name = path.split('/').pop(), users = staged(await ctx.reload()).filter(d => d.source?.path === path).map(d => d.name);
   if (!await UI.confirm(`Delete the raw file ${name} from data/raw?${users.length ? ` ${users.join(', ')} ${users.length > 1 ? 'were' : 'was'} staged from it: the staged data stays, but Update cannot read this file again.` : ''}`, { danger: true, ok: 'Delete' })) return;

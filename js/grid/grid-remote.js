@@ -1,6 +1,6 @@
 // Data Grid on the engine: the grid never holds the whole dataset. Its search box, column filters and sort are turned
-// into one SQL query (WHERE / ORDER BY / LIMIT / OFFSET) that the engine runs on all workers (the dataset's in-memory
-// table when the Dashboard loaded one, else its Parquet parts). The first 100 rows load at once, then 100 more at a time as
+// into one SQL query (WHERE / ORDER BY / LIMIT / OFFSET) that the engine runs on all workers (the dataset's rows
+// resident in engine memory, else its Arrow parts on disk). The first 100 rows load at once, then 100 more at a time as
 // the reader nears the end. Global: GridRemote.
 //   GridRemote.attach(grid, { dataset, views(), cols, columns, where, onCount(total, loaded, stat) })
 //     views() = engine views for the dataset; cols = the picked fields; columns = [{ name, type }] of the dataset;

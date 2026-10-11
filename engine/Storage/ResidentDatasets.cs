@@ -30,6 +30,7 @@ namespace NativeDataEngine
         readonly Dictionary<string, Entry> entries = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, string> loading = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // key -> rel path
         readonly Dictionary<string, string> skipped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // key|sig -> reason (too big)
+        readonly Dictionary<string, string> failed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);    // key -> last load error
         long clock;
 
         public ResidentDatasets(DataEngine e) { this.e = e; }
@@ -83,25 +84,63 @@ namespace NativeDataEngine
             return null;
         }
 
-        // Starts background loads; returns what each path is doing now (resident / loading / skipped / error).
-        public List<Dictionary<string, object>> Preload(IEnumerable<string> rels)
+        // Starts background loads; returns what each path is doing (resident / loading / skipped / error). waitMs > 0:
+        // waits up to that long for the loads to finish first (the Dashboard waits so its first queries read RAM).
+        public List<Dictionary<string, object>> Preload(IEnumerable<string> rels, int waitMs)
         {
-            List<Dictionary<string, object>> r = new List<Dictionary<string, object>>();
-            foreach (string rel in rels)
+            List<string> list = new List<string>(rels);
+            List<string> fulls = new List<string>();
+            foreach (string rel in list)
             {
-                Dictionary<string, object> d = new Dictionary<string, object>(); d["path"] = rel;
+                string full = null;
                 try
                 {
-                    string full = PathGuard.Project(e.Root, rel, false);
+                    full = PathGuard.Project(e.Root, rel, false);
+                    if (Eligible(full))
+                    {
+                        List<string> files = Datasets.Files(full);
+                        if (Find(full, Signature(files, full)) == null) StartLoad(full, files, Signature(files, full));
+                    }
+                }
+                catch { }
+                fulls.Add(full);
+            }
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            while (waitMs > 0 && sw.ElapsedMilliseconds < waitMs)
+            {
+                bool busy = false;
+                lock (gate) foreach (string f in fulls) if (f != null && loading.ContainsKey(f)) busy = true;
+                if (!busy) break;
+                Thread.Sleep(25);
+            }
+            List<Dictionary<string, object>> r = new List<Dictionary<string, object>>();
+            for (int i = 0; i < list.Count; i++)
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>(); d["path"] = list[i];
+                try
+                {
+                    string full = fulls[i] ?? PathGuard.Project(e.Root, list[i], false);
                     if (!Eligible(full)) { d["state"] = "skipped"; d["reason"] = "not a project dataset folder (data/source or data/staged)"; r.Add(d); continue; }
                     List<string> files = Datasets.Files(full);
-                    if (TryGet(full, files, false) != null) d["state"] = "resident";
-                    else { string why = StartLoad(full, files, Signature(files, full)); d["state"] = why == null ? "loading" : "skipped"; if (why != null) d["reason"] = why; }
+                    string sig = Signature(files, full);
+                    Entry x = Find(full, sig);
+                    string why;
+                    if (x != null) { d["state"] = "resident"; d["rows"] = x.Rows; d["bytes"] = x.Bytes; d["loadMs"] = x.Ms; }
+                    else lock (gate)
+                        {
+                            if (loading.ContainsKey(full)) d["state"] = "loading";
+                            else if (skipped.TryGetValue(full + "|" + sig, out why) || failed.TryGetValue(full, out why)) { d["state"] = "skipped"; d["reason"] = why; }
+                            else d["state"] = "loading";
+                        }
                 }
                 catch (Exception ex) { d["state"] = "error"; d["reason"] = EngineError.From(ex).Message; }
                 r.Add(d);
             }
             return r;
+        }
+        Entry Find(string full, string sig)
+        {
+            lock (gate) { Entry x; return sig != null && entries.TryGetValue(full, out x) && x.Sig == sig ? x : null; }
         }
 
         // null = loading (now or already); else why it will not load.
@@ -112,7 +151,7 @@ namespace NativeDataEngine
             {
                 if (loading.ContainsKey(full)) return null;
                 string why; if (skipped.TryGetValue(full + "|" + sig, out why)) return why;
-                loading[full] = PathGuard.Rel(e.Root, full);
+                loading[full] = PathGuard.Rel(e.Root, full); failed.Remove(full);
             }
             Thread t = new Thread(() => Load(full, files, sig));
             t.IsBackground = true; t.Name = "ResidentLoad"; t.Start();
@@ -156,6 +195,7 @@ namespace NativeDataEngine
                     x.LastUsed = ++clock; entries[full] = x;
                 }
                 else if (reason != null && reason.StartsWith("larger")) skipped[full + "|" + sig] = reason;
+                else if (reason != null) failed[full] = reason;
             }
             if (ok) EngineLog.Write("engine", "In memory: " + x.Rel + " (" + x.Rows.ToString("N0") + " rows, " + MemoryGuard.Mb(x.Bytes) + ") in " + x.Ms + " ms.");
             else

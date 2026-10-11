@@ -7,7 +7,7 @@
 //   PipelineRunner.active(pipe)                      the active query, or undefined
 //   await PipelineRunner.writeSql(ctx, pipe)         pipeline/transform.sql = the active query (Transform writes it on save)
 //   await PipelineRunner.run(ctx, pipe, log, changed, onJob)   runs pipeline/transform.sql (the active query) and writes its result to data/source/<output>/
-//                                                    (Parquet parts, atomic) and records the run. changed: unused (the
+//                                                    (Arrow parts, atomic) and records the run. changed: unused (the
 //                                                    output always rebuilds), kept for Update.
 const PipelineRunner = (() => {
   const file = ctx => `${ctx.dir}/pipeline/pipeline.json`, runsFile = ctx => `${ctx.dir}/pipeline/runs.json`;
@@ -63,7 +63,7 @@ const PipelineRunner = (() => {
         onJob(j);
         if (j.stage && j.stage !== lastStage) { lastStage = j.stage; log(`${j.stage}…`); }
       });
-      if (before && before.path !== w.path) await DNFS.remove(before.path, { recursive: !/\.parquet$/.test(before.path) }).catch(() => {});
+      if (before && before.path !== w.path) await DNFS.remove(before.path, { recursive: !/\.(parquet|arrow)$/.test(before.path) }).catch(() => {});
       await Projects.upsertDataset(ctx.folder, { name, path: w.path, parts: w.files, stage: 'source', rows: w.rowCount, bytes: w.bytes, columns: Engine.columnsOf(w),
         version: w.version, imported: new Date().toISOString(), source: { kind: 'pipeline', query: q.id } });
       rec.outputs.push({ name, rows: w.rowCount, before: before?.rows ?? null });

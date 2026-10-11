@@ -115,10 +115,10 @@ const Projects = (() => {
     return save(cfg);
   }
 
-  // Datasets (always Parquet): { name, path, parts?, stage, direct?, rows, columns: [{ name, type }], source, imported }
+  // Datasets (Arrow IPC parts; older ones Parquet): { name, path, parts?, stage, direct?, rows, columns: [{ name, type }], source, imported }
   //   stage 'staged' = data/staged (Import > Stage; input for Pipeline)
   //   stage 'source' = data/source (Import > Import Directly, or Pipeline output; ready for Dashboard)
-  //   path = dataset folder (part-NNNNNN.parquet + dataset.json, written by the engine); parts = its part files.
+  //   path = dataset folder (part-NNNNNN.arrow + dataset.json, written by the engine); parts = its part files.
   //   version = dataset.json version (bumped on every rewrite). Older records may point at a single .parquet file.
   async function upsertDataset(folder, ds) {
     const cfg = await get(folder);

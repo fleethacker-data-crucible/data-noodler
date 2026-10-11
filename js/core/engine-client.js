@@ -10,12 +10,16 @@
 //   await Engine.write({ sql, views, dest, meta }, onProgress)    -> dataset manifest { path, files, rowCount, bytes, columns, version, ... }
 //   await Engine.exportTo({ sql, views, to, format, table }, onProgress) -> { path, rows, bytes, format }
 //   await Engine.pipeline(spec, onProgress)              -> { outputs, skipped, order, ms }
-//   Engine.src(path, table)  SQL source for a file: read_csv / read_parquet / read_sqlite
-//   Engine.views(datasets)   { name: 'SELECT * FROM read_parquet(...)' } for a project's datasets
+//   await Engine.memory.load(paths)  / preload(paths)    project datasets into engine memory (load waits, preload does not)
+//                                                         -> [{ path, state: resident|loading|skipped|error, rows, bytes, reason }]
+//   await Engine.memory.info() / drop(path)               what is resident; free it (path = folder prefix, none = all)
+//   Engine.src(path, table)  SQL source for a file: read_csv / read_dataset (Arrow / Parquet) / read_sqlite
+//   Engine.views(datasets)   { name: 'SELECT * FROM read_dataset(...)' } for a project's datasets
+// Datasets are folders of Arrow IPC parts (the working format; older ones Parquet); Parquet / CSV / SQLite = export only.
 //   Engine.q(name) / Engine.lit(text)   quote an identifier / a string literal
 // Views are named SQL snippets the query can use as tables (datasets, pipeline steps).
 const Engine = (() => {
-  const KINDS = { csv: 'csv', tsv: 'csv', txt: 'csv', parquet: 'parquet', pq: 'parquet', sqlite: 'sqlite', sqlite3: 'sqlite', db: 'sqlite' };
+  const KINDS = { csv: 'csv', tsv: 'csv', txt: 'csv', parquet: 'parquet', pq: 'parquet', arrow: 'arrow', feather: 'arrow', sqlite: 'sqlite', sqlite3: 'sqlite', db: 'sqlite' };
   const kind = path => KINDS[(String(path).split('.').pop() || '').toLowerCase()] || null;
   const q = s => '"' + String(s).replace(/"/g, '""') + '"';
   const lit = s => "'" + String(s).replace(/'/g, "''") + "'";
@@ -35,10 +39,10 @@ const Engine = (() => {
     const k = kind(path);
     if (k === 'csv') return `read_csv(${lit(path)})`;
     if (k === 'sqlite') return `read_sqlite(${lit(path)}, ${lit(table || '')})`;
-    return `read_parquet(${lit(path)})`;   // a .parquet file or a dataset folder
+    return `read_dataset(${lit(path)})`;   // an .arrow / .parquet file or a dataset folder
   };
   // A dataset record { path, parts } as SQL: the folder (or legacy single file) holds its own part list.
-  const dataset = d => `read_parquet(${lit(d.path)})`;
+  const dataset = d => `read_dataset(${lit(d.path)})`;
   const views = (datasets = []) => Object.fromEntries(datasets.map(d => [d.name, `SELECT * FROM ${dataset(d)}`]));
 
   const query = (sql, { views, limit, workers } = {}) => call('query', { sql, views, limit, workers });
@@ -66,9 +70,16 @@ const Engine = (() => {
   const cancel = id => call('job/cancel?id=' + encodeURIComponent(id), {});
   const status = () => call('status');
   const cache = { load: (name, sql, views, workers) => call('cache/load', { name, sql, views, workers }), drop: name => call('cache/drop', { name }) };
+  const paths = p => (p || []).filter(Boolean);
+  const memory = {
+    load: async p => (await call('memory/load', { paths: paths(p), wait: true })).datasets,
+    preload: async p => (await call('memory/load', { paths: paths(p), wait: false })).datasets,
+    info: () => call('memory'),
+    drop: path => call('memory/drop', { path: path || '' }),
+  };
 
   // Columns of a written dataset manifest, in the { name, type } form dataset records use.
   const columnsOf = m => (m.columns || []).map(c => ({ name: c.name, type: c.type }));
 
-  return { kind, q, lit, src, dataset, views, query, describe, count, preview, check, open, job, write, exportTo, pipeline, cancel, status, cache, columnsOf, call };
+  return { kind, q, lit, src, dataset, views, query, describe, count, preview, check, open, job, write, exportTo, pipeline, cancel, status, cache, memory, columnsOf, call };
 })();

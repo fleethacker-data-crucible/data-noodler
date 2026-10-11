@@ -62,7 +62,7 @@ Click a field: insert it in the SQL">Input datasets</h2>
           <div class="fsrch"><input type="search" id="fsAll" placeholder="Search fields…" spellcheck="false"></div>
           <div class="lst" id="dsList"></div>
         </section>
-        <section id="outSec"><h2 title="The active query's result is saved under this name (Parquet parts in data/source)">Output dataset name</h2><input id="outName" type="text" placeholder="Required: name the output dataset" spellcheck="false"><div class="row" style="margin-top:10px"><button id="run" title="Run the active query over all of the input data and save the result as the output dataset">Build Output Dataset</button></div></section>
+        <section id="outSec"><h2 title="The active query's result is saved under this name (Arrow parts in data/source)">Output dataset name</h2><input id="outName" type="text" placeholder="Required: name the output dataset" spellcheck="false"><div class="row" style="margin-top:10px"><button id="run" title="Run the active query over all of the input data and save the result as the output dataset">Build Output Dataset</button></div></section>
         <section>
           <h2 title="Write and try out as many queries as you like; the active one builds the output dataset">Queries</h2>
           <div class="row" style="margin-bottom:8px"><button id="add">Add</button><button id="setActive" class="ghost" title="Make the selected query the one Build Output Dataset runs">Set Active</button><button id="del" class="danger">Delete</button></div>
@@ -70,7 +70,7 @@ Click a field: insert it in the SQL">Input datasets</h2>
         </section>
       </aside>
       <section class="stack">
-        <div id="none" class="muted">Click Add to write a query. A query is one SELECT, or a script (CREATE TABLE, INSERT, UPDATE, ... ) that ends with a SELECT. The active query builds the output dataset (Parquet in data/source). The simplest one is <span class="mono">SELECT * FROM &lt;input dataset&gt;</span>.</div>
+        <div id="none" class="muted">Click Add to write a query. A query is one SELECT, or a script (CREATE TABLE, INSERT, UPDATE, ... ) that ends with a SELECT. The active query builds the output dataset (Arrow in data/source). The simplest one is <span class="mono">SELECT * FROM &lt;input dataset&gt;</span>.</div>
         <div id="editor" hidden class="stack">
           <section><h2>Query name</h2><input id="qName" type="text" placeholder="Required: name this query" spellcheck="false"></section>
           <h2 title="One SELECT, or several statements separated by ; that end with a SELECT (its result is the output)">SQL <small class="muted" style="text-transform:none;letter-spacing:0">Tab / Shift+Tab indent · Ctrl+Space suggestions · Ctrl+Enter preview</small></h2>
@@ -103,7 +103,7 @@ Click a field: insert it in the SQL">Input datasets</h2>
 <script src="../js/grid/preview-grid.js"></script>
 <script>
 // Transform = a list of SQL queries (each one SELECT or a script ending in a SELECT; engine/Core/Script.cs). The
-// active query builds the output dataset data/source/<output name>/ (Parquet parts). Saved in pipeline/pipeline.json as
+// active query builds the output dataset data/source/<output name>/ (Arrow parts). Saved in pipeline/pipeline.json as
 // { version: 2, queries: [{ id, name, sql }], active, output } (see js/pipeline/runner.js).
 const { $, esc } = UI;
 // Input datasets: click expands the field list, Shift+click inserts the dataset name; click a field to insert it.

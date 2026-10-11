@@ -29,6 +29,7 @@ $mime = @{
     '.svg' = 'image/svg+xml'; '.png' = 'image/png'; '.jpg' = 'image/jpeg'; '.ico' = 'image/x-icon'
     '.woff' = 'font/woff'; '.woff2' = 'font/woff2'; '.ttf' = 'font/ttf'; '.csv' = 'text/csv'
     '.parquet' = 'application/vnd.apache.parquet'
+    '.arrow' = 'application/vnd.apache.arrow.file'
 }
 
 # --- settings ---

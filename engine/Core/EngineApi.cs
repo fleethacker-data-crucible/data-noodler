@@ -11,6 +11,7 @@
 //   POST pipeline {datasets, nodes, changed, version}   -> {jobId}
 //   GET  job?id=  /  POST job/cancel?id=  /  GET jobs
 //   POST cache/load {name, sql, views}  /  POST cache/drop {name}     (in-memory tables for the engine bench)
+//   GET  memory  /  POST memory/load {paths, wait}  /  POST memory/drop {path}   (resident project datasets)
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -151,6 +152,14 @@ namespace NativeDataEngine
                     }
                 case "cache/load": return Ok(e.CacheLoad(Need(req, "name"), Need(req, "sql"), Views(req), (int)Json.Long(req, "workers", 0)));
                 case "cache/drop": { Dictionary<string, object> d = new Dictionary<string, object>(); d["dropped"] = e.CacheDrop(Json.Str(req, "name")); return Ok(d); }
+                case "memory": return Ok(e.Resident.Info());
+                case "memory/load":
+                    {
+                        Dictionary<string, object> d = new Dictionary<string, object>();
+                        d["datasets"] = e.Resident.Preload(Json.Strs(req, "paths"), Json.Bool(req, "wait", false) ? 600000 : 0);
+                        return Ok(d);
+                    }
+                case "memory/drop": { Dictionary<string, object> d = new Dictionary<string, object>(); d["dropped"] = e.Resident.DropUnder(Json.Str(req, "path")); return Ok(d); }
             }
             throw new EngineException("NOT_FOUND", "Unknown engine call: " + op, 404);
         }

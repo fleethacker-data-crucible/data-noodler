@@ -14,7 +14,7 @@
 $importWarnSec = 10
 $importTimeoutSec = 30
 # Data file types the import API will read. Anything else is refused.
-$importExts = '.csv', '.tsv', '.txt', '.parquet', '.pq', '.sqlite', '.sqlite3', '.db'
+$importExts = '.csv', '.tsv', '.txt', '.parquet', '.pq', '.arrow', '.feather', '.sqlite', '.sqlite3', '.db'
 
 # A full source path (X:\... or \\server\share\...), or throws FsError.
 function Resolve-SourcePath([string]$src) {

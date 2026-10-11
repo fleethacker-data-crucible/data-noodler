@@ -175,31 +175,19 @@ const save = UI.debounce(() => saveNow().catch(e => UI.toast(`Could not save the
 // Cache key = dataset version + the widget's declarative query: a new dataset version makes the cache stale.
 const keyOf = w => { const d = dsOf(w.dataset); return JSON.stringify({ q: queryOf(w), pv: pkgOf(w)?.version, v: d?.version ?? null, imported: d?.imported }); };
 const countOf = async (dataset, where) => +(await Engine.call('query', { query: { dataset, aggregate: [{ function: 'count', as: 'n' }], where }, views: viewsOf(dataset) })).rows[0]?.[0] || 0;
-// ---- datasets in engine memory: every dataset a widget uses is loaded once into an engine in-memory table (columnar,
-// read from the Parquet parts on all workers). Widgets then query memory: each batch of the table is one parallel unit.
-// A dataset that will not fit the engine's memory budget stays on disk: queries read its Parquet parts (row groups in
-// parallel). The tables are dropped when the Dashboard closes.
-const mem = new Map();        // dataset name -> { table, rows, bytes, ms } once loaded
+// ---- datasets in engine memory: the engine keeps project datasets resident (loaded once from their Arrow parts, shared by
+// every window, refreshed when the dataset changes). Before a widget's first query its dataset is loaded (waits for it),
+// so widgets query RAM. A dataset larger than the engine's in-memory share stays on disk and is read from its parts.
 const memLoads = new Map();   // dataset name -> load promise
-const memName = d => `dn_mem_${ctx.folder}_${d.name}_v${d.version ?? 0}`.replace(/[^A-Za-z0-9_]/g, '_');
-// Rough size in memory: 8 bytes per number / date, 2 per flag, 40 per text value (+ null flags).
-const memEstimate = d => (d.rowCount || 0) * (d.columns || []).reduce((n, c) => n + (/INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC|DATE|TIME/i.test(c.type) ? 9 : /BOOL/i.test(c.type) ? 2 : 41), 0);
 function ensureMem(name) {
   const d = dsOf(name); if (!d) return Promise.resolve();
-  if (!memLoads.has(name)) memLoads.set(name, (async () => {
-    try {
-      const st = await Engine.status(), free = (st.memory?.budget || 0) - (st.memory?.reserved || 0), need = memEstimate(d);
-      if (need > free * 0.8) { ctx.log(`${name}: about ${UI.bytes(need)} will not fit in engine memory (${UI.bytes(free)} free): reading its Parquet parts instead.`, 'warn'); return; }
-      const t0 = performance.now(), r = await Engine.cache.load(memName(d), `SELECT * FROM ${qid(name)}`, Engine.views([d]));
-      mem.set(name, { table: memName(d), rows: r.rows, bytes: r.bytes, ms: r.ms });
-      ctx.log(`${name}: ${(+r.rows).toLocaleString()} rows (${UI.bytes(r.bytes)}) loaded into engine memory in ${UI.ms(performance.now() - t0)} on ${st.workers} workers.`);
-    } catch (e) { ctx.log(`${name}: could not load into engine memory (${e.message.split('\n')[0]}): reading its Parquet parts instead.`, 'warn'); }
-  })());
+  if (!memLoads.has(name)) memLoads.set(name, Engine.memory.load([d.path]).then(([r]) => {
+    if (r?.state === 'resident') ctx.log(`${name}: in engine memory (${UI.num(r.rows)} rows, ${UI.bytes(r.bytes)}).`);
+    else if (r) ctx.log(`${name}: read from disk (${r.reason || r.state}).`, 'warn');
+  }).catch(e => ctx.log(`${name}: could not load into engine memory (${e.message.split('\n')[0]}): reading it from disk.`, 'warn')));
   return memLoads.get(name);
 }
-// Views for a dataset: its in-memory table when loaded, else its Parquet parts.
-const viewsOf = name => { const m = mem.get(name); return m ? { [name]: `SELECT * FROM ${qid(m.table)}` } : Engine.views([dsOf(name)]); };
-addEventListener('pagehide', () => { for (const m of mem.values()) Engine.cache.drop(m.table).catch(() => {}); });
+const viewsOf = name => Engine.views([dsOf(name)]);
 async function compute(w, fresh) {
   const d = dsOf(w.dataset); if (!d) throw new Error(`Dataset "${w.dataset}" not found.`);
   if (!fresh) { try { const c = await DNFS.readJSONOr(cachePath(w), {}); if (c.key === keyOf(w)) return { ...c.res, cached: true }; } catch {} }
