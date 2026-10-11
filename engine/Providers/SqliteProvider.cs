@@ -8,9 +8,16 @@ using System.Text;
 
 namespace NativeDataEngine
 {
+    [System.Security.SuppressUnmanagedCodeSecurity]   // no security stack walk on each call (millions of binds)
     internal static class WinSQLite
     {
         const string Dll = "winsqlite3.dll";
+        // Before SQLite starts: multi-thread mode (each connection is used by one thread at a time, so no per-connection
+        // locks) and no global memory statistics (they lock one mutex on every allocation, which stops parallel writers
+        // from scaling). Returns an error, harmlessly, if SQLite was already started in this process.
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] static extern int sqlite3_config(int op);
+        [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_config")] static extern int sqlite3_config_int(int op, int v);
+        static WinSQLite() { try { sqlite3_config(2); sqlite3_config_int(9, 0); } catch { } }
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_open_v2(byte[] filename, out IntPtr db, int flags, IntPtr vfs);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_close_v2(IntPtr db);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_prepare_v2(IntPtr db, byte[] sql, int nByte, out IntPtr stmt, IntPtr tail);
@@ -30,6 +37,7 @@ namespace NativeDataEngine
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_bind_int64(IntPtr stmt, int i, long v);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_bind_double(IntPtr stmt, int i, double v);
         [DllImport(Dll, CallingConvention = CallingConvention.StdCall)] internal static extern int sqlite3_bind_text(IntPtr stmt, int i, byte[] v, int n, IntPtr destructor);
+        [DllImport(Dll, CallingConvention = CallingConvention.StdCall, EntryPoint = "sqlite3_bind_text")] internal static extern int sqlite3_bind_text_ptr(IntPtr stmt, int i, IntPtr v, int n, IntPtr destructor);
 
         internal const int ROW = 100, DONE = 101, OPEN_READONLY = 1, OPEN_READWRITE = 2, OPEN_CREATE = 4;
         internal static readonly IntPtr TRANSIENT = new IntPtr(-1);
@@ -89,6 +97,7 @@ namespace NativeDataEngine
     {
         readonly SqliteDb db; IntPtr st;
         internal SqliteStmt(SqliteDb db, IntPtr st) { this.db = db; this.st = st; }
+        internal IntPtr Handle { get { return st; } }
         public bool Step()
         {
             int rc = WinSQLite.sqlite3_step(st);
@@ -231,38 +240,169 @@ namespace NativeDataEngine
         public static List<string> TablesOf(string path) { using (SqliteDb db = new SqliteDb(path, false)) return db.Tables(); }
 
         // Export: one table, one transaction, prepared INSERT.
+        // Export on all workers. One SQLite file has a single writer, so the rows are cut into slices of up to 64k and each
+        // worker writes the slices it takes into its own piece file (temp\write), one table per slice with the final
+        // table's exact layout. Then SQLite copies the slice tables into the final table in row order (ATTACH +
+        // INSERT ... SELECT *: its raw record transfer, no decoding and no per-value calls), so the order is kept. One worker:
+        // straight into the final file. The output is written to a staging path and swapped in when complete, so no
+        // rollback journal or fsyncs are needed (journal off, synchronous off, exclusive lock, 64 KB pages, big cache).
+        static readonly string[] Fast = { "page_size = 65536", "journal_mode = OFF", "synchronous = OFF", "locking_mode = EXCLUSIVE", "cache_size = -131072", "temp_store = MEMORY" };
+        static string Decl(DataType t) { return t.Kind == Kind.Int || t.Kind == Kind.Bool ? "INTEGER" : t.Kind == Kind.Double || t.Kind == Kind.Decimal ? "REAL" : t.Kind == Kind.Date ? "DATE" : t.Kind == Kind.Timestamp ? "TIMESTAMP" : "TEXT"; }
+        static SqliteDb OpenFast(string path) { SqliteDb db = new SqliteDb(path, true); foreach (string pr in Fast) db.Exec("PRAGMA " + pr); return db; }
+
         public static long Export(string path, string table, IEnumerable<Batch> batches, Schema s, ExecCtx ctx)
         {
-            long n = 0;
-            using (SqliteDb db = new SqliteDb(path, true))
+            List<string> names = ParquetFileWriter.UniqueNames(s);
+            List<string> cols = new List<string>(), qn = new List<string>();
+            for (int c = 0; c < s.Count; c++) { qn.Add(SqliteDb.Q(names[c])); cols.Add(SqliteDb.Q(names[c]) + " " + Decl(s[c].Type)); }
+            string marks = string.Join(", ", new string[s.Count].Select_("?"));
+            int k = Math.Max(1, ctx.Parallel);   // every worker writes
+            using (SqliteDb db = OpenFast(path))
             {
                 db.Exec("DROP TABLE IF EXISTS " + SqliteDb.Q(table));
-                List<string> cols = new List<string>();
-                List<string> names = ParquetFileWriter.UniqueNames(s);
-                for (int c = 0; c < s.Count; c++)
-                {
-                    DataType t = s[c].Type; string decl = t.Kind == Kind.Int || t.Kind == Kind.Bool ? "INTEGER" : t.Kind == Kind.Double || t.Kind == Kind.Decimal ? "REAL" : t.Kind == Kind.Date ? "DATE" : t.Kind == Kind.Timestamp ? "TIMESTAMP" : "TEXT";
-                    cols.Add(SqliteDb.Q(names[c]) + " " + decl);
-                }
                 db.Exec("CREATE TABLE " + SqliteDb.Q(table) + " (" + string.Join(", ", cols) + ")");
-                db.Exec("BEGIN");
-                string ph = string.Join(", ", new string[s.Count].Select_("?"));
-                using (SqliteStmt ins = db.Prepare("INSERT INTO " + SqliteDb.Q(table) + " VALUES (" + ph + ")"))
+                if (k == 1)
                 {
-                    foreach (Batch b in batches)
+                    db.Exec("BEGIN");
+                    long n1 = 0;
+                    using (SqliteStmt ins = db.Prepare("INSERT INTO " + SqliteDb.Q(table) + " VALUES (" + marks + ")"))
+                        foreach (Batch b in batches) { Insert(ins, Encode(b, s), 0, 0); n1 += b.Rows; ctx.Ct.ThrowIfCancellationRequested(); }
+                    db.Exec("COMMIT");
+                    return n1;
+                }
+                // ---- pieces, written in parallel ----
+                string dir = Datasets.Staging(path + ".parts"); Directory.CreateDirectory(dir);
+                try
+                {
+                    // One shared queue: whichever writer is free takes the next slice (and notes which piece it went to).
+                    var queue = new System.Collections.Concurrent.BlockingCollection<long[]>(2 * k);
+                    var slices = new List<Batch>(); var ranges = new List<long[]>();   // ranges[i] = (piece, first row, last row)
+                    var writers = new System.Threading.Tasks.Task[k];
+                    var cts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ctx.Ct);
+                    for (int w = 0; w < k; w++)
                     {
-                        for (int r = 0; r < b.Rows; r++)
+                        int me = w;
+                        string piece = Path.Combine(dir, "p" + w + ".sqlite");
+                        writers[w] = System.Threading.Tasks.Task.Factory.StartNew(() =>
                         {
-                            for (int c = 0; c < s.Count; c++) ins.Bind(c + 1, b.Cols[c], r);
-                            ins.Step(); ins.Reset();
+                            try
+                            {
+                                using (SqliteDb pdb = OpenFast(piece))
+                                {
+                                    pdb.Exec("BEGIN");
+                                    foreach (long[] r in queue.GetConsumingEnumerable(cts.Token))
+                                    {
+                                        Batch b; lock (slices) { b = slices[(int)r[3]]; slices[(int)r[3]] = null; }
+                                        r[0] = me;
+                                        string tn = "s" + r[3];
+                                        pdb.Exec("CREATE TABLE " + tn + " (" + string.Join(", ", cols) + ")");
+                                        using (SqliteStmt ins = pdb.Prepare("INSERT INTO " + tn + " VALUES (" + marks + ")")) Insert(ins, Encode(b, s), 0, 0);
+                                    }
+                                    pdb.Exec("COMMIT");
+                                }
+                            }
+                            catch { cts.Cancel(); throw; }
+                        }, System.Threading.Tasks.TaskCreationOptions.LongRunning);
+                    }
+                    long next = 0;
+                    try
+                    {
+                        // Each batch is cut into slices of at most 64k rows, so every writer stays busy.
+                        foreach (Batch b0 in batches)
+                        {
+                            for (int at = 0; at < b0.Rows; at += 65536)
+                            {
+                                int len = Math.Min(65536, b0.Rows - at);
+                                Batch b = at == 0 && len == b0.Rows ? b0 : b0.Slice(at, len);
+                                long[] r; lock (slices) { r = new long[] { -1, next, next + len - 1, slices.Count }; slices.Add(b); }
+                                ranges.Add(r);
+                                queue.Add(r, cts.Token);
+                                next += len;
+                            }
                         }
-                        n += b.Rows;
+                    }
+                    catch (OperationCanceledException) { if (ctx.Ct.IsCancellationRequested) throw; }   // a writer failed: its error is below
+                    finally { queue.CompleteAdding(); }
+                    try { System.Threading.Tasks.Task.WaitAll(writers); }
+                    catch (AggregateException ae)
+                    {
+                        ctx.Ct.ThrowIfCancellationRequested();
+                        foreach (Exception x in ae.Flatten().InnerExceptions) if (!(x is OperationCanceledException)) throw x;
+                        throw;
+                    }
+                    // ---- copy the slice tables into the final table, in row order ----
+                    // SQLite attaches at most 10 files at once, so pieces are attached as their slices come up (the 9 most
+                    // recent stay attached). ATTACH is not allowed inside a transaction; with no journal and no syncs each
+                    // copy commits on its own at no extra cost.
+                    List<long> open = new List<long>();
+                    foreach (long[] r in ranges)
+                    {
+                        if (!open.Contains(r[0]))
+                        {
+                            if (open.Count >= 9) { db.Exec("DETACH DATABASE p" + open[0]); open.RemoveAt(0); }
+                            db.Exec("ATTACH DATABASE '" + Path.Combine(dir, "p" + r[0] + ".sqlite").Replace("'", "''") + "' AS p" + r[0]);
+                            open.Add(r[0]);
+                        }
+                        else { open.Remove(r[0]); open.Add(r[0]); }
+                        db.Exec("INSERT INTO main." + SqliteDb.Q(table) + " SELECT * FROM p" + r[0] + ".s" + r[3]);
                         ctx.Ct.ThrowIfCancellationRequested();
                     }
+                    foreach (long w in open) db.Exec("DETACH DATABASE p" + w);
+                    return next;
                 }
-                db.Exec("COMMIT");
+                finally { DatasetWriter.TryDelete(dir); }
             }
-            return n;
+        }
+        // INSERTs one encoded batch (lead = 1: the first parameter is the row number, starting at first).
+        static void Insert(SqliteStmt ins, Encoded e, int lead, long first)
+        {
+            Batch b = e.B; IntPtr h = ins.Handle; int nc = e.Buf.Length;
+            GCHandle[] pins = new GCHandle[nc]; IntPtr[] at = new IntPtr[nc];
+            try
+            {
+                for (int c = 0; c < nc; c++) if (e.Buf[c] != null) { pins[c] = GCHandle.Alloc(e.Buf[c], GCHandleType.Pinned); at[c] = pins[c].AddrOfPinnedObject(); }
+                for (int r = 0; r < b.Rows; r++)
+                {
+                    if (lead == 1) WinSQLite.sqlite3_bind_int64(h, 1, first + r);
+                    for (int c = 0; c < nc; c++)
+                    {
+                        if (e.Buf[c] == null) { ins.Bind(c + 1 + lead, b.Cols[c], r); continue; }
+                        Column col = b.Cols[c];
+                        if (col.IsNull(r) || (col.Type.Kind == Kind.String && col.S[r] == null)) { WinSQLite.sqlite3_bind_null(h, c + 1 + lead); continue; }
+                        int o = e.Off[c][r];
+                        WinSQLite.sqlite3_bind_text_ptr(h, c + 1 + lead, at[c] + o, e.Off[c][r + 1] - o, WinSQLite.TRANSIENT);
+                    }
+                    ins.Step(); ins.Reset();
+                }
+            }
+            finally { foreach (GCHandle g in pins) if (g.IsAllocated) g.Free(); }
+        }
+        // A batch ready to INSERT: each text / date / timestamp column's UTF-8 in one buffer (value r = Buf[Off[r] ..
+        // Off[r + 1]]), so a batch makes a few arrays instead of one per value (the garbage collector pauses every thread).
+        sealed class Encoded { public Batch B; public byte[][] Buf; public int[][] Off; }
+        static Encoded Encode(Batch b, Schema s)
+        {
+            Encoded e = new Encoded(); e.B = b; e.Buf = new byte[s.Count][]; e.Off = new int[s.Count][];
+            for (int c = 0; c < s.Count; c++)
+            {
+                Column col = b.Cols[c]; Kind k = col.Type.Kind;
+                if (k == Kind.Int || k == Kind.Bool || k == Kind.Double || k == Kind.Decimal || k == Kind.Null) continue;
+                int[] off = new int[b.Rows + 1]; byte[] buf = new byte[Math.Max(64, b.Rows * 12)]; int at = 0;
+                string[] str = k == Kind.String ? col.S : null;
+                for (int r = 0; r < b.Rows; r++)
+                {
+                    off[r] = at;
+                    if (col.IsNull(r)) continue;
+                    string v = str != null ? str[r] : Values.Text(col, r);
+                    if (v == null) continue;
+                    int need = at + v.Length * 3;
+                    if (need > buf.Length) Array.Resize(ref buf, Math.Max(need, buf.Length * 2));
+                    at += Encoding.UTF8.GetBytes(v, 0, v.Length, buf, at);
+                }
+                off[b.Rows] = at;
+                e.Buf[c] = buf; e.Off[c] = off;
+            }
+            return e;
         }
     }
 

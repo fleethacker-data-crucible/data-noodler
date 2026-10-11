@@ -168,7 +168,7 @@
 
   // ---- clear / wipe / report ----
   const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); });
-  // Generate Test Data: every checked size, all workers, in a popup listing each file with its progress.
+  // Generate Test Data: the picked files, all workers; progress in the page's progress bar and activity log.
   // First a check list of every test file (missing ones of the checked sizes ticked; ones already there are greyed and
   // marked); resolves with the picked keys, or null when cancelled.
   async function pickData(message) {
@@ -200,17 +200,16 @@
     if (running) throw new Error('Stop the run first.');
     const keys = await pickData(typeof message === 'string' ? message : null);
     if (!keys?.length) return;
+    // Progress on the page: the progress bar, Progress / Elapsed cards, status line and activity log.
     running = true; ['run', 'report', 'utils'].forEach(id => $(id).disabled = true); runT0 = performance.now();
-    const dlg = $('genDlg'), list = $('genList'); list.innerHTML = ''; $('genMsg').textContent = ''; $('genClose').disabled = true;
-    dlg.showModal();
-    let row = null, total = 0;
-    const finish = () => { if (row) { row.classList.add('done'); row.querySelector('i').style.width = '100%'; row.querySelector('span').textContent = 'done'; } };
-    const say = (t, rows) => {
-      finish(); log(t); total = rows || 0;
-      row = document.createElement('div'); row.className = 'it';
-      row.innerHTML = `<b>${esc(t.replace(/^Making /, ''))}</b><span>starting</span><div class="progress"><i></i></div>`;
-      list.append(row); row.scrollIntoView({ block: 'nearest' });
+    let step = 0, total = 0, label = '';
+    const steps = keys.length;
+    const show = (f, extra) => {
+      $('bar').style.width = `${(100 * Math.min(1, (step - 1 + f) / Math.max(1, steps))).toFixed(1)}%`;
+      $('cProg').textContent = `${Math.max(0, step - 1)} / ${steps}`; $('sProg').textContent = label;
+      $('status').textContent = extra ? `${label} · ${extra}` : label;
     };
+    const say = (t, rows) => { if (step) log(`${label}: done`, 'ok'); step++; total = rows || 0; label = t; log(t); show(0); };
     const genJob = async (op, body) => {
       let j = await Engine.call(op, { ...body, workers: maxW }); curJob = j.jobId;
       try {
@@ -218,7 +217,7 @@
           if (j.state === 'failed' || j.state === 'cancelled') throw new Error(j.error?.message || `Job ${j.state}`);
           await new Promise(r => setTimeout(r, 150));
           j = await Engine.call('job?id=' + encodeURIComponent(j.jobId), undefined, 'GET');
-          if (row) { const f = total ? Math.min(1, j.rowsProcessed / total) : (j.progress || 0); row.querySelector('i').style.width = `${(f * 100).toFixed(1)}%`; row.querySelector('span').textContent = `${UI.num(j.rowsProcessed)} rows · ${fmtS(j.elapsedMs)}`; }
+          show(total ? Math.min(1, j.rowsProcessed / total) : (j.progress || 0), `${UI.num(j.rowsProcessed)} rows · ${fmtS(j.elapsedMs)}`);
         }
         return j;
       } finally { curJob = null; }
@@ -226,14 +225,13 @@
     try {
       await setBatch(DEFAULT_BATCH);
       await T.makeItems(keys, say, genJob);
-      finish();
-      if (!list.children.length) list.innerHTML = '<div class="muted">All test data is already there.</div>';
-      $('genMsg').textContent = `Test data ready (${fmtS(performance.now() - runT0)}).`;
-      log($('genMsg').textContent, 'ok');
-    } catch (e) { $('genMsg').textContent = `Failed: ${e.message}`; log(`Generate test data: ${e.message}`, 'err'); }
-    finally { $('genClose').disabled = false; running = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
+      if (step) log(`${label}: done`, 'ok');
+      $('bar').style.width = '100%'; $('cProg').textContent = `${steps} / ${steps}`;
+      const m = step ? `Test data ready (${fmtS(performance.now() - runT0)}).` : 'All picked test data is already there.';
+      $('status').textContent = m; $('sProg').textContent = m; log(m, 'ok'); UI.toast(m, 'ok');
+    } catch (e) { $('status').textContent = `Generate test data failed: ${e.message}`; log(`Generate test data: ${e.message}`, 'err'); }
+    finally { running = false; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); }
   });
-  $('genClose').onclick = () => $('genDlg').close();
   const doPurge = UI.guard(async () => {
     if (running) throw new Error('Stop the run first.');
     await T.dropMem(call);

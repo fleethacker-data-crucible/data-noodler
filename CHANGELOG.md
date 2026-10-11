@@ -2,6 +2,16 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-11: SQLite export on all workers
+
+- **SQLite export** (5M rows: 345k -> about 1M rows/s, same rows, same order): rows are cut into 64k-row slices; every
+  worker writes the slices it takes into its own piece file in `temp\write` (one table per slice); SQLite then copies the
+  slice tables into the final table in row order with its raw record transfer (ATTACH + INSERT ... SELECT *). Text is
+  packed into one UTF-8 buffer per column per slice (no per-value arrays), binds skip .NET's security stack walk, and
+  the file is written with no journal / syncs (it is built at a staging path and swapped in). SQLite import already
+  reads rowid ranges on all workers.
+- **Benchmark:** Generate Test Data shows its progress in the page's progress bar, cards and activity log (no popup).
+
 ## 2026-10-11: All temporary data stays in <root>\temp
 
 - Nothing temporary is written outside the app folder: `temp\engine` (compiled engine cache, was %LOCALAPPDATA%),
