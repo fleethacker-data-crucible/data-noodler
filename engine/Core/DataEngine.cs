@@ -201,7 +201,9 @@ namespace NativeDataEngine
         }
 
         // ---------- query ----------
-        public QueryResult Query(string sql, Dictionary<string, string> views, int maxRows, int workers, CancellationToken ct)
+        public QueryResult Query(string sql, Dictionary<string, string> views, int maxRows, int workers, CancellationToken ct) { return Query(sql, views, maxRows, workers, ct, null); }
+        // job: reports rows read as it runs (the Benchmark's live numbers); null = none.
+        public QueryResult Query(string sql, Dictionary<string, string> views, int maxRows, int workers, CancellationToken ct, Job job)
         {
             return WithWiden(() =>
             {
@@ -212,16 +214,17 @@ namespace NativeDataEngine
                 {
                     QueryResult r = new QueryResult(); r.Schema = p.Op.Schema;
                     if (q.Describe) { r.Schema = DescribeSchema(p.Op.Schema, r); r.Ms = sw.ElapsedMilliseconds; return r; }
-                    CollectRows(p, r, maxRows, workers, ct);
+                    CollectRows(p, r, maxRows, workers, ct, job);
                     r.Ms = sw.ElapsedMilliseconds;
                     return r;
                 }
                 finally { cat.Dispose(); }
             });
         }
-        void CollectRows(Planned p, QueryResult r, long maxRows, int workers, CancellationToken ct)
+        void CollectRows(Planned p, QueryResult r, long maxRows, int workers, CancellationToken ct) { CollectRows(p, r, maxRows, workers, ct, null); }
+        void CollectRows(Planned p, QueryResult r, long maxRows, int workers, CancellationToken ct, Job job)
         {
-            ExecCtx ctx = Ctx(null, workers, ct);
+            ExecCtx ctx = Ctx(job, workers, ct);
             long limit = maxRows > 0 ? maxRows : Options.MaxResultRows;
             using (MemoryLease lease = new MemoryLease(Mem, "Query result"))
             {
@@ -485,7 +488,8 @@ namespace NativeDataEngine
         // rest are written to an Arrow dataset under temp\spill and the table is read from its parts.
         const double SpillFraction = 0.7;
         public static string SpillRoot { get; private set; }   // <root>\temp\spill (the app temp folder: safe to delete)
-        public Dictionary<string, object> CacheLoad(string name, string sql, Dictionary<string, string> views, int workers)
+        public Dictionary<string, object> CacheLoad(string name, string sql, Dictionary<string, string> views, int workers) { return CacheLoad(name, sql, views, workers, null); }
+        public Dictionary<string, object> CacheLoad(string name, string sql, Dictionary<string, string> views, int workers, Job job)
         {
             CacheDrop(name);
             Stopwatch sw = Stopwatch.StartNew();
@@ -493,7 +497,7 @@ namespace NativeDataEngine
             {
                 QueryStmt q; Catalog cat;
                 Planned p = Plan(sql, views, out q, out cat);
-                ExecCtx ctx = Ctx(null, workers, CancellationToken.None);
+                ExecCtx ctx = Ctx(job, workers, job != null ? job.Cts.Token : CancellationToken.None);
                 MemTable m = new MemTable(); m.Schema = p.Op.Schema; m.Batches = new List<Batch>(); m.Lease = new MemoryLease(Mem, "Cached table");
                 DatasetWriter w = null;
                 try

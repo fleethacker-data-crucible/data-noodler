@@ -134,32 +134,34 @@ const BenchTests = (() => {
     const m = (mid, label, kind, ms, rows = n) => ({ id: mid, label, kind, ms, rows });
     const t = TESTS.find(x => x.id === id);
     const fmt = id.split('-')[1];
-    const part = ctx.part || (() => {});
+    const part = ctx.part || (() => {}), act = ctx.act || (() => {});
+    // Timed engine calls run as jobs so the page sees rows read as they go; the metric is the engine's own time.
+    const aj = async (op, body) => (await job(op, { ...body, async: true })).result;
     if (id.startsWith('import-')) {
-      part(0, 1, n);
+      act('read'); part(0, 1, n);
       const j = await job('write', { sql: `SELECT * FROM ${src[fmt]}`, dest: `${D}/out/import_${fmt}`, workers });
       return [m(id, t.label, 'read', j.elapsedMs)];
     }
     if (id.startsWith('export-')) {
-      part(0, 1, n);
+      act('write'); part(0, 1, n);
       const j = await job('export', { sql: `SELECT * FROM ${base}`, to: `${D}/out/export.${fmt}`, format: fmt, table: 't', workers });
       return [m(id, t.label, 'write', j.elapsedMs)];
     }
     if (id === 'rw-mem') {
       await ensureMem(ctx);
       const cols = 'count(*), max(id), max(order_date), max(order_ts), sum(store_id), max(store_key), max(customer), max(region), max(category), sum(qty), sum(price), sum(discount), sum(cost), sum(CASE WHEN is_online THEN 1 ELSE 0 END), sum(rating), max(note), sum(amount)';
-      part(0, 0.5, 0, n / 20e6 * 1000);
-      const r = await call('query', { sql: `SELECT ${cols} FROM bench_m`, workers });
-      part(0.5, 1, 0, n / 50e6 * 1000);
-      const w = await call('cache/load', { name: 'bench_m2', sql: 'SELECT * FROM bench_m', workers });
+      act('read'); part(0, 0.5, n);
+      const r = await aj('query', { sql: `SELECT ${cols} FROM bench_m`, workers });
+      act('write'); part(0.5, 1, n);
+      const w = await aj('cache/load', { name: 'bench_m2', sql: 'SELECT * FROM bench_m', workers });
       await call('cache/drop', { name: 'bench_m2' });
       return [m('rw-mem:read', 'Read (memory)', 'read', r.ms), m('rw-mem:write', 'Write (memory)', 'write', w.ms)];
     }
     if (id.startsWith('rw-')) {
       await call('cache/drop', { name: 'bench_m' }); memFor = null;   // room for the copy being read (reloaded when needed)
-      part(0, 0.5, 0, n / ({ csv: 1.2e6, parquet: 8e6, arrow: 5e6, sqlite: 1e6 }[fmt]) * 1000);
-      const r = await call('cache/load', { name: 'bench_r', sql: `SELECT * FROM ${src[fmt]}`, workers });
-      part(0.5, 1, n);
+      act('read'); part(0, 0.5, n);
+      const r = await aj('cache/load', { name: 'bench_r', sql: `SELECT * FROM ${src[fmt]}`, workers });
+      act('write'); part(0.5, 1, n);
       try {
         const w = fmt === 'arrow' ? await job('write', { sql: 'SELECT * FROM bench_r', dest: `${D}/out/rw_arrow`, workers })
           : await job('export', { sql: 'SELECT * FROM bench_r', to: `${D}/out/rw.${fmt}`, format: fmt, table: 't', workers });
@@ -175,7 +177,8 @@ const BenchTests = (() => {
         part(qi / HEAVY.length, (qi + 1) / HEAVY.length, 0, n / (qid === 'q-sort' || qid === 'q-window' ? 2e6 : 15e6) * 1000);
         ctx.say(`${label} (${sizeLabel(n)} rows, ${workers} worker${workers > 1 ? 's' : ''})`);
         const sql = sql0 || `SELECT id, customer FROM bench_m ORDER BY customer, id LIMIT 10 OFFSET ${Math.max(0, n - 10)}`;
-        try { const r = await call('query', { sql, workers }); out.push(m(qid, label, 'query', r.ms)); }
+        act('query');
+        try { const r = await aj('query', { sql, workers }); out.push(m(qid, label, 'query', r.ms)); }
         catch (e) { out.push({ id: qid, label, kind: 'query', err: e.code === 'QUERY_OUT_OF_MEMORY' ? 'out of memory' : e.message.split('\n')[0] }); }
         ctx.onMetric?.(out[out.length - 1]);
       }

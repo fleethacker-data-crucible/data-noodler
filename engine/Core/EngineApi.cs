@@ -101,6 +101,13 @@ namespace NativeDataEngine
                     {
                         Dictionary<string, object> spec = Json.Obj(req, "query");
                         string sql = spec != null ? QuerySpec.ToSql(spec) : Need(req, "sql");
+                        if (Json.Bool(req, "async", false))
+                        {
+                            // As a job (rows read so far are reported while it runs); the result is the usual query answer.
+                            Dictionary<string, string> v0 = Views(req); int lim = (int)Json.Long(req, "limit", 0), wk = (int)Json.Long(req, "workers", 0);
+                            Job jq = e.Jobs.Start("query", "query", jb => Json.Parse(ResultJson(e.Query(sql, v0, lim, wk, jb.Cts.Token, jb))));
+                            return Json.Write(jq.ToJson());
+                        }
                         QueryResult r = e.Query(sql, Views(req), (int)Json.Long(req, "limit", 0), (int)Json.Long(req, "workers", 0), CancellationToken.None);
                         return ResultJson(r);
                     }
@@ -158,7 +165,13 @@ namespace NativeDataEngine
                         foreach (Job j in e.Jobs.All()) l.Add(j.ToJson());
                         Dictionary<string, object> d = new Dictionary<string, object>(); d["jobs"] = l; return Ok(d);
                     }
-                case "cache/load": return Ok(e.CacheLoad(Need(req, "name"), Need(req, "sql"), Views(req), (int)Json.Long(req, "workers", 0)));
+                case "cache/load":
+                    {
+                        string name = Need(req, "name"), sql = Need(req, "sql"); Dictionary<string, string> v = Views(req); int wk = (int)Json.Long(req, "workers", 0);
+                        if (!Json.Bool(req, "async", false)) return Ok(e.CacheLoad(name, sql, v, wk));
+                        Job jc = e.Jobs.Start("cache", name, jb => e.CacheLoad(name, sql, v, wk, jb));   // as a job: rows read reported live
+                        return Json.Write(jc.ToJson());
+                    }
                 case "memory/purge":
                     {
                         // Frees engine memory: cached tables (and their spills), resident datasets, then a compacting GC.

@@ -58,12 +58,13 @@ namespace NativeDataEngine
             Thread t = new Thread(() =>
             {
                 j.State = "running"; j.Clock.Start();
-                EngineLog.Write("engine", "Job " + j.Id + " started: " + kind + " " + label);
+                bool quiet = kind == "query" || kind == "cache";   // Benchmark steps: not logged one by one
+                if (!quiet) EngineLog.Write("engine", "Job " + j.Id + " started: " + kind + " " + label);
                 try
                 {
                     j.Result = work(j);
                     j.State = "done"; j.Progress = 1;
-                    EngineLog.Write("engine", "Job " + j.Id + " done in " + j.Clock.ElapsedMilliseconds + " ms: " + kind + " " + label);
+                    if (!quiet) EngineLog.Write("engine", "Job " + j.Id + " done in " + j.Clock.ElapsedMilliseconds + " ms: " + kind + " " + label);
                 }
                 catch (Exception e)
                 {

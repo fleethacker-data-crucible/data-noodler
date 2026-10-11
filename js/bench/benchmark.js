@@ -13,9 +13,10 @@
 
   const fmtRate = r => r >= 1e9 ? (r / 1e9).toFixed(2) + 'B' : r >= 1e6 ? (r / 1e6).toFixed(r >= 1e8 ? 0 : 1) + 'M' : r >= 1e3 ? (r / 1e3).toFixed(0) + 'k' : r.toFixed(0);
   const fmtS = ms => (ms / 1000).toFixed(1) + ' s';   // live cards: always seconds, 1 decimal
-  const fmtMs = ms => ms >= 10000 ? (ms / 1000).toFixed(1) + ' s' : Math.round(ms).toLocaleString() + ' ms';
+  const fmtSec = ms => (ms / 1000).toFixed(ms < 1000 ? 2 : 1) + ' s';   // results: seconds (2 decimals under 1 s)
+  const fmtR = r => `${fmtRate(r)} r/s`;
   const val = c => !c || c.err || !(c.ms >= 0) ? null : st.unit === 'ms' ? c.ms : c.rows / Math.max(c.ms, 0.01) * 1000;
-  const show = c => c?.err ? c.err : c?.running ? 'running' : val(c) == null ? '' : st.unit === 'ms' ? fmtMs(c.ms) : fmtRate(val(c)) + '/s';
+  const show = c => c?.err ? c.err : c?.running ? 'running' : val(c) == null ? '' : st.unit === 'ms' ? fmtSec(c.ms) : fmtR(val(c));
   const log = (msg, cls = '') => { const d = document.createElement('div'); d.className = cls; d.textContent = `${UI.stamp()}  ${msg}`; $('log').prepend(d); };
 
   // ---- check-box drop-downs ----
@@ -44,13 +45,15 @@
   addEventListener('click', () => document.querySelectorAll('.pick .dd-menu.open').forEach(m => m.classList.remove('open')));
 
   // ---- cards ----
-  const last = {};   // kind -> the last finished result shown (put back when the live ticker stops)
-  function card(kind, ms, rows, note, final) {
-    if (final) last[kind] = [ms, rows, note];
-    const id = kind === 'read' ? 'Read' : kind === 'write' ? 'Write' : 'Query';
-    $('c' + id).textContent = ms == null ? '–' : st.unit === 'ms' ? fmtS(ms) : rows ? fmtRate(rows / Math.max(ms, 0.01) * 1000) + '/s' : fmtS(ms);
-    $('s' + id).textContent = note || ' ';
+  // Read / Write / Query cards are live only: while that kind of step runs they show its elapsed time (Time) or its
+  // rows per second so far (Rows / s); otherwise -- or 0 r/s. Nothing is kept from earlier steps.
+  const cardId = kind => kind === 'read' ? 'Read' : kind === 'write' ? 'Write' : 'Query';
+  function card(kind, ms, rows, note) {
+    $('c' + cardId(kind)).textContent = st.unit === 'ms' ? fmtS(ms) : fmtR(ms > 0 ? (rows || 0) / ms * 1000 : 0);
+    $('s' + cardId(kind)).textContent = note || '00a0';
   }
+  function idle(kind) { $('c' + cardId(kind)).textContent = st.unit === 'ms' ? '--' : '0 r/s'; $('s' + cardId(kind)).textContent = '00a0'; }
+  const idleAll = () => ['read', 'write', 'query'].forEach(idle);
   setInterval(async () => {
     try {
       const r = await fetch('/api/mem', { headers: { 'X-DN-Token': window.DN_TOKEN || '' }, cache: 'no-store' }).then(r => r.json());
@@ -97,8 +100,9 @@
   setInterval(paintBar, 100);
 
   // ---- engine calls with live numbers ----
-  let live = null;   // { kind, n, label, t0 } for the step running (sync calls tick the elapsed time)
-  setInterval(() => { if (live && !live.job) card(live.kind, performance.now() - live.t0, null, `${live.label} · running…`); }, 100);
+  let live = null;   // { kind, label, t0 } for the step running; act(kind) switches it (a read/write test: read, then write)
+  setInterval(() => { if (live && !live.job) card(live.kind, performance.now() - live.t0, 0, `${live.label} · starting…`); }, 100);
+  function act(kind) { if (!live) return; if (live.kind !== kind) idle(live.kind); live.kind = kind; live.job = false; live.t0 = performance.now(); }
   async function call(op, body) {
     const r = await Engine.call(op, body);
     return r;
@@ -136,12 +140,12 @@
       const one = val(r.cells[1]);
       const sp = best != null && one != null ? (st.unit === 'ms' ? one / best : best / one) : null;
       html += `<tr><td><span class="kind ${r.kind}"></span>${esc(r.label)}</td><td>${T.sizeLabel(r.n)}</td><td>${T.sizeLabel(r.batch)}</td><td>${r.kind}</td>` +
-        ts.map(t => { const c = r.cells[t]; return `<td class="${c?.err ? 'err' : c?.running ? 'run' : 'v'}${t === bestT ? ' best' : ''}" title="${c && !c.err && c.ms != null ? `${fmtMs(c.ms)} · ${fmtRate(c.rows / Math.max(c.ms, .01) * 1000)} rows/s` : esc(c?.err || '')}">${esc(show(c))}</td>`; }).join('') +
+        ts.map(t => { const c = r.cells[t]; return `<td class="${c?.err ? 'err' : c?.running ? 'run' : 'v'}${t === bestT ? ' best' : ''}" title="${c && !c.err && c.ms != null ? `${fmtSec(c.ms)} · ${fmtR(c.rows / Math.max(c.ms, .01) * 1000)}` : esc(c?.err || '')}">${esc(show(c))}</td>`; }).join('') +
         `<td class="v">${bestT ? `${bestT}` : ''}</td><td class="v">${sp ? sp.toFixed(1) + '×' : ''}</td></tr>`;
     }
     $('results').innerHTML = html + '</tbody></table></div>';
   }
-  $('unit').onchange = () => { st.unit = $('unit').value; render(); save(); };
+  $('unit').onchange = () => { st.unit = $('unit').value; render(); if (!live) idleAll(); save(); };
 
   // ---- plan / save / load ----
   function plan() {
@@ -158,7 +162,7 @@
     $('run').disabled = true; $('stop').disabled = false; ['report', 'utils'].forEach(id => $(id).disabled = true);
     const total = st.sizes.length * st.batches.length * st.tests.length * st.threads.length; let done = 0;
     const prog = (label) => { $('cProg').textContent = `${done} / ${total}`; $('sProg').textContent = label; $('status').textContent = label; };
-    const ctxBase = { call, job, part, stopped: () => stopped, say: t => prog(t) };
+    const ctxBase = { call, job, part, act, stopped: () => stopped, say: t => prog(t) };
     // Test data made during a run: the bar shows that file's progress, then goes back to the run's.
     const prep = t => { prog(t); log(t); };
     // Loading the table into memory before the memory / query tests (not timed): the bar shows that load, then the step.
@@ -181,7 +185,7 @@
               for (const m of T.metricsOf(id)) { const k = keyOf(m.id, n, b); results[k] ||= { id: m.id, label: m.label || test.label, kind: m.kind, test: id, n, batch: b, cells: {} }; results[k].cells[w] = { running: true }; }
               render();
               live = { kind: test.kind === 'both' ? 'read' : test.kind, label: test.label, t0: performance.now() };
-              const put = m => { const k = keyOf(m.id, n, b); results[k] ||= { id: m.id, label: m.label, kind: m.kind, test: id, n, batch: b, cells: {} }; results[k].label = m.label; results[k].cells[w] = m.err ? { err: m.err } : { ms: m.ms, rows: m.rows }; if (!m.err) { card(m.kind, m.ms, m.rows, `${m.label} · ${T.sizeLabel(n)} · ${w}w`, true); if (live) live.t0 = performance.now(); } render(); save(); };
+              const put = m => { const k = keyOf(m.id, n, b); results[k] ||= { id: m.id, label: m.label, kind: m.kind, test: id, n, batch: b, cells: {} }; results[k].label = m.label; results[k].cells[w] = m.err ? { err: m.err } : { ms: m.ms, rows: m.rows }; idle(m.kind); render(); save(); };
               try {
                 const ms = await T.run(id, { ...ctxBase, n, workers: w, onMetric: put });
                 for (const m of ms) put(m);
@@ -191,16 +195,16 @@
                 for (const m of T.metricsOf(id)) { const k = keyOf(m.id, n, b); if (results[k].cells[w]?.running) results[k].cells[w] = { err: msg }; }
                 if (!stopped) log(`${label}: ${msg}`, 'err');
               }
-              live = null; for (const k of Object.keys(last)) card(k, ...last[k]); done++; steps(done, total); render(); save();
+              live = null; idleAll(); done++; steps(done, total); render(); save();
             }
           }
         }
         await T.dropMem(call);
       }
-      prog(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtMs(performance.now() - runT0)}.`);
-      log(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtMs(performance.now() - runT0)}.`, stopped ? 'warn' : 'ok');
+      prog(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtS(performance.now() - runT0)}.`);
+      log(stopped ? 'Stopped.' : `Finished ${done} runs in ${fmtS(performance.now() - runT0)}.`, stopped ? 'warn' : 'ok');
     } finally {
-      live = null; running = false; barOff();
+      live = null; idleAll(); running = false; barOff();
       await setBatch(DEFAULT_BATCH); await T.dropMem(call).catch(() => {});
       $('stop').disabled = true; ['report', 'utils'].forEach(id => $(id).disabled = false); plan(); save();
     }
@@ -209,7 +213,7 @@
   addEventListener('pagehide', () => { try { fetch('/api/engine/options', { method: 'POST', keepalive: true, headers: { 'X-DN-Token': window.DN_TOKEN || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ batchRows: DEFAULT_BATCH }) }); } catch {} });
 
   // ---- clear / wipe / report ----
-  const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); });
+  const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); $('cTime').textContent = '0.0 s'; $('cProg').textContent = '–'; $('sProg').textContent = '00a0'; $('status').textContent = ''; barOff(); idleAll(); plan(); });
   // Generate Test Data: the picked files, all workers; progress in the page's progress bar and activity log.
   // First a check list of every test file (missing ones of the checked sizes ticked; ones already there are greyed and
   // marked); resolves with the picked keys, or null when cancelled.
@@ -298,7 +302,7 @@
       for (const r of rows) {
         const g = `${T.sizeLabel(r.n)} rows, ${T.sizeLabel(r.batch)} rows per batch`;
         if (g !== grp) { grp = g; lines.push('', `### ${g}`, '', `| Test | Kind | ${ts.map(t => `${t}w`).join(' | ')} |`, `|---|---|${ts.map(() => '---:').join('|')}|`); }
-        const cell = c => !c ? '' : c.err ? c.err : c.ms == null ? '' : unit === 'ms' ? fmtMs(c.ms) : fmtRate(c.rows / Math.max(c.ms, .01) * 1000);
+        const cell = c => !c ? '' : c.err ? c.err : c.ms == null ? '' : unit === 'ms' ? fmtSec(c.ms) : fmtR(c.rows / Math.max(c.ms, .01) * 1000);
         lines.push(`| ${r.label} | ${r.kind} | ${ts.map(t => cell(r.cells[t])).join(' | ')} |`);
       }
       lines.push('');
@@ -348,7 +352,7 @@
     pick($('pThreads'), 'Workers', threads.map(v => ({ v, l: `${v} worker${v > 1 ? 's' : ''}`, short: String(v) })), 'threads');
     pick($('pBatches'), 'Rows per batch', T.BATCHES.map(v => ({ v, l: `${T.sizeLabel(v)} rows${v === DEFAULT_BATCH ? ' (default)' : ''}`, short: T.sizeLabel(v) })), 'batches');
     $('sub').textContent = status ? `${status.workers} workers on ${status.cores} logical cores · memory budget ${UI.bytes(status.memory?.budget || 0)} of ${UI.bytes(status.memory?.totalPhys || 0)} RAM` : $('sub').textContent;
-    render(); plan();
+    render(); plan(); idleAll();
     if (noData) doMake('There is no test data generated. Pick the test files to generate now, or Cancel.');
   })();
 })();
