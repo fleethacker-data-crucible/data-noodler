@@ -50,9 +50,9 @@
   const cardId = kind => kind === 'read' ? 'Read' : kind === 'write' ? 'Write' : 'Query';
   function card(kind, ms, rows, note) {
     $('c' + cardId(kind)).textContent = st.unit === 'ms' ? fmtS(ms) : fmtR(ms > 0 ? (rows || 0) / ms * 1000 : 0);
-    $('s' + cardId(kind)).textContent = note || '00a0';
+    $('s' + cardId(kind)).textContent = note || '\u00a0';
   }
-  function idle(kind) { $('c' + cardId(kind)).textContent = st.unit === 'ms' ? '0 s' : '0 r/s'; $('s' + cardId(kind)).textContent = '00a0'; }
+  function idle(kind) { $('c' + cardId(kind)).textContent = st.unit === 'ms' ? '0 s' : '0 r/s'; $('s' + cardId(kind)).textContent = '\u00a0'; }
   const idleAll = () => ['read', 'write', 'query'].forEach(idle);
   setInterval(async () => {
     try {
@@ -213,7 +213,7 @@
   addEventListener('pagehide', () => { try { fetch('/api/engine/options', { method: 'POST', keepalive: true, headers: { 'X-DN-Token': window.DN_TOKEN || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ batchRows: DEFAULT_BATCH }) }); } catch {} });
 
   // ---- clear / wipe / report ----
-  const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); $('cTime').textContent = '0.0 s'; $('cProg').textContent = '–'; $('sProg').textContent = '00a0'; $('status').textContent = ''; barOff(); idleAll(); plan(); });
+  const doClear = UI.guard(async () => { if (!await UI.confirm('Clear every result in the table? (Test data stays.)', { ok: 'Clear' })) return; results = {}; render(); save(); $('cTime').textContent = '0.0 s'; $('cProg').textContent = '–'; $('sProg').textContent = '\u00a0'; $('status').textContent = ''; barOff(); idleAll(); plan(); });
   // Generate Test Data: the picked files, all workers; progress in the page's progress bar and activity log.
   // First a check list of every test file (missing ones of the checked sizes ticked; ones already there are greyed and
   // marked); resolves with the picked keys, or null when cancelled.
