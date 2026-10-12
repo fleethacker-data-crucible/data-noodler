@@ -1,12 +1,11 @@
-.server/.profile*/
-.server/logs/
-.server/.pid
+server/.profile*/
+server/logs/
+server/.pid
 test-data/
 temp/
 .trash/
-js/duckdb/bench.*
-projects/*
-!projects/sales-demo/
+workspace/projects/*
+!workspace/projects/.gitkeep
 
 # Data files: never committed (any folder). Import reads these; datasets are Parquet.
 *.csv
@@ -21,7 +20,7 @@ projects/*
 *.arrow
 *.feather
 
-# App packages (__app-package.ps1 Pack)
+# App packages (Data_Noodler_Package.ps1)
 Data_Noodler_*.gz
 
 
@@ -29,4 +28,8 @@ Data_Noodler_*.gz
 version.txt
 
 # Chart Builder: where its window was (per user)
-chart-builder/builder-state.json
+workspace/chart-builder/builder-state.json
+workspace/chart-builder/dev/_new/
+
+# Claude test scripts (local only)
+.claude/tests/

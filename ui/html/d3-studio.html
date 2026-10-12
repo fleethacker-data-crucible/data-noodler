@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>D3 Studio</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<script src="../js/core/icons.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  * { scrollbar-width: none; } ::-webkit-scrollbar { display: none; }
+  body { display: flex; flex-direction: column; }
+  body > header.gh, .app > .topbar { display: none; }   /* no header: the toolbar is the top row */
+  body > .app { flex: 1; min-height: 0; height: auto; display: flex; flex-direction: column; }
+  .tools { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .tools label.field { font-size: 12px; }
+  .tools #name { width: 190px; } .tools #cat { width: 140px; } .tools #desc { width: 230px; }  #src option { color: var(--text); font-weight: 400; } #src option.ds, #src.ds { color: var(--ok); font-weight: 700; }
+  .tools #publish { margin-right: 8px; }
+  /* Chart list: published charts (in d3-studio/live) in green. */
+  #pick option { color: var(--text); } #pick option.pub, #pick.pub { color: var(--ok); }
+  .tools .sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+  .studio { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 10px 12px; }
+  .col { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .col h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-2); display: flex; align-items: center; gap: 8px; }
+  .col h3 small { color: var(--muted); font-weight: 400; }
+  .col h3 .spacer { flex: 1; }
+  .col h3 label.auto { font-weight: 400; color: var(--text-2); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  #code { flex: 3; min-height: 0; height: auto; font: 11.5px/17px var(--mono); }
+  #gen { flex: none; height: auto; font: 11.5px/17px var(--mono); background: var(--panel); }
+  #data { flex: 1; min-height: 60px; height: auto; font: 11.5px/17px var(--mono); }
+  #data.off { display: none; }
+  /* Right column: the chart stays pinned at the top right (its bottom edge = window middle: studio.js placePreview); below it the
+     Inputs, colours and Settings scroll together, up and down by mouse wheel (no scroll bar, nothing sideways). */
+  .col.pvcol > .pvwrap, .col.pvcol > #err { flex: none; }
+  .pvscroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px; }
+  .pvscroll > * { flex: none; }
+  .pvwrap { height: 300px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); padding: 6px 8px; display: flex; }
+  #pv { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+  #err { min-height: 18px; font: 12.5px/1.4 var(--mono); color: var(--err); white-space: pre-wrap; }
+  #err.ok { color: var(--muted); }
+  .colours { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .ins { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--border); border-radius: 4px; }
+  .ins table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .ins th, .ins td { padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+  .ins th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); white-space: nowrap; }
+  .ins input[type=text] { width: 100%; box-sizing: border-box; }
+  #ins input[data-f="key"] { font-family: var(--mono); width: 70px; }
+  #ins input[data-f="src"] { font-family: var(--mono); min-width: 150px; }
+  #ins td.code { font-size: 11.5px; }
+  #ins input.bad, #opts input.bad { border-color: var(--err); }
+  #ins input.good { border-color: var(--ok); }
+  #ins td.code { font-family: var(--mono); color: var(--text-2); white-space: nowrap; }
+  #ins .ib.del, #opts .ib.del { color: var(--err); height: 20px; width: 20px; font-size: 20px; background: none; padding: 0; justify-content: center; vertical-align: middle; }
+  .order { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; font-size: 12px; }
+  .order label.field { font-size: 12px; } .order #top { width: 80px; }
+  #sql { font: 12px/1.45 var(--mono); color: var(--text-2); white-space: pre-wrap; padding: 4px 6px; border-left: 3px solid var(--border); }
+  #sql .kw { color: var(--blue); font-weight: 600; } #sql .tb { color: var(--ok); }
+  #opts .op { display: flex; align-items: center; font-family: var(--mono); color: var(--muted); }
+  #opts .op input { font-family: var(--mono); min-width: 80px; }
+  #opts input[data-f="default"][type=number] { width: 70px; }
+  /* Settings row buttons (ui/js/core/icons.js), 22px: eye = shown on the preview (white) / hidden (grey), red X = remove. */
+  #opts td.acts { white-space: nowrap; }
+  #opts .ib { background: none; padding: 0; height: 22px; width: 22px; font-size: 22px; justify-content: center; vertical-align: middle; margin-left: 6px; }
+  #opts .ib.eye { color: var(--text); } #opts .ib.eye.off { color: var(--muted); }
+  #opts .rng { display: flex; gap: 3px; } #opts .rng input { width: 52px; }
+  .help { color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .help code { color: var(--text-2); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">D3</span><div><h1 id="title">D3 Studio</h1><div class="sub">Build D3 charts for the Dashboard</div></div></div>
+  </header>
+  <div class="tools">
+    <button id="save" class="ghost" title="Save to d3-studio/dev/ (work in progress: not on the Dashboard)">Save</button>
+    <button id="publish" title="Save, then copy to d3-studio/live/: it appears in Dashboard > Charts">Publish</button>
+    <label class="field">Chart<select id="pick"></select></label>
+    <label class="field">Category<select id="cat" title="The chart's group in Dashboard > Charts (New category… adds one)"></select></label>
+    <label class="field">Name<input id="name" type="text" placeholder="My chart" spellcheck="false"></label>
+    <label class="field">Description<input id="desc" type="text" placeholder="Optional" spellcheck="false"></label>
+    <label class="field" title="The cleaned dataset (CLEAN_, data/source) the inputs read, to test the chart with real data">Dataset<select id="src"></select></label>
+  </div>
+  <div class="studio">
+    <div class="col">
+      <h3>D3 code <small>live file <code id="live"></code></small><span class="spacer"></span>
+        <label class="auto" title="Redraw the chart a moment after you stop typing (only when the code has no syntax error)"><input type="checkbox" id="auto" checked> Auto run</label>
+        <button id="run" class="small ghost" title="Run the code now (Ctrl+Enter)">Run</button>
+        <button id="starter" class="ghost small" title="Replace the code with a starter chart built from the Inputs (scales, svg, grid, axes): then only the marks are yours to write">Starter code</button>
+        <button id="convert" class="ghost small" title="Turn Observable notebook code into plain D3 and a fixed width / height into W / H (also done on paste)">Convert to D3</button>
+        <button id="helpbtn" class="ghost small">Help</button></h3>
+      <div class="help" id="help" hidden>
+        The chart is drawn in its own <code>&lt;div&gt;</code> (<code>el</code>), <code>W</code> x <code>H</code> px. Return an svg (<code>svg.node()</code>) or draw into <code>el</code>:
+        the chart's root svg always scales to fit its box (a fixed width / height from pasted code gets a viewBox), here and on the Dashboard.<br>
+        <b>Inputs</b> (right) are the chart's data variables: each one is a column of <code>data</code> (<code>d.x</code>, <code>d.y</code>) with an accessor in capitals
+        (<code>X(d)</code>, <code>Y(d)</code>), listed in the Generated box above the code. Pick the Data table (top right, a cleaned CLEAN_ dataset) and a field of it for each input
+        to draw real data; until then the Sample data is drawn. On the Dashboard a new chart starts empty (axes and grid only) until its fields are linked in
+        Right-click &gt; Chart Settings.<br>
+        Also ready: <code>colors</code> (the 8 colours), <code>opts</code> (Settings: <code>opts.grid.x</code> ...), <code>theme</code> (<code>text</code>, <code>text2</code>, <code>muted</code>,
+        <code>border</code>, <code>font</code>), <code>inputs.x.label</code> / <code>.field</code> (axis titles), <code>width</code> / <code>height</code> (= W / H).<br>
+        Editor: suggestions as you type (<code>d3.</code> lists all of D3 v7, <code>svg.</code> / <code>x.</code> the methods of that selection / scale, <code>d.</code> the inputs),
+        Ctrl+Space lists everything, hover a D3 name for what it does, Ctrl+/ comment, Ctrl+F find, Ctrl+Enter run. Errors: dark orange on the line you are typing, dark red elsewhere,
+        green flash when fixed; hover one for the message.
+      </div>
+      <h3>Generated <small>from the Inputs, read only: ready to use in your code</small></h3>
+      <div id="gen"></div>
+      <div id="code"></div>
+      <h3>Sample data <small>JSON rows or CSV, keyed by the input variables: drawn while the inputs are not linked to fields</small><span class="spacer"></span>
+        <button id="load" class="ghost small">Load file…</button><button id="datatog" class="ghost small">Hide</button><input id="file" type="file" accept=".csv,.tsv,.txt,.json" hidden></h3>
+      <div id="data"></div>
+    </div>
+    <div class="col pvcol">
+      <div class="pvwrap"><div id="pv"></div></div>
+      <div id="err" class="ok"></div>
+      <div class="pvscroll">
+      <h3>Inputs <small>the chart's data variables: pick a field of the Data table (top right) for each</small><span class="spacer"></span>
+        <button id="insAdd" class="ghost small" title="Add a data variable (a column of data)">Add input</button></h3>
+      <div class="ins" id="ins"></div>
+      <div class="order">
+        <label class="field">Order<select id="sort"><option value="desc">Largest first</option><option value="asc">Smallest first</option><option value="label">By X (A to Z, dates in order)</option></select></label>
+        <label class="field">Max X values<input id="top" type="number" min="1" max="100000" value="20"></label>
+        <span class="help">the Dashboard's default too (changed per chart in Chart Settings)</span>
+      </div>
+      <div id="sql"></div>
+      <h3>Default colours <small>locked into the chart's style.css</small><span class="spacer"></span><button id="themecols" class="ghost small" title="Use the app theme colours">Theme colours</button></h3>
+      <div class="colours" id="colours"></div>
+      <h3>Settings <small>shown in the Dashboard's Chart Settings; the code reads each as opts.&lt;name&gt;</small><span class="spacer"></span>
+        <button id="optsFind" class="ghost small" title="Add a setting for every opts.&lt;name&gt; the code reads">Find in code</button><button id="optsAdd" class="ghost small">Add setting</button></h3>
+      <div class="ins" id="opts"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/charts/color-picker.js"></script>
+<script src="../js/pipeline/sql-editor.js"></script>
+<script src="../js/vendor/d3.min.js"></script>
+<script src="../js/charts/d3-render.js"></script>
+<script src="../js/charts/apex-widget.js"></script>
+<script src="../js/d3studio/d3-api.js"></script>
+<script src="../js/d3studio/d3-assist.js"></script>
+<script src="../js/d3studio/observable.js"></script>
+<script src="../js/d3studio/studio.js"></script>
+</body>
+</html>

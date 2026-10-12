@@ -1,0 +1,9 @@
+﻿{
+    "fileThreads":  16,
+    "engineWorkers":  64,
+    "engineMemory":  0.5,
+    "port":  25000,
+    "browser":  "edge",
+    "portMode":  "manual",
+    "theme":  "dark"
+}
