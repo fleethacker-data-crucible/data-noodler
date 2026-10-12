@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Syntax Library · Data Noodler</title>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<script src="../js/core/icons.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  /* No visible scrollbars; scrolling is by mouse wheel (Ctrl = 4x, as in ui/js/core/embed.js). */
+  * { scrollbar-width: none; }
+  *::-webkit-scrollbar { display: none; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+  .pop { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
+  .tree { border-right: 1px solid var(--border); background: var(--panel); overflow: auto; padding: 8px 0; user-select: none; }
+  .tree .srch { padding: 4px 12px 8px; }
+  .tree .srch input { width: 100%; box-sizing: border-box; display: block; }
+  .tree .node { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+  .tree .node:hover { background: var(--panel-2); }
+  .tree .node.on { background: var(--sel); color: var(--text); }
+  .tree .node small { margin-left: auto; color: var(--muted); }
+  .tree .root { font-weight: 600; padding: 8px 12px; color: var(--text); }
+  .tree .kids { display: none; }
+  .tree .grp.open > .kids { display: block; }
+  .tree .kids .node { padding-left: 36px; font-size: 12.5px; }
+  .main { overflow: auto; padding: 16px 24px 24px; }
+  .main h2 { margin: 0 0 4px; }
+  .main h2 + h2, .e + h2 { margin-top: 22px; }
+  .e { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .e h3 { margin: 0 0 6px; font-size: 14px; }
+  .e p { margin: 0 0 8px; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+  .e pre { margin: 0 0 6px; padding: 6px 10px; background: var(--panel); border-radius: var(--radius); font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; width: fit-content; max-width: 100%; box-sizing: border-box; }
+  .e .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin: 2px 0 3px; }
+  .e pre.syn { color: var(--blue-h); }
+  .e .cp { display: block; margin: 0 0 10px; padding: 1px 8px; font-size: 11px; }
+  mark { background: var(--warn); color: #000; padding: 0; margin: 0; border-radius: 0; font: inherit; letter-spacing: inherit; }
+  .empty { color: var(--muted); padding: 24px 0; }
+</style>
+</head>
+<body>
+<div class="pop">
+  <nav class="tree"><div class="root">SYNTAX LIBRARY</div><div class="srch"><input id="q" type="search" placeholder="Search all text…" spellcheck="false" autofocus></div><div id="cats"></div></nav>
+  <main class="main" id="list"></main>
+</div>
+<script>
+// Everything the engine (server/data-engine/Query/*.cs, server/data-engine/Core/Script.cs) understands. [name, category, syntax, description, example]
+const L = [
+// ---- query clauses ----
+['SELECT', 'Clause', 'SELECT [DISTINCT] expr [AS alias], ... FROM source', 'Returns columns or computed values. * selects every column; EXCLUDE (col, ...) after * leaves some out.', 'SELECT EMP_ID, HOURS * RATE AS PAY FROM EMPLOYEE_HOURS'],
+['DISTINCT', 'Clause', 'SELECT DISTINCT expr, ...', 'Removes duplicate rows from the result.', 'SELECT DISTINCT DEPARTMENT FROM EMPLOYEE_HOURS'],
+['FROM', 'Clause', 'FROM dataset [AS alias] | FROM (subquery) alias', 'Names the input dataset, view, CTE or subquery to read from.', 'SELECT * FROM EMPLOYEE_HOURS e'],
+['WHERE', 'Clause', 'WHERE condition', 'Keeps only rows where the condition is true.', "SELECT * FROM EMPLOYEE_HOURS WHERE HOURS > 40 AND DEPARTMENT = 'Sales'"],
+['GROUP BY', 'Clause', 'GROUP BY expr, ... | GROUP BY ALL', 'Groups rows that share values so aggregates are computed per group. GROUP BY ALL groups by every non-aggregate column.', 'SELECT DEPARTMENT, SUM(HOURS) FROM EMPLOYEE_HOURS GROUP BY DEPARTMENT'],
+['HAVING', 'Clause', 'HAVING aggregate_condition', 'Filters groups after GROUP BY.', 'SELECT DEPARTMENT, COUNT(*) AS N FROM EMPLOYEE_HOURS GROUP BY DEPARTMENT HAVING COUNT(*) > 10'],
+['ORDER BY', 'Clause', 'ORDER BY expr [ASC|DESC] [NULLS FIRST|LAST], ...', 'Sorts the result.', 'SELECT * FROM EMPLOYEE_HOURS ORDER BY WORK_DATE DESC NULLS LAST'],
+['LIMIT / OFFSET', 'Clause', 'LIMIT n [OFFSET m]', 'Returns at most n rows, optionally skipping the first m.', 'SELECT * FROM EMPLOYEE_HOURS ORDER BY HOURS DESC LIMIT 10 OFFSET 20'],
+['QUALIFY', 'Clause', 'QUALIFY window_condition', 'Filters rows on the result of a window function (like HAVING for windows).', 'SELECT * FROM EMPLOYEE_HOURS QUALIFY ROW_NUMBER() OVER (PARTITION BY EMP_ID ORDER BY WORK_DATE DESC) = 1'],
+['WITH (CTE)', 'Clause', 'WITH name AS (query) [, name2 AS (query)] SELECT ...', 'Common table expression: a named subquery used by the main query.', 'WITH t AS (SELECT EMP_ID, SUM(HOURS) H FROM EMPLOYEE_HOURS GROUP BY EMP_ID)\nSELECT * FROM t WHERE H > 160'],
+['WITH RECURSIVE', 'Clause', 'WITH RECURSIVE name AS (anchor UNION ALL recursive_part) SELECT ...', 'A CTE that refers to itself, for hierarchies or series.', 'WITH RECURSIVE n AS (SELECT 1 AS i UNION ALL SELECT i + 1 FROM n WHERE i < 10)\nSELECT * FROM n'],
+['UNION / UNION ALL', 'Set operation', 'query UNION [ALL] query', 'Stacks two results. UNION removes duplicates, UNION ALL keeps them.', 'SELECT EMP_ID FROM A UNION ALL SELECT EMP_ID FROM B'],
+['INTERSECT', 'Set operation', 'query INTERSECT [ALL] query', 'Rows present in both results.', 'SELECT EMP_ID FROM A INTERSECT SELECT EMP_ID FROM B'],
+['EXCEPT', 'Set operation', 'query EXCEPT [ALL] query', 'Rows in the first result that are not in the second.', 'SELECT EMP_ID FROM A EXCEPT SELECT EMP_ID FROM B'],
+['PIVOT', 'Clause', 'PIVOT (aggregate(col) FOR col IN (v1, v2, ...))', 'Turns row values into columns.', "SELECT * FROM EMPLOYEE_HOURS PIVOT (SUM(HOURS) FOR DEPARTMENT IN ('Sales', 'Ops'))"],
+['UNPIVOT', 'Clause', 'UNPIVOT (value_col FOR name_col IN (c1, c2, ...))', 'Turns columns into rows.', 'SELECT * FROM T UNPIVOT (AMOUNT FOR MONTH IN (JAN, FEB, MAR))'],
+['ROLLUP', 'Grouping', 'GROUP BY ROLLUP (a, b, ...)', 'Groups plus subtotals for each leading prefix and a grand total.', 'SELECT REGION, DEPARTMENT, SUM(HOURS) FROM EMPLOYEE_HOURS GROUP BY ROLLUP (REGION, DEPARTMENT)'],
+['CUBE', 'Grouping', 'GROUP BY CUBE (a, b, ...)', 'Subtotals for every combination of the listed columns.', 'SELECT REGION, DEPARTMENT, SUM(HOURS) FROM EMPLOYEE_HOURS GROUP BY CUBE (REGION, DEPARTMENT)'],
+['GROUPING SETS', 'Grouping', 'GROUP BY GROUPING SETS ((a, b), (a), ())', 'Computes several groupings in one query.', 'SELECT REGION, DEPARTMENT, SUM(HOURS) FROM EMPLOYEE_HOURS GROUP BY GROUPING SETS ((REGION), (DEPARTMENT), ())'],
+// ---- joins ----
+['INNER JOIN', 'Join', 'FROM a [INNER] JOIN b ON condition | USING (col)', 'Rows that match in both tables.', 'SELECT * FROM EMPLOYEE_HOURS h JOIN EMPLOYEES e ON h.EMP_ID = e.EMP_ID'],
+['LEFT JOIN', 'Join', 'FROM a LEFT [OUTER] JOIN b ON condition', 'All rows from the left table, matched rows from the right (NULL when none).', 'SELECT * FROM EMPLOYEES e LEFT JOIN EMPLOYEE_HOURS h ON h.EMP_ID = e.EMP_ID'],
+['RIGHT JOIN', 'Join', 'FROM a RIGHT [OUTER] JOIN b ON condition', 'All rows from the right table, matched rows from the left.', 'SELECT * FROM EMPLOYEE_HOURS h RIGHT JOIN EMPLOYEES e ON h.EMP_ID = e.EMP_ID'],
+['FULL JOIN', 'Join', 'FROM a FULL [OUTER] JOIN b ON condition', 'All rows from both tables, matched where possible.', 'SELECT * FROM A FULL JOIN B ON A.ID = B.ID'],
+['CROSS JOIN', 'Join', 'FROM a CROSS JOIN b', 'Every combination of rows (Cartesian product).', 'SELECT * FROM SIZES CROSS JOIN COLORS'],
+['NATURAL JOIN', 'Join', 'FROM a NATURAL JOIN b', 'Joins on every column name the two tables share.', 'SELECT * FROM EMPLOYEE_HOURS NATURAL JOIN EMPLOYEES'],
+['LATERAL', 'Join', 'FROM a, LATERAL (subquery using a) x', 'A subquery in FROM that can refer to columns of earlier tables.', 'SELECT * FROM EMPLOYEES e, LATERAL (SELECT MAX(HOURS) M FROM EMPLOYEE_HOURS h WHERE h.EMP_ID = e.EMP_ID) x'],
+// ---- operators / predicates ----
+['AND / OR / NOT', 'Operator', 'cond AND cond | cond OR cond | NOT cond', 'Combine or negate conditions.', "WHERE HOURS > 8 AND NOT (DEPARTMENT = 'Ops' OR DEPARTMENT = 'IT')"],
+['Arithmetic', 'Operator', 'a + b, a - b, a * b, a / b, a % b', 'Add, subtract, multiply, divide, remainder. + and - also work on dates with INTERVAL or a number of days.', 'SELECT HOURS * RATE AS PAY, WORK_DATE + 7 AS NEXT_WEEK FROM EMPLOYEE_HOURS'],
+['|| (concatenate)', 'Operator', "text || text", 'Joins text values.', "SELECT FIRST_NAME || ' ' || LAST_NAME AS NAME FROM EMPLOYEES"],
+['Comparison', 'Operator', '=, <>, !=, <, <=, >, >=', 'Compares two values. Comparing with NULL gives NULL.', 'WHERE HOURS >= 40'],
+['BETWEEN', 'Predicate', 'expr [NOT] BETWEEN low AND high', 'True when the value is in the range (inclusive).', "WHERE WORK_DATE BETWEEN DATE '2026-01-01' AND DATE '2026-03-31'"],
+['IN', 'Predicate', 'expr [NOT] IN (v1, v2, ...) | IN (subquery)', 'True when the value equals one in the list or subquery.', "WHERE DEPARTMENT IN ('Sales', 'Ops')"],
+['LIKE', 'Predicate', "expr [NOT] LIKE 'pattern'", 'Pattern match: % = any text, _ = one character. Case sensitive.', "WHERE LAST_NAME LIKE 'Mc%'"],
+['ILIKE', 'Predicate', "expr [NOT] ILIKE 'pattern'", 'LIKE that ignores case.', "WHERE EMAIL ILIKE '%@GMAIL.COM'"],
+['IS NULL', 'Predicate', 'expr IS [NOT] NULL', 'Tests for missing values.', 'WHERE END_DATE IS NULL'],
+['IS DISTINCT FROM', 'Predicate', 'a IS [NOT] DISTINCT FROM b', 'Null-safe comparison: two NULLs count as equal.', 'WHERE OLD_RATE IS DISTINCT FROM NEW_RATE'],
+['EXISTS', 'Predicate', '[NOT] EXISTS (subquery)', 'True when the subquery returns at least one row.', 'SELECT * FROM EMPLOYEES e WHERE EXISTS (SELECT 1 FROM EMPLOYEE_HOURS h WHERE h.EMP_ID = e.EMP_ID)'],
+['ANY / SOME / ALL', 'Predicate', 'expr op ANY | SOME | ALL (subquery)', 'Compares a value to every row of a subquery: ANY/SOME = at least one, ALL = every one.', 'WHERE HOURS > ALL (SELECT HOURS FROM EMPLOYEE_HOURS WHERE DEPARTMENT = \'IT\')'],
+['CASE', 'Expression', 'CASE WHEN cond THEN v [WHEN ...] [ELSE v] END\nCASE expr WHEN val THEN v ... END', 'Conditional value.', "SELECT CASE WHEN HOURS > 40 THEN 'Overtime' ELSE 'Regular' END AS KIND FROM EMPLOYEE_HOURS"],
+['CAST', 'Expression', 'CAST(expr AS type) | expr::type', 'Converts to another type (INTEGER, BIGINT, DOUBLE, DECIMAL, VARCHAR, DATE, TIMESTAMP, BOOLEAN ...). Fails on bad values.', "SELECT CAST(EMP_ID AS VARCHAR), '2026-01-31'::DATE"],
+['TRY_CAST', 'Expression', 'TRY_CAST(expr AS type)', 'Like CAST but returns NULL instead of failing.', "SELECT TRY_CAST(RAW_HOURS AS DOUBLE) FROM EMPLOYEE_HOURS"],
+['EXTRACT', 'Expression', 'EXTRACT(part FROM date)', 'A part of a date or timestamp (YEAR, MONTH, DAY, HOUR, ...).', 'SELECT EXTRACT(YEAR FROM WORK_DATE) FROM EMPLOYEE_HOURS'],
+['INTERVAL', 'Expression', "INTERVAL 'n' unit | INTERVAL n unit", 'A time span to add to or subtract from dates.', "SELECT WORK_DATE + INTERVAL 30 DAY FROM EMPLOYEE_HOURS"],
+['Literals', 'Expression', "'text', 123, 1.5, TRUE, FALSE, NULL, DATE 'yyyy-mm-dd', TIMESTAMP 'yyyy-mm-dd hh:mm:ss'", 'Constant values.', "SELECT DATE '2026-01-01', TRUE, NULL"],
+['Scalar subquery', 'Expression', '(SELECT one_value ...)', 'A subquery returning one row and one column, used as a value. More than one row is an error.', 'SELECT EMP_ID, HOURS - (SELECT AVG(HOURS) FROM EMPLOYEE_HOURS) AS DIFF FROM EMPLOYEE_HOURS'],
+// ---- aggregates ----
+['COUNT', 'Aggregate', 'COUNT(*) | COUNT([DISTINCT] expr)', 'Number of rows, or of non-NULL (distinct) values.', 'SELECT COUNT(*), COUNT(DISTINCT EMP_ID) FROM EMPLOYEE_HOURS'],
+['SUM', 'Aggregate', 'SUM(expr)', 'Total of the values. FSUM / SUMKAHAN / KAHAN_SUM are more precise for floats.', 'SELECT SUM(HOURS) FROM EMPLOYEE_HOURS'],
+['AVG / MEAN', 'Aggregate', 'AVG(expr)', 'Average of the values.', 'SELECT AVG(HOURS) FROM EMPLOYEE_HOURS'],
+['MIN / MAX', 'Aggregate', 'MIN(expr), MAX(expr)', 'Smallest / largest value.', 'SELECT MIN(WORK_DATE), MAX(WORK_DATE) FROM EMPLOYEE_HOURS'],
+['MEDIAN', 'Aggregate', 'MEDIAN(expr)', 'Middle value.', 'SELECT MEDIAN(HOURS) FROM EMPLOYEE_HOURS'],
+['MODE', 'Aggregate', 'MODE(expr)', 'Most frequent value.', 'SELECT MODE(DEPARTMENT) FROM EMPLOYEE_HOURS'],
+['QUANTILE_CONT / QUANTILE', 'Aggregate', 'QUANTILE_CONT(expr, fraction)', 'Interpolated quantile (0.9 = 90th percentile).', 'SELECT QUANTILE_CONT(HOURS, 0.9) FROM EMPLOYEE_HOURS'],
+['QUANTILE_DISC', 'Aggregate', 'QUANTILE_DISC(expr, fraction)', 'Quantile that returns an actual value from the data.', 'SELECT QUANTILE_DISC(HOURS, 0.5) FROM EMPLOYEE_HOURS'],
+['STDDEV / STDDEV_SAMP / STDDEV_POP', 'Aggregate', 'STDDEV(expr)', 'Standard deviation (sample, or population with _POP).', 'SELECT STDDEV(HOURS) FROM EMPLOYEE_HOURS'],
+['VARIANCE / VAR_SAMP / VAR_POP', 'Aggregate', 'VARIANCE(expr)', 'Variance (sample, or population with _POP).', 'SELECT VAR_POP(HOURS) FROM EMPLOYEE_HOURS'],
+['STRING_AGG / GROUP_CONCAT / LISTAGG', 'Aggregate', "STRING_AGG(expr, 'separator' [ORDER BY ...])", 'Joins the group\'s text values into one string.', "SELECT DEPARTMENT, STRING_AGG(LAST_NAME, ', ') FROM EMPLOYEES GROUP BY DEPARTMENT"],
+['FIRST / LAST / ANY_VALUE / ARBITRARY', 'Aggregate', 'FIRST(expr), LAST(expr), ANY_VALUE(expr)', 'A value from the group (first, last, or any).', 'SELECT EMP_ID, ANY_VALUE(LAST_NAME) FROM EMPLOYEE_HOURS GROUP BY EMP_ID'],
+['COUNT_IF / COUNTIF', 'Aggregate', 'COUNT_IF(condition)', 'Number of rows where the condition is true.', 'SELECT COUNT_IF(HOURS > 40) FROM EMPLOYEE_HOURS'],
+['BOOL_AND / BOOL_OR', 'Aggregate', 'BOOL_AND(cond), BOOL_OR(cond)', 'True if the condition holds for every / any row.', 'SELECT BOOL_OR(HOURS > 12) FROM EMPLOYEE_HOURS'],
+['PRODUCT', 'Aggregate', 'PRODUCT(expr)', 'Multiplies the values together.', 'SELECT PRODUCT(1 + RATE_CHANGE) FROM RATES'],
+['APPROX_COUNT_DISTINCT', 'Aggregate', 'APPROX_COUNT_DISTINCT(expr)', 'Number of distinct values.', 'SELECT APPROX_COUNT_DISTINCT(EMP_ID) FROM EMPLOYEE_HOURS'],
+['FILTER', 'Aggregate', 'aggregate(expr) FILTER (WHERE condition)', 'Applies an aggregate only to rows matching the condition.', "SELECT SUM(HOURS) FILTER (WHERE DEPARTMENT = 'Ops') FROM EMPLOYEE_HOURS"],
+// ---- window ----
+['OVER', 'Window', 'func(...) OVER ([PARTITION BY ...] [ORDER BY ...] [ROWS|RANGE BETWEEN ... AND ...])', 'Computes a function over a window of related rows without collapsing them. Any aggregate can be used with OVER.', 'SELECT EMP_ID, HOURS, SUM(HOURS) OVER (PARTITION BY EMP_ID ORDER BY WORK_DATE ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS RUNNING FROM EMPLOYEE_HOURS'],
+['ROW_NUMBER', 'Window', 'ROW_NUMBER() OVER (...)', 'Sequential number 1, 2, 3 ... within the window.', 'SELECT ROW_NUMBER() OVER () AS ID, * FROM EMPLOYEE_HOURS'],
+['RANK', 'Window', 'RANK() OVER (ORDER BY ...)', 'Rank with gaps after ties (1, 1, 3).', 'SELECT EMP_ID, RANK() OVER (ORDER BY HOURS DESC) FROM EMPLOYEE_HOURS'],
+['DENSE_RANK', 'Window', 'DENSE_RANK() OVER (ORDER BY ...)', 'Rank without gaps (1, 1, 2).', 'SELECT EMP_ID, DENSE_RANK() OVER (ORDER BY HOURS DESC) FROM EMPLOYEE_HOURS'],
+['PERCENT_RANK', 'Window', 'PERCENT_RANK() OVER (ORDER BY ...)', 'Relative rank from 0 to 1.', 'SELECT PERCENT_RANK() OVER (ORDER BY HOURS) FROM EMPLOYEE_HOURS'],
+['CUME_DIST', 'Window', 'CUME_DIST() OVER (ORDER BY ...)', 'Fraction of rows at or below this one.', 'SELECT CUME_DIST() OVER (ORDER BY HOURS) FROM EMPLOYEE_HOURS'],
+['NTILE', 'Window', 'NTILE(n) OVER (ORDER BY ...)', 'Splits rows into n roughly equal buckets numbered 1..n.', 'SELECT EMP_ID, NTILE(4) OVER (ORDER BY HOURS) AS QUARTILE FROM EMPLOYEE_HOURS'],
+['LAG', 'Window', 'LAG(expr [, offset [, default]]) OVER (...)', 'Value from a previous row.', 'SELECT WORK_DATE, HOURS - LAG(HOURS) OVER (PARTITION BY EMP_ID ORDER BY WORK_DATE) FROM EMPLOYEE_HOURS'],
+['LEAD', 'Window', 'LEAD(expr [, offset [, default]]) OVER (...)', 'Value from a following row.', 'SELECT WORK_DATE, LEAD(WORK_DATE) OVER (PARTITION BY EMP_ID ORDER BY WORK_DATE) FROM EMPLOYEE_HOURS'],
+['FIRST_VALUE / LAST_VALUE', 'Window', 'FIRST_VALUE(expr) OVER (...)', 'First / last value in the window frame.', 'SELECT FIRST_VALUE(HOURS) OVER (PARTITION BY EMP_ID ORDER BY WORK_DATE) FROM EMPLOYEE_HOURS'],
+// ---- math ----
+['ABS', 'Math', 'ABS(x)', 'Absolute value.', 'SELECT ABS(-5)  -- 5'],
+['ROUND', 'Math', 'ROUND(x [, decimals])', 'Rounds to the given decimals (default 0). ROUND_EVEN rounds halves to even.', 'SELECT ROUND(HOURS * RATE, 2) FROM EMPLOYEE_HOURS'],
+['FLOOR / CEIL / CEILING', 'Math', 'FLOOR(x), CEIL(x)', 'Round down / up to a whole number.', 'SELECT FLOOR(7.8), CEIL(7.2)  -- 7, 8'],
+['TRUNC', 'Math', 'TRUNC(x)', 'Drops the fractional part.', 'SELECT TRUNC(-7.8)  -- -7'],
+['EVEN', 'Math', 'EVEN(x)', 'Rounds away from zero to the next even number.', 'SELECT EVEN(2.1)  -- 4'],
+['SQRT / CBRT', 'Math', 'SQRT(x), CBRT(x)', 'Square root / cube root.', 'SELECT SQRT(16), CBRT(27)'],
+['POW / POWER', 'Math', 'POW(x, y)', 'x raised to the power y.', 'SELECT POWER(2, 10)  -- 1024'],
+['MOD / FMOD', 'Math', 'MOD(x, y)', 'Remainder of x / y.', 'SELECT MOD(17, 5)  -- 2'],
+['EXP / LN / LOG / LOG10 / LOG2', 'Math', 'EXP(x), LN(x), LOG(x), LOG2(x)', 'e^x, natural log, base-10 log (LOG and LOG10), base-2 log.', 'SELECT LN(EXP(1)), LOG10(1000)'],
+['SIGN', 'Math', 'SIGN(x)', '-1, 0 or 1 by the sign of x.', 'SELECT SIGN(-3)'],
+['PI', 'Math', 'PI()', '3.14159...', 'SELECT PI() * R * R FROM CIRCLES'],
+['RANDOM', 'Math', 'RANDOM()', 'Random number from 0 to 1.', 'SELECT * FROM EMPLOYEE_HOURS ORDER BY RANDOM() LIMIT 100'],
+['SIN / COS / TAN / ASIN / ACOS / ATAN / ATAN2', 'Math', 'SIN(x), ATAN2(y, x)', 'Trigonometry in radians.', 'SELECT SIN(RADIANS(30))'],
+['DEGREES / RADIANS', 'Math', 'DEGREES(x), RADIANS(x)', 'Converts between radians and degrees.', 'SELECT DEGREES(PI())  -- 180'],
+['GREATEST / LEAST', 'Math', 'GREATEST(a, b, ...), LEAST(a, b, ...)', 'Largest / smallest of the arguments.', 'SELECT GREATEST(HOURS, 0), LEAST(HOURS, 12) FROM EMPLOYEE_HOURS'],
+['HASH', 'Math', 'HASH(a [, b, ...])', 'A 64-bit hash of the values (for keys or sampling).', 'SELECT HASH(EMP_ID, WORK_DATE) AS ROW_KEY FROM EMPLOYEE_HOURS'],
+// ---- text ----
+['LOWER / LCASE', 'Text', 'LOWER(text)', 'Lower case.', "SELECT LOWER('ABC')  -- abc"],
+['UPPER / UCASE', 'Text', 'UPPER(text)', 'Upper case.', "SELECT UPPER(LAST_NAME) FROM EMPLOYEES"],
+['TRIM / LTRIM / RTRIM', 'Text', 'TRIM(text)', 'Removes spaces from both ends / the left / the right.', "SELECT TRIM('  hi  ')  -- 'hi'"],
+['LENGTH / LEN / CHAR_LENGTH / STRLEN', 'Text', 'LENGTH(text)', 'Number of characters.', "SELECT LENGTH('hello')  -- 5"],
+['SUBSTRING / SUBSTR', 'Text', 'SUBSTRING(text, start [, length])', 'Part of a text, start is 1-based (negative counts from the end).', "SELECT SUBSTRING('ABCDEF', 2, 3)  -- 'BCD'"],
+['LEFT / RIGHT', 'Text', 'LEFT(text, n), RIGHT(text, n)', 'First / last n characters.', "SELECT LEFT(ZIP, 3) FROM EMPLOYEES"],
+['REPLACE', 'Text', 'REPLACE(text, find, replacement)', 'Replaces every occurrence.', "SELECT REPLACE(PHONE, '-', '') FROM EMPLOYEES"],
+['CONCAT', 'Text', 'CONCAT(a, b, ...)', 'Joins values as text (NULLs are skipped).', "SELECT CONCAT(FIRST_NAME, ' ', LAST_NAME) FROM EMPLOYEES"],
+['CONCAT_WS', 'Text', 'CONCAT_WS(separator, a, b, ...)', 'Joins values with a separator, skipping NULLs.', "SELECT CONCAT_WS(', ', CITY, STATE, ZIP) FROM EMPLOYEES"],
+['CONTAINS', 'Text', 'CONTAINS(text, search)', 'True when text contains search.', "WHERE CONTAINS(EMAIL, '@')"],
+['STARTS_WITH / PREFIX', 'Text', 'STARTS_WITH(text, prefix)', 'True when text begins with prefix.', "WHERE STARTS_WITH(EMP_ID, 'TMP')"],
+['ENDS_WITH / SUFFIX', 'Text', 'ENDS_WITH(text, suffix)', 'True when text ends with suffix.', "WHERE ENDS_WITH(FILE_NAME, '.csv')"],
+['STRPOS / INSTR / POSITION', 'Text', 'STRPOS(text, search)', '1-based position of search in text, 0 when absent.', "SELECT STRPOS(EMAIL, '@') FROM EMPLOYEES"],
+['SPLIT_PART', 'Text', 'SPLIT_PART(text, delimiter, n)', 'The n-th piece (1-based) after splitting on delimiter.', "SELECT SPLIT_PART(EMAIL, '@', 2) AS DOMAIN FROM EMPLOYEES"],
+['LPAD / RPAD', 'Text', 'LPAD(text, length, fill)', 'Pads text on the left / right to the length.', "SELECT LPAD(CAST(EMP_ID AS VARCHAR), 6, '0')  -- 000042"],
+['REPEAT', 'Text', 'REPEAT(text, n)', 'Text repeated n times.', "SELECT REPEAT('-', 20)"],
+['REVERSE', 'Text', 'REVERSE(text)', 'Characters in reverse order.', "SELECT REVERSE('abc')  -- 'cba'"],
+['REGEXP_MATCHES', 'Text', 'REGEXP_MATCHES(text, pattern)', 'True when the regular expression matches anywhere in text.', "WHERE REGEXP_MATCHES(PHONE, '^[0-9]{3}-')"],
+['REGEXP_FULL_MATCH', 'Text', 'REGEXP_FULL_MATCH(text, pattern)', 'True when the regular expression matches the whole text.', "WHERE REGEXP_FULL_MATCH(ZIP, '[0-9]{5}')"],
+['REGEXP_EXTRACT', 'Text', 'REGEXP_EXTRACT(text, pattern [, group])', 'The matched text (or a capture group), empty when no match.', "SELECT REGEXP_EXTRACT(EMAIL, '@(.+)$', 1) FROM EMPLOYEES"],
+['REGEXP_REPLACE', 'Text', "REGEXP_REPLACE(text, pattern, replacement [, 'g'])", "Replaces the first match, or every match with 'g'. \\1 in the replacement refers to a group.", "SELECT REGEXP_REPLACE(PHONE, '[^0-9]', '', 'g') FROM EMPLOYEES"],
+['MD5', 'Text', 'MD5(text)', 'MD5 hash as hex text.', 'SELECT MD5(EMAIL) FROM EMPLOYEES'],
+['TO_JSON', 'Text', 'TO_JSON(text)', 'Text as a JSON string literal (quoted and escaped).', "SELECT TO_JSON('say \"hi\"')"],
+// ---- null / logic ----
+['COALESCE / IFNULL', 'Null & logic', 'COALESCE(a, b, ...)', 'First non-NULL argument.', "SELECT COALESCE(NICKNAME, FIRST_NAME) FROM EMPLOYEES"],
+['NULLIF', 'Null & logic', 'NULLIF(a, b)', 'NULL when a = b, otherwise a (handy to avoid divide by zero).', 'SELECT PAY / NULLIF(HOURS, 0) FROM EMPLOYEE_HOURS'],
+['IF / IFF', 'Null & logic', 'IF(condition, then, else)', 'Short CASE with one condition.', "SELECT IF(HOURS > 40, 'OT', 'REG') FROM EMPLOYEE_HOURS"],
+['CHOOSE', 'Null & logic', 'CHOOSE(k, v1, v2, ...)', 'The k-th value (1-based), NULL when out of range.', "SELECT CHOOSE(QUARTER(WORK_DATE), 'Q1', 'Q2', 'Q3', 'Q4') FROM EMPLOYEE_HOURS"],
+['TYPEOF', 'Null & logic', 'TYPEOF(expr)', 'Name of the value\'s data type.', 'SELECT TYPEOF(HOURS) FROM EMPLOYEE_HOURS LIMIT 1'],
+// ---- dates ----
+['CURRENT_DATE / TODAY', 'Date', 'CURRENT_DATE | TODAY()', "Today's date (UTC).", 'SELECT CURRENT_DATE'],
+['NOW / CURRENT_TIMESTAMP', 'Date', 'NOW() | CURRENT_TIMESTAMP', 'Current date and time (UTC).', 'SELECT NOW()'],
+['YEAR / MONTH / DAY / QUARTER', 'Date', 'YEAR(d), MONTH(d), DAY(d), QUARTER(d)', 'Parts of a date. DAYOFMONTH = DAY.', 'SELECT YEAR(WORK_DATE), MONTH(WORK_DATE) FROM EMPLOYEE_HOURS'],
+['HOUR / MINUTE / SECOND / MILLISECOND', 'Date', 'HOUR(ts), MINUTE(ts), SECOND(ts), MILLISECOND(ts)', 'Parts of a timestamp.', 'SELECT HOUR(CLOCK_IN) FROM EMPLOYEE_HOURS'],
+['DAYOFWEEK / DOW / ISODOW', 'Date', 'DAYOFWEEK(d), ISODOW(d)', 'Day of week: DOW 0 = Sunday .. 6; ISODOW 1 = Monday .. 7.', 'SELECT ISODOW(WORK_DATE) FROM EMPLOYEE_HOURS'],
+['DAYOFYEAR / DOY', 'Date', 'DAYOFYEAR(d)', 'Day number in the year (1..366).', 'SELECT DAYOFYEAR(WORK_DATE) FROM EMPLOYEE_HOURS'],
+['WEEK / WEEKOFYEAR / YEARWEEK', 'Date', 'WEEK(d), YEARWEEK(d)', 'ISO week number; YEARWEEK = year * 100 + week.', 'SELECT YEARWEEK(WORK_DATE) FROM EMPLOYEE_HOURS'],
+['EPOCH', 'Date', 'EPOCH(d)', 'Seconds since 1970-01-01.', 'SELECT EPOCH(CLOCK_IN) FROM EMPLOYEE_HOURS'],
+['MONTHNAME / DAYNAME', 'Date', 'MONTHNAME(d), DAYNAME(d)', 'Month / weekday name (January, Monday ...).', 'SELECT DAYNAME(WORK_DATE) FROM EMPLOYEE_HOURS'],
+['DATE_PART / DATEPART', 'Date', "DATE_PART('part', d)", "A named part: 'year', 'quarter', 'month', 'day', 'dow', 'isodow', 'doy', 'week', 'hour', 'minute', 'second', 'millisecond', 'epoch'.", "SELECT DATE_PART('month', WORK_DATE) FROM EMPLOYEE_HOURS"],
+['DATE_TRUNC / DATETRUNC', 'Date', "DATE_TRUNC('part', d)", "Rounds down to the start of the 'year', 'quarter', 'month', 'week' (Monday), 'day', 'hour', 'minute' or 'second'.", "SELECT DATE_TRUNC('month', WORK_DATE) AS MONTH, SUM(HOURS) FROM EMPLOYEE_HOURS GROUP BY 1"],
+['DATE_DIFF / DATEDIFF / DATE_SUB', 'Date', "DATE_DIFF('part', start, end)", "Whole units from start to end: 'year', 'quarter', 'month', 'week', 'day', 'hour', 'minute', 'second'.", "SELECT DATE_DIFF('day', HIRE_DATE, CURRENT_DATE) AS DAYS_EMPLOYED FROM EMPLOYEES"],
+['DATE_ADD', 'Date', 'DATE_ADD(d, n | INTERVAL)', 'Adds days (a number) or an INTERVAL to a date.', 'SELECT DATE_ADD(WORK_DATE, 14) FROM EMPLOYEE_HOURS'],
+['ADD_DAYS / ADD_SECONDS', 'Date', 'ADD_DAYS(d, n), ADD_SECONDS(ts, n)', 'Adds days / seconds (fractions allowed), returns a timestamp.', 'SELECT ADD_DAYS(CLOCK_IN, 0.5) FROM EMPLOYEE_HOURS'],
+['MAKE_DATE', 'Date', 'MAKE_DATE(year, month, day)', 'Builds a date from numbers.', 'SELECT MAKE_DATE(2026, 10, 8)'],
+['LAST_DAY', 'Date', 'LAST_DAY(d)', 'Last day of the date\'s month.', 'SELECT LAST_DAY(WORK_DATE) FROM EMPLOYEE_HOURS'],
+['STRFTIME', 'Date', "STRFTIME(d, 'format')", 'Formats a date as text: %Y year, %m month, %d day, %H hour, %M minute, %S second, %b / %B month name, %a / %A day name.', "SELECT STRFTIME(WORK_DATE, '%Y-%m') FROM EMPLOYEE_HOURS"],
+['STRPTIME', 'Date', "STRPTIME(text, 'format')", 'Parses text into a timestamp using % codes; fails when it does not match.', "SELECT STRPTIME('10/08/2026', '%m/%d/%Y')"],
+['TRY_STRPTIME', 'Date', "TRY_STRPTIME(text, 'format')", 'Like STRPTIME but returns NULL when the text does not match.', "SELECT TRY_STRPTIME(RAW_DATE, '%m/%d/%Y') FROM IMPORTS"],
+// ---- script statements ----
+['CREATE TABLE', 'Statement', 'CREATE [TEMP] TABLE name (col type [PRIMARY KEY|NOT NULL|UNIQUE|DEFAULT v|CHECK (...)], ...)\nCREATE [OR REPLACE] TABLE name AS query', 'Creates a session table (lives while the script runs).', 'CREATE TABLE T AS SELECT * FROM EMPLOYEE_HOURS WHERE HOURS > 0;\nSELECT * FROM T'],
+['CREATE VIEW', 'Statement', 'CREATE [OR REPLACE] VIEW name AS query', 'A named query used by later statements.', 'CREATE VIEW OT AS SELECT * FROM EMPLOYEE_HOURS WHERE HOURS > 40;\nSELECT COUNT(*) FROM OT'],
+['DROP', 'Statement', 'DROP TABLE | VIEW | INDEX [IF EXISTS] name', 'Removes a session table, view or index.', 'DROP TABLE IF EXISTS T'],
+['ALTER TABLE', 'Statement', 'ALTER TABLE t ADD [COLUMN] col type | DROP [COLUMN] col | RENAME COLUMN a TO b | ALTER COLUMN col TYPE type | RENAME TO new', 'Changes a session table\'s columns or name.', 'ALTER TABLE T ADD COLUMN PAY DOUBLE;\nALTER TABLE T RENAME COLUMN HRS TO HOURS'],
+['INSERT', 'Statement', 'INSERT [OR REPLACE|OR IGNORE] INTO t [(cols)] VALUES (...), ... | query | DEFAULT VALUES\n  [ON CONFLICT (key) DO UPDATE SET ... | DO NOTHING] [ON DUPLICATE KEY UPDATE ...]', 'Adds rows; upsert with ON CONFLICT / ON DUPLICATE KEY.', "INSERT INTO T (EMP_ID, HOURS) VALUES (1, 8), (2, 7.5)"],
+['SELECT INTO', 'Statement', 'SELECT ... INTO new_table FROM ...', 'Creates a table from a query (SQL Server style).', 'SELECT * INTO T FROM EMPLOYEE_HOURS WHERE HOURS > 0'],
+['UPDATE', 'Statement', 'UPDATE t SET col = expr, ... [FROM other] [WHERE condition]', 'Changes values in matching rows.', "UPDATE T SET HOURS = 0 WHERE HOURS < 0"],
+['DELETE', 'Statement', 'DELETE FROM t [WHERE condition]', 'Removes matching rows.', 'DELETE FROM T WHERE EMP_ID IS NULL'],
+['TRUNCATE', 'Statement', 'TRUNCATE [TABLE] t', 'Removes all rows.', 'TRUNCATE TABLE T'],
+['MERGE', 'Statement', 'MERGE INTO target USING source ON condition\n  WHEN MATCHED THEN UPDATE SET ... | DELETE\n  WHEN NOT MATCHED THEN INSERT (cols) VALUES (...)', 'Updates, deletes or inserts target rows based on a source.', 'MERGE INTO T USING NEW_HOURS n ON T.EMP_ID = n.EMP_ID\nWHEN MATCHED THEN UPDATE SET HOURS = n.HOURS\nWHEN NOT MATCHED THEN INSERT (EMP_ID, HOURS) VALUES (n.EMP_ID, n.HOURS)'],
+['CREATE INDEX', 'Statement', 'CREATE [UNIQUE] [CLUSTERED|NONCLUSTERED] INDEX name ON t (col, ...)', 'Creates an index on a session table (UNIQUE enforces unique keys).', 'CREATE UNIQUE INDEX IX_EMP ON T (EMP_ID)'],
+['BEGIN / COMMIT / ROLLBACK', 'Statement', 'BEGIN [TRANSACTION]; ...; COMMIT | ROLLBACK', 'Groups statements; ROLLBACK undoes changes since BEGIN.', 'BEGIN;\nDELETE FROM T WHERE HOURS = 0;\nCOMMIT'],
+['TRY / CATCH', 'Statement', 'BEGIN TRY ... END TRY BEGIN CATCH ... END CATCH', 'Runs the CATCH block when a statement in TRY fails. ERROR_MESSAGE(), ERROR_NUMBER(), ERROR_SEVERITY(), ERROR_STATE() describe the error.', "BEGIN TRY\n  INSERT INTO T VALUES (1, 'x');\nEND TRY\nBEGIN CATCH\n  CREATE TABLE ERR AS SELECT ERROR_MESSAGE() AS MSG;\nEND CATCH"],
+['THROW / RAISERROR', 'Statement', "THROW number, 'message', state | RAISERROR('message', severity, state)", 'Stops the script with an error (caught by CATCH if inside TRY).', "THROW 50001, 'No rows to process', 1"],
+['ERROR_MESSAGE / ERROR_NUMBER / ERROR_SEVERITY / ERROR_STATE', 'Statement', 'ERROR_MESSAGE()', 'Inside a CATCH block: details of the error; NULL elsewhere.', 'SELECT ERROR_MESSAGE()'],
+['Script (;)', 'Statement', 'statement; statement; ... SELECT ...', 'Statements separated by ; run in order. The result is the final SELECT (or the last table created or changed).', 'CREATE TABLE T AS SELECT * FROM EMPLOYEE_HOURS;\nUPDATE T SET HOURS = 0 WHERE HOURS IS NULL;\nSELECT * FROM T'],
+['Comments', 'Statement', '-- line comment\n/* block comment */', 'Ignored text.', 'SELECT 1 -- one'],
+].map(([n, c, s, d, x]) => ({ n, c, s, d, x })).sort((a, b) => a.n.localeCompare(b.n, undefined, { sensitivity: 'base' }));
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const cats = [...new Set(L.map(e => e.c))].sort();
+const $ = id => document.getElementById(id);
+let cat = cats[0];   // section shown on the right (when not searching)
+const open = new Set();   // expanded sections in the left tree (when not searching)
+// Tree: a section click toggles it and shows it on the right; an entry click shows its section and scrolls to it.
+$('cats').onclick = ev => {
+  const k = ev.target.closest('[data-n]'), g = ev.target.closest('[data-c]'); if (!g) return;
+  const c = g.dataset.c;
+  if (k) { if (!$('q').value.trim()) { cat = c; draw(); } document.querySelector(`.e[data-n="${CSS.escape(k.dataset.n)}"]`)?.scrollIntoView(); return; }
+  open.has(c) ? open.delete(c) : open.add(c); cat = c; draw(); $('list').scrollTop = 0;
+};
+
+// Search: every word must appear somewhere in the entry. Sections with hits open in the tree, everything else is hidden,
+// and the right shows every hit under its section heading.
+function draw() {
+  const words = $('q').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const rx = words.length ? new RegExp('(' + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi') : null;
+  const hl = s => rx ? esc(s).replace(rx, '<mark>$1</mark>') : esc(s);
+  const hit = e => words.every(w => (e.n + ' ' + e.c + ' ' + e.s + ' ' + e.d + ' ' + e.x).toLowerCase().includes(w));
+  const by = cats.map(c => [c, L.filter(e => e.c === c && hit(e))]).filter(([, es]) => es.length);
+  $('cats').innerHTML = by.map(([c, es]) => `<div class="grp${words.length || open.has(c) ? ' open' : ''}" data-c="${esc(c)}"><div class="node${!words.length && c === cat ? ' on' : ''}">${Icons.caret(0, 'tw')}<span>${hl(c)}</span><small>${es.length}</small></div><div class="kids">${
+    es.map(e => `<div class="node" data-n="${esc(e.n)}"><span>${hl(e.n)}</span></div>`).join('')}</div></div>`).join('');
+  const show = words.length ? by : by.filter(([c]) => c === cat);
+  $('list').innerHTML = show.map(([c, es]) => (words.length ? `<h2>${esc(c)}</h2>` : '') +es.map(e => `<div class="e" data-n="${esc(e.n)}"><h3>${hl(e.n)}</h3><p>${hl(e.d)}</p>
+    <div class="lbl">Syntax</div><pre class="syn">${hl(e.s)}</pre><button class="ghost cp" data-x="${esc(e.s)}">Copy</button>
+    <div class="lbl">Example</div><pre>${hl(e.x)}</pre><button class="ghost cp" data-x="${esc(e.x)}">Copy</button></div>`).join('')).join('') || '<div class="empty">No matches.</div>';
+}
+$('list').onclick = ev => { const b = ev.target.closest('[data-x]'); if (!b) return; navigator.clipboard.writeText(b.dataset.x).then(() => { b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1000); }); };
+// Searching scrolls the right side to the first match.
+$('q').oninput = () => { draw(); const m = $('list').querySelector('mark'); m ? m.scrollIntoView({ block: 'center' }) : $('list').scrollTop = 0; };
+// Ctrl + wheel scrolls 4x faster instead of zooming (the global rule from ui/js/core/embed.js, which this window does not load).
+addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); (e.target.closest('.tree, .main') || $('list')).scrollBy({ top: e.deltaY * 4 }); }, { passive: false });
+draw();
+</script>
+</body>
+</html>

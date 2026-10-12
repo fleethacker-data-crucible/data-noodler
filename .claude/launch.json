@@ -2,6 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     { "name": "static-test", "runtimeExecutable": "python", "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1"], "port": 8765 },
-    { "name": "data-noodler", "runtimeExecutable": "powershell.exe", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".server/server.ps1"], "port": 8079 }
+    { "name": "data-noodler", "runtimeExecutable": "powershell.exe", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "server/server.ps1"], "port": 8079 }
   ]
 }

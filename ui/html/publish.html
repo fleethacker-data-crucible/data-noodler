@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Publish</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  #pubs th.sel, #pubs td.sel { width: 1%; text-align: center; }
+  .opts { display: grid; gap: 6px; }
+  .tgts { display: grid; gap: 10px; }
+  .tgt { display: flex; align-items: flex-start; gap: 8px; }
+  .tgt label { flex: 1; display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .tgt label small { display: block; color: var(--muted); }
+  .tgt button { padding: 2px 10px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><span class="logo">DN</span><div><h1 id="title">Publish</h1><div class="sub" id="sub"></div></div></div>
+  </header>
+  <div class="main stack">
+    <div class="grid2">
+      <section class="box stack">
+        <h3>Dashboard</h3>
+        <div class="muted">The current results in each ticked format, saved in the project's publish folder.</div>
+        <label class="field">Dashboard Name<input id="dName" type="text" spellcheck="false"></label>
+        <div class="tgts" id="tgts"></div>
+        <div class="row"><button id="pubDash">Publish</button></div>
+      </section>
+      <section class="box stack">
+        <h3>Datasets</h3>
+        <div class="muted">Copies of imported datasets for other tools.</div>
+        <div class="opts" id="dsOpts"></div>
+        <label class="field">Format<select id="fmt"><option value="csv">CSV (with header)</option><option value="parquet">Parquet (Snappy)</option><option value="sqlite">SQLite</option></select></label>
+        <button id="pubData">Export selected</button>
+      </section>
+    </div>
+    <h2 style="margin-top:20px">Published</h2>
+    <div class="row"><button id="openSel" disabled>Open Selected</button><button id="delSel" class="danger" hidden>Delete Selected</button></div>
+    <div id="pubs"></div>
+    <h2>Activity</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/module-page.js"></script>
+<script src="../js/publish/publisher.js"></script>
+<script>
+const { $, esc } = UI;
+let ctx;
+
+// ---- Published table: every dashboard file in <project>/publish (one row per file). Who / when comes from
+// publish/published.json ({ "<file name>": { by, at } }, written by Publish); files without an entry show their file time.
+const MANIFEST = () => Publisher.MANIFEST(ctx);
+const EXT = { html: 'Web App (.html)', jpg: 'Image (.jpg)', png: 'Image (.png)', webp: 'Image (.webp)', pdf: 'PDF (.pdf)', pptx: 'PowerPoint Slide' };
+async function listPubs() {
+  let items = [];
+  try { items = await DNFS.list(`${ctx.dir}/publish`); } catch {}
+  const man = await DNFS.readJSONOr(MANIFEST(), {});
+  const p2 = n => String(n).padStart(2, '0');
+  const rows = items.filter(f => !f.dir && EXT[f.name.split('.').pop().toLowerCase()]).map(f => {
+    const m = man[f.name] || {}, d = new Date(m.at || f.modified);
+    return { f, type: EXT[f.name.split('.').pop().toLowerCase()], by: m.by || '', d,
+      date: `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`, time: `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` };
+  }).sort((a, b) => b.d - a.d || a.f.name.localeCompare(b.f.name));
+  $('pubs').innerHTML = rows.length ? `<div class="table-wrap"><table class="grid"><thead><tr><th class="sel"><input type="checkbox" id="pubAll" title="Select all"></th><th>File Name</th><th>Type</th><th>Published By</th><th>Date</th><th>Time</th></tr></thead><tbody>${
+    rows.map(r => `<tr><td class="sel"><input type="checkbox" data-p="${esc(r.f.path)}"></td><td class="mono">${esc(r.f.name)}</td><td>${esc(r.type)}</td><td>${esc(r.by)}</td><td>${r.date}</td><td>${r.time}</td></tr>`).join('')}</tbody></table></div>`
+    : '<div class="muted">Nothing published yet.</div>';
+  pubSel();
+}
+const picked = () => [...$('pubs').querySelectorAll('tbody input:checked')].map(c => c.dataset.p);
+const pubSel = () => { const n = picked().length; $('openSel').disabled = !n; $('delSel').hidden = !n; };
+const openFile = async path => {
+  const res = await fetch(`/api/openfile?${new URLSearchParams({ path })}`, { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } });
+  if (res.status === 404) throw new Error('The server is out of date: restart it (Server Control) to enable Open.');
+  const r = await res.json().catch(() => ({ ok: false, error: `server answered ${res.status}` }));
+  if (!r.ok) throw new Error(`Open ${path.split('/').pop()}: ${r.error}`);
+};
+async function delFiles(paths) {
+  if (!await UI.confirm(paths.length === 1 ? `Delete ${paths[0].split('/').pop()}?` : `Delete ${paths.length} published files?`, { danger: true, ok: 'Delete' })) return;
+  const man = await DNFS.readJSONOr(MANIFEST(), {});
+  for (const p of paths) { await DNFS.remove(p); delete man[p.split('/').pop()]; ctx.log(`Deleted published file ${p}`); }
+  await DNFS.writeJSON(MANIFEST(), man);
+  listPubs();
+}
+$('pubs').onchange = ev => { if (ev.target.id === 'pubAll') for (const c of $('pubs').querySelectorAll('tbody input')) c.checked = ev.target.checked; pubSel(); };
+$('openSel').onclick = UI.guard(async () => { for (const p of picked()) await openFile(p); });
+$('delSel').onclick = UI.guard(async () => { const p = picked(); if (p.length) await delFiles(p); });
+
+// Publishing itself (dashboard formats, dataset exports) is shared with Update: ui/js/publish/publisher.js.
+const { nameStamp, STAMP, fixName, TARGETS, IMG_FMTS } = Publisher;
+const imgSettings = () => Publisher.imgSettings(ctx.cfg);
+let nameT;
+// Applies the name rules to a text box as it is typed in (also used by Image Settings' File Name); returns the value.
+function forceName(o) {
+  let p = o.selectionStart, v = fixName(o.value);
+  if (!STAMP.test(v)) { const s = nameStamp(), rest = v.replace(/^[\d_]*/, ''); p = Math.max(s.length, p + s.length - (v.length - rest.length)); v = s + rest; }
+  if (v !== o.value) { o.value = v; o.setSelectionRange(p, p); }
+  return v;
+}
+$('dName').oninput = () => {
+  const v = forceName($('dName'));
+  clearTimeout(nameT); nameT = setTimeout(UI.guard(async () => { ctx.cfg.publish = { ...(ctx.cfg.publish || {}), name: v.replace(STAMP, '') }; await Projects.save(ctx.cfg); }), 600);
+};
+const initName = () => { $('dName').value = nameStamp() + fixName(ctx.cfg.publish?.name || ''); };
+
+// ---- dashboard: every ticked format, drawn now (ui/js/publish/publisher.js) ----
+$('pubDash').onclick = UI.guard(async () => {
+  $('pubDash').disabled = true;
+  const st = ctx.step('Publishing the dashboard…');
+  try { await Publisher.dashboard(ctx, { name: $('dName').value }); st.done('Dashboard published'); }
+  catch (e) { st.fail(`Publish failed: ${e.message}`); throw e; }
+  finally { $('pubDash').disabled = false; }
+  UI.toast('Dashboard published', 'ok');
+  await listPubs();
+});
+// ---- Formats, saved in the project config as cfg.publish = { name, targets: [ids] }; all go to <project>/publish ----
+const showSettings = () => { for (const c of $('tgts').querySelectorAll('input')) $('tgts').querySelector(`[data-set="${c.value}"]`)?.toggleAttribute('hidden', !c.checked); };
+// Image settings, saved as cfg.publish.image = { name (after the stamp), formats: ['jpg'|'png'|'webp'], res: ['default'|'WxH'] }.
+async function imageDialog() {
+  const s = imgSettings(), dash = await DNFS.readJSONOr(`${ctx.dir}/dashboard/dashboard.json`, {});
+  const DW = (dash.cols || 48) * 30, DH = (dash.rows || 27) * 30;
+  const ck = (name, v, label, on) => `<label class="row" style="gap:8px"><input type="checkbox" name="${name}" value="${v}"${on ? ' checked' : ''}> ${label}</label>`;
+  const body = `<label class="field">File Name<span class="row" style="flex-wrap:nowrap"><input id="imgName" type="text" spellcheck="false" style="flex:1"><span id="imgExt" class="muted mono"></span></span></label>
+    <div class="field">File Format${IMG_FMTS.map(f => ck('fmt', f, '.' + f, s.formats.includes(f))).join('')}</div>
+    <div class="field">Resolutions${ck('res', 'default', `Default (${DW} × ${DH}, the dashboard's size)`, s.res.includes('default'))}</div>`;
+  const pend = UI.dialog('Image Settings', body, [{ label: 'Cancel', value: null, kind: 'ghost' }, { label: 'Save', value: f => ({
+    name: f.querySelector('#imgName').value.replace(STAMP, '').replace(/_+$/, ''),
+    formats: [...f.querySelectorAll('[name=fmt]:checked')].map(c => c.value), res: [...f.querySelectorAll('[name=res]:checked')].map(c => c.value) }) }]);
+  const d = [...document.querySelectorAll('dialog')].pop(), inp = d.querySelector('#imgName');
+  const ext = () => { d.querySelector('#imgExt').textContent = [...d.querySelectorAll('[name=fmt]:checked')].map(c => '.' + c.value).join(' ') || '(no format)'; };
+  inp.value = nameStamp() + fixName(s.name || ctx.cfg.publish?.name || ''); inp.oninput = () => forceName(inp); d.addEventListener('change', ext); ext();
+  const v = await pend;
+  if (!v) return;
+  if (!v.formats.length) throw new Error('Tick at least one image format.');
+  if (!v.res.length) throw new Error('Tick at least one resolution.');
+  ctx.cfg.publish = { ...(ctx.cfg.publish || {}), image: v }; await Projects.save(ctx.cfg);
+  ctx.log(`Image settings: ${v.formats.map(f => '.' + f).join(', ')} · ${v.res.join(', ')}`, 'ok');
+}
+// Format list on the page (between the name and the buttons); ticking saves right away.
+function renderTargets() {
+  // Older projects ticked jpg / png / webp separately: fold them into the one Image option (and its formats).
+  const old = (ctx.cfg.publish?.targets || []).filter(t => IMG_FMTS.includes(t));
+  if (old.length) ctx.cfg.publish = { ...ctx.cfg.publish, targets: [...ctx.cfg.publish.targets.filter(t => !IMG_FMTS.includes(t)), 'image'], image: { ...imgSettings(), formats: old } };
+  const on = new Set(ctx.cfg.publish?.targets || []);
+  $('tgts').innerHTML = TARGETS.map(t => `<div class="tgt"><label><input type="checkbox" value="${t.id}"${on.has(t.id) ? ' checked' : ''}><span>${esc(t.label)}<small>${esc(t.desc)}</small></span></label>${t.img ? `<button class="ghost" data-set="${t.id}">Settings</button>` : ''}</div>`).join('');
+  showSettings();
+}
+$('tgts').onchange = UI.guard(async () => {
+  showSettings();
+  ctx.cfg.publish = { ...(ctx.cfg.publish || {}), targets: [...$('tgts').querySelectorAll('input:checked')].map(c => c.value) };
+  await Projects.save(ctx.cfg);
+});
+$('tgts').onclick = UI.guard(async ev => { if (ev.target.closest('[data-set]')) await imageDialog(); });
+
+// ---- dataset exports ----
+$('pubData').onclick = UI.guard(async () => {
+  const names = [...document.querySelectorAll('#dsOpts input:checked')].map(c => c.value);
+  if (!names.length) throw new Error('Tick at least one dataset.');
+  const fmt = $('fmt').value;
+  // Remembered so Update exports the same datasets again.
+  ctx.cfg.publish = { ...(ctx.cfg.publish || {}), data: { names, fmt } }; await Projects.save(ctx.cfg);
+  $('pubData').disabled = true;
+  const st = ctx.step(`Exporting ${names.length} dataset(s) as ${fmt.toUpperCase()}…`);
+  try { await Publisher.data(ctx, { names, fmt }); st.done('Export finished'); }
+  catch (e) { st.fail(`Export failed: ${e.message}`); throw e; }
+  finally { $('pubData').disabled = false; }
+  UI.toast('Export finished', 'ok'); await listPubs();
+});
+(async () => {
+  const names = [...document.querySelectorAll('#dsOpts input:checked')].map(c => c.value);
+  if (!names.length) throw new Error('Tick at least one dataset.');
+  const fmt = $('fmt').value, dir = `${ctx.dir}/publish/data-${stamp()}`;
+  $('pubData').disabled = true;
+  try {
+    for (const n of names) {
+      const d = ctx.cfg.datasets.find(x => x.name === n), st = ctx.step(`Exporting ${n} as ${fmt.toUpperCase()}…`);
+      // One file per dataset; the engine streams it, so a big dataset never has to fit in memory.
+      const r = await Engine.exportTo({ sql: `SELECT * FROM ${Engine.dataset(d)}`, to: `${dir}/${n}.${fmt}`, format: fmt, table: n }).catch(e => { st.fail(`Export ${n} failed: ${e.message}`); throw e; });
+      st.done(`Exported ${n} as ${fmt.toUpperCase()}: ${UI.num(r.rows)} rows, ${UI.bytes(r.bytes)}`);
+    }
+    await Projects.touchModule(ctx.folder, 'publish');
+    UI.toast('Export finished', 'ok'); await listPubs();
+  } finally { $('pubData').disabled = false; }
+});
+
+(async () => {
+  try {
+    ctx = await ModulePage.init('publish', 'Publish');
+    const was = new Set(ctx.cfg.publish?.data?.names || []); if (ctx.cfg.publish?.data?.fmt) $('fmt').value = ctx.cfg.publish.data.fmt;   // last export choices
+    $('dsOpts').innerHTML = (ctx.cfg.datasets || []).map(d => `<label class="row"><input type="checkbox" value="${esc(d.name)}"${was.has(d.name) ? ' checked' : ''}> ${esc(d.name)} <span class="muted">${UI.rows(d.rows)} rows · ${UI.bytes(d.bytes)}</span></label>`).join('') || '<span class="muted">No datasets yet.</span>';
+    renderTargets(); initName();
+    await listPubs();
+  } catch (e) { UI.toast(e.message, 'err'); }
+})();
+</script>
+</body>
+</html>

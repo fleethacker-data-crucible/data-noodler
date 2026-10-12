@@ -6,10 +6,10 @@ DLLs, no installs, no admin rights).
 
 ## Start
 
-- Double-click **`Data Noodler.lnk`** (rebuild it with `rebuild-shortcut.ps1` if the folder moved).
-- Or run `powershell -NoProfile -ExecutionPolicy Bypass -File .server\server.ps1`.
+- Double-click **`Data Noodler.lnk`**.
+- Or run `powershell -NoProfile -ExecutionPolicy Bypass -File server\server.ps1`.
 
-The server compiles the engine (`engine/**/*.cs`, cached as a DLL in `temp\engine\`) and opens the
+The server compiles the engine (`server/data-engine/**/*.cs`, cached as a DLL in `temp\data-engine\`) and opens the
 **Project Manager**. The red **Server Control** button opens the control panel (port 8079: status, engine check, live log).
 
 ## How data flows
@@ -38,23 +38,22 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
 
 | Module | Page | What it does |
 |---|---|---|
-| Project Manager | `html/project_manager.html` | Projects (create, edit, rename, trash), module buttons, Update workflow. Entry point. |
-| Import | `html/import.html` | Pick or link a raw file, set column names / types, Import it as an Arrow dataset. |
-| Transform | `html/transform.html` | Named SQL queries (SELECT or scripts); the active one builds `data/source/CLEAN_*`. |
-| Dashboard | `html/dashboard.html` | Charts from D3 Studio + Data Grids on a grid layout; queries run in the engine. |
-| D3 Studio | `html/d3-studio.html` | Build D3 charts (code + inputs linked to TABLE.FIELD); Publish to the Dashboard. |
-| Publish | `html/publish.html` | Web app / PDF / PowerPoint / images of a dashboard; dataset export (CSV / Parquet / SQLite). |
-| Archives | `html/archives.html` | Snapshots of a project, compare, restore. |
-| Benchmark | `html/benchmark.html` (Utilities menu) | Engine speed: imports, exports, reads / writes, heavy queries by rows, batch size and workers. |
-| SQL console | `html/engine-test.html` | Run SQL against the engine. |
+| Project Manager | `ui/html/project_manager.html` | Projects (create, edit, rename, trash), module buttons, Update workflow. Entry point. |
+| Import | `ui/html/import.html` | Pick or link a raw file, set column names / types, Import it as an Arrow dataset. |
+| Transform | `ui/html/transform.html` | Named SQL queries (SELECT or scripts); the active one builds `data/source/CLEAN_*`. |
+| Dashboard | `ui/html/dashboard.html` | Charts from D3 Studio + Data Grids on a grid layout; queries run in the engine. |
+| D3 Studio | `ui/html/d3-studio.html` | Build D3 charts (code + inputs linked to TABLE.FIELD); Publish to the Dashboard. |
+| Publish | `ui/html/publish.html` | Web app / PDF / PowerPoint / images of a dashboard; dataset export (CSV / Parquet / SQLite). |
+| Archives | Project Manager > Archives | Zipped project snapshots: take, restore, delete. |
+| Benchmark | `ui/html/benchmark.html` (Utilities menu) | Engine speed: imports, exports, reads / writes, heavy queries by rows, batch size and workers. |
 
 ## Tests and benchmarks
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\sql-cheatsheet.ps1    # SQL dialect: 158 checks
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\arrow-format.ps1      # Arrow = Parquet answers, memory, exports
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\spill.ps1             # GROUP BY / sort / window / join spill to disk
-powershell -NoProfile -ExecutionPolicy Bypass -File tests\bench-compare.ps1     # old vs new engine, rows/s per step
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\sql-cheatsheet.ps1    # SQL dialect: 158 checks
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\arrow-format.ps1      # Arrow = Parquet answers, memory, exports
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\spill.ps1             # GROUP BY / sort / window / join spill to disk
+powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\bench-compare.ps1     # old vs new engine, rows/s per step
 ```
 
 ## Rules for working on it

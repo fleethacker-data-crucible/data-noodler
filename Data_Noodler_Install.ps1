@@ -82,8 +82,17 @@ try {
     foreach ($d in $dirs) { [void](New-Item -ItemType Directory -Force -Path (Join-Path $Root ($d.Replace('/', '\')))) }
     # User data is never overwritten: projects, settings, users, charts and temp. A file there is written only when it
     # does not exist yet (a fresh install gets the defaults); everything else is program files and is replaced.
-    $UserData = @('projects/*', 'temp/*', 'config/*', 'chart-builder/*', '.server/settings.json', 'version.txt')
+    $UserData = @('workspace/*', 'temp/*', 'config/*', 'server/settings.json', 'version.txt')
     $isUser = { param($p) foreach ($u in $UserData) { if ($p -like $u) { return $true } }; return $false }
+    # Older installs kept the server in .server: move its settings to server\ and remove the old folder.
+    $old = Join-Path $Root '.server'
+    if (Test-Path -LiteralPath $old) {
+        $os = Join-Path $old 'settings.json'; $ns = Join-Path $Root 'server\settings.json'
+        if ((Test-Path -LiteralPath $os) -and -not (Test-Path -LiteralPath $ns)) { [void](New-Item -ItemType Directory -Force -Path (Split-Path $ns)); Move-Item -LiteralPath $os -Destination $ns }
+        Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    # Older installs kept the engine source in engine\ (now server\data-engine) and its DLL cache in temp\engine.
+    foreach ($o in 'engine', 'temp\engine') { $p = Join-Path $Root $o; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue } }
     $kept = New-Object 'System.Collections.Generic.HashSet[string]'
     $n = 0
     foreach ($f in $files) {
@@ -115,8 +124,8 @@ try {
     $desk = [Environment]::GetFolderPath('Desktop')
     $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desk 'Data Noodler.lnk'))
     $lnk.TargetPath = 'C:\Windows\System32\conhost.exe'
-    $lnk.Arguments = '--headless powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + (Join-Path $Root '.server\server.ps1') + '"'
-    $lnk.WorkingDirectory = Join-Path $Root '.server'
+    $lnk.Arguments = '--headless powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + (Join-Path $Root 'server\server.ps1') + '"'
+    $lnk.WorkingDirectory = Join-Path $Root 'server'
     $lnk.IconLocation = (Join-Path $Root 'assets\client_favicon.ico') + ',0'
     $lnk.WindowStyle = 7
     $lnk.Save()

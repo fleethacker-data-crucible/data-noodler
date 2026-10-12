@@ -7,7 +7,7 @@ A portable look-and-feel standard for any web app or tool, whatever it does. Dro
 ## 1. Core principles
 
 - **Fully offline.** No CDNs, no Google Fonts, no npm, no external packages, no network calls at runtime. Every font, icon, script and stylesheet is vendored in the repo.
-- **One stylesheet.** All pages link one shared theme file (e.g. `css/theme.css`). Pages add only layout-specific rules.
+- **One stylesheet.** All pages link one shared theme file (e.g. `ui/css/theme.css`). Pages add only layout-specific rules.
 - **Dark first.** Dark is the default. A light palette is optional and only via `prefers-color-scheme`.
 - **Flat and quiet.** Flat panels, 1px border lines, no gradients, shadows only on floating things (dialogs, notifications, toasts).
 - **One corner radius: 4px (`--radius`) on everything** — buttons, inputs, drop-downs and their open lists, panels, cards,
