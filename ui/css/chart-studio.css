@@ -1,0 +1,235 @@
+/* Chart Builder and Dashboard Builder: one look for both pages (the grid stage, its tools at the bottom, chart cards with
+   resize handles, field slots, the settings panel on the right). Page-only rules stay in each page. */
+html, body { height: 100%; margin: 0; overflow: hidden; }
+* { scrollbar-width: thin; }
+/* The page: the grid (stage) and the settings panel on the right. Empty (first load): just the grid; New / Open slides
+   the panel in from the right and fades the chart in. */
+.cb { position: fixed; inset: 0; }
+.cb > .stage { position: absolute; top: 0; bottom: 0; left: 0; right: 270px; transition: right .25s ease-out; }
+.cb > aside.right { position: absolute; top: 0; bottom: 0; right: 0; width: 270px; box-sizing: border-box; transition: transform .25s ease-out; }
+.cb.instant > .stage, .cb.instant > aside.right, .cb.instant .card { transition: none; }   /* a refresh: back as it was, no slide-in */
+.cb.empty > .stage { right: 0; }
+.cb.empty > aside.right { transform: translateX(100%); }
+.cb.empty .card, .cb.empty .slots, .cb.empty .status, .cb.empty #save, .cb.empty #codeBtn, .cb.empty #publish { display: none; }
+.card { transition: opacity .2s ease-out; }
+.card.fade, .pv.fade { opacity: 0; }
+.pv { transition: opacity .12s ease-out; }
+.cb > aside { overflow: auto; padding: 12px 14px; background: var(--panel); display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.cb > aside.left { border-right: 1px solid var(--border); }
+.cb > aside.right { border-left: 1px solid var(--border); }
+.cb h3 { margin: 6px 0 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.cb select, .cb input[type=text], .cb input[type=search], .cb input[type=number] { width: 100%; box-sizing: border-box; }
+
+/* Fields: drag a chip onto a slot (or onto the chart). */
+.fields { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; flex: none; }   /* long field lists scroll; Colours stays in reach */
+.chip { flex: none; display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg);
+  cursor: grab; user-select: none; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip:hover { border-color: var(--muted); }
+.chip .t { flex: none; width: 22px; text-align: center; font: 11px var(--mono); color: var(--muted); }
+.chip .t.num { color: var(--c3); } .chip .t.date { color: var(--c5); } .chip .t.text { color: var(--c1); }
+.chip span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.hintbox { font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+/* Stage: the 24px grid (as the Dashboard), a line locked to its centre; the chart card sits on it. */
+.stage { overflow: hidden; min-width: 0;
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px),
+                    linear-gradient(to bottom, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px; background-position: var(--gx, 0px) 0; }
+.tools { position: absolute; left: 50%; bottom: 24px; transform: translate(-50%, 50%); display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 5px; z-index: 10; width: max-content; }
+.tools .dd-menu { top: auto; bottom: calc(100% + 4px); }   /* at the bottom: menus open upward */
+.tools button { width: 100%; justify-content: center; text-align: center; }
+.namebox { display: flex; flex-direction: column; gap: 6px; }
+.nlbl { margin: 6px 0 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+/* Slots: X under the chart (bottom centre), Y left of it (middle); they follow the chart when it is resized. */
+.slots { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.slots .slot { position: absolute; pointer-events: auto; white-space: nowrap; }
+/* Empty slots appear (quick fade) only while a field is being dragged; filled ones always show their field. */
+.slots .slot { transition: opacity .12s ease-out; }
+.slots .slot:not(.set) { opacity: 0; pointer-events: none; }
+body.dragging .slots .slot { opacity: 1; pointer-events: auto; }
+.slot { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 4px 3px 10px; border: 1px dashed var(--muted); border-radius: 4px;
+  background: var(--panel); font-size: 12px; color: var(--muted); }
+.slot b { color: var(--text-2); font-weight: 600; }
+.slot.over, .card.over { border-color: var(--blue); border-style: solid; background: color-mix(in srgb, var(--blue) 14%, var(--panel)); }
+.slot.set { border-style: solid; border-color: var(--border); }
+.slot .f { color: var(--text); font-family: var(--mono); font-size: 12px; }
+.slot select { width: auto; height: 24px; padding: 0 4px; font-size: 12px; }
+.slot .x { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 4px; font-size: 14px; }
+.slot .x:hover { color: var(--err); }
+.card { position: absolute; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box; }
+.card .pv { position: absolute; inset: 8px; }
+/* Resize handles: an L at each corner (width and height), a short bar on each side (that side only). The chart stays
+   centred, so it grows on both sides at once. */
+.card .rz { position: absolute; width: 14px; height: 14px; z-index: 2; border-color: var(--muted); border-style: solid; border-width: 0; }
+.card .rz:hover { border-color: var(--text); }
+.card .rz.se { right: -6px; bottom: -6px; border-right-width: 2px; border-bottom-width: 2px; cursor: nwse-resize; }
+.card .rz.sw { left: -6px; bottom: -6px; border-left-width: 2px; border-bottom-width: 2px; cursor: nesw-resize; }
+.card .rz.ne { right: -6px; top: -6px; border-right-width: 2px; border-top-width: 2px; cursor: nesw-resize; }
+.card .rz.nw { left: -6px; top: -6px; border-left-width: 2px; border-top-width: 2px; cursor: nwse-resize; }
+.card .rz.n, .card .rz.s { left: calc(50% - 7px); width: 14px; height: 8px; cursor: ns-resize; }
+.card .rz.n { top: -6px; border-top-width: 2px; } .card .rz.s { bottom: -6px; border-bottom-width: 2px; }
+.card .rz.e, .card .rz.w { top: calc(50% - 7px); height: 14px; width: 8px; cursor: ew-resize; }
+.card .rz.e { right: -6px; border-right-width: 2px; } .card .rz.w { left: -6px; border-left-width: 2px; }
+.card .sz { position: absolute; right: 4px; bottom: -22px; font: 11px var(--mono); color: var(--muted); }
+.status { position: absolute; left: 0; right: 0; top: 96px; text-align: center; font-size: 12px; color: var(--muted); z-index: 4; pointer-events: none; }
+.status.err { color: var(--err); }
+
+/* Right: chart types and settings. */
+/* Right panel sections: click a heading to fold it (remembered per section). */
+.sec { display: block; }
+.sec > * + * { margin-top: 8px; }
+.sec > .fields { display: flex; }
+.sec > summary { list-style: none; cursor: pointer; user-select: none; margin: 6px 0 0; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.sec > summary::-webkit-details-marker { display: none; }
+.sec > summary::before { content: '▾'; font-size: 16px; line-height: 1; transition: transform .12s; }
+.sec:not([open]) > summary::before { transform: rotate(-90deg); }
+.sec > summary:hover { color: var(--text-2); }
+.types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.type { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 6px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); cursor: pointer; font-size: 12px; color: var(--text-2); }
+.type svg { width: 26px; height: 26px; fill: var(--muted); color: var(--muted); }
+.type:hover { border-color: var(--muted); }
+.type.on { border-color: var(--blue); color: var(--text); } .type.on svg { fill: var(--blue); color: var(--blue); }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.opt { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.row2 { display: grid; grid-template-columns: 1fr 80px; gap: 6px; }
+.codebtn { margin-top: auto; }
+.badge-custom { font-size: 11px; color: var(--warn); }
+.optrow { display: grid; grid-template-columns: 1fr 110px; align-items: center; gap: 8px; font-size: 13px; }
+.optrow + .optrow, .opt + .optrow, .optrow + .opt { margin-top: 6px; }
+/* Chart name (Chart Builder): locked 5px above the chart, centred on it; required (red while empty). Not a dashboard setting. */
+.cname { position: absolute; z-index: 4; transform: translate(-50%, -100%); field-sizing: content; min-width: 250px; max-width: 90%; box-sizing: border-box; text-align: center; font-weight: 600; }
+.cname:placeholder-shown { border-color: var(--err); }
+.cname::placeholder { color: var(--err); opacity: 1; }
+.cb.empty .cname { display: none; }
+.cb input.cname[type=text] { width: auto; }   /* beats the panel inputs width: 100% */
+/* Chart types (Chart Builder): one bar, 24px from the top, centred on the chart. */
+.typebar { position: absolute; top: 24px; z-index: 6; transform: translateX(-50%); display: flex; gap: 6px; }
+.typebar .type { width: 64px; background: color-mix(in srgb, var(--panel) 92%, #fff); }
+.cb.empty .typebar { display: none; }
+.status:not(.err) { display: none; }   /* only code errors show (no data note) */
+/* Fields: 6 visible (search for the rest), smooth scrolling, no scroll bar. */
+.fields { max-height: calc(6 * 28px + 5 * 4px); scroll-behavior: smooth; scrollbar-width: none; overscroll-behavior: contain; }
+.fields::-webkit-scrollbar { display: none; }
+.fields .chip { height: 28px; box-sizing: border-box; }
+.fields .chip, #src, #src option { font-family: var(--mono); }   /* fields and dataset: Syne Mono */
+.sec > .fields[hidden] { display: none; }
+#fq[hidden] { display: none; }
+.sec[hidden] { display: none; }
+/* Panel sections: headings a little larger, white bold; an open section is a lighter grey block. */
+.sec > summary { font-size: 12.5px; color: var(--text); font-weight: 700; }
+.sec > summary:hover { color: var(--text); }
+.sec[open] { background: color-mix(in srgb, var(--panel) 90%, #fff); border-radius: 4px; padding: 6px 8px 10px; margin: 0 -8px; }
+.sec[open] > summary { margin-top: 0; }
+/* Section contents line up with the heading's first letter (arrow 14px + 6px gap). */
+.sec > summary::before { display: inline-block; width: 14px; text-align: center; }
+.sec > :not(summary) { margin-left: 20px; }
+/* A line under a setting (option sep: true), separating it from the next group of settings. */
+.optrow.sep { border-bottom: 1px solid color-mix(in srgb, var(--text) 30%, transparent); padding-bottom: 8px; margin-bottom: 8px; }
+.optrow .switch { justify-self: end; }
+/* Panel toggles: thinner, the knob as tall as the slider. */
+.optrow .switch { height: 12px; width: 30px; }
+.optrow .switch span::after { left: 0; top: 0; width: 12px; height: 12px; }
+.optrow .switch input:checked + span::after { transform: translateX(18px); }
+.optrow .switch { justify-self: start; }   /* lines up with the left edge of the number boxes */
+.cb .optrow input[type=number] { width: auto; field-sizing: content; min-width: 3ch; justify-self: start; }   /* as wide as its value */
+.optrow .switch span { background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }   /* off: same as the number boxes */
+.optrow .switch input:checked + span { background: var(--blue); box-shadow: none; }          /* on: blue */
+/* Panel number boxes: no up / down arrows (the mouse wheel steps them). */
+.cb aside input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.cb aside input[type=number]::-webkit-inner-spin-button, .cb aside input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+/* Every setting row the same height, so the labels are evenly spaced (number boxes and toggles alike). */
+.optrow { height: 26px; box-sizing: content-box; }
+.cb .optrow input[type=number], .cb .optrow input[type=text], .cb .optrow select { height: 24px; }
+/* The chart draws its own background (Chart > Background): the card is only its frame. */
+.card { background: transparent; }
+.card .pv { inset: 0; }
+.card .pv { border-radius: 3px; overflow: hidden; }
+.cb .optrow select.pick { width: auto; justify-self: start; padding: 0 22px 0 6px; }
+.optsub { font-size: 12px; font-weight: 700; color: var(--text-2); margin: 2px 0 4px; }
+.optrow + .optsub { margin-top: 0; }
+.optrow > span:first-child { font-size: 12px; color: color-mix(in srgb, var(--muted) 70%, var(--text)); }   /* setting labels: smaller, grey */
+/* Sub groups (X-Axis, Y-Axis): collapsible, a small arrow like the sections. */
+.subsec > summary.optsub { list-style: none; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; margin-left: -20px; }
+.subsec > summary.optsub::-webkit-details-marker { display: none; }
+.subsec > summary.optsub::before { content: '▾'; display: inline-block; width: 14px; text-align: center; font-size: 14px; line-height: 1; transition: transform .12s; }
+.subsec:not([open]) > summary.optsub::before { transform: rotate(-90deg); }
+.subsec:not([open]) { margin-bottom: 4px; }
+.subsec > .optrow:last-child.sep { }
+/* Tree: a sub group's arrow sits under its section's first letter; its settings under the sub heading's first letter. Same arrow size as the sections. */
+.subsec > summary.optsub { margin-left: 0; }
+.subsec > summary.optsub::before { font-size: 16px; }
+.subsec > :not(summary) { margin-left: 20px; }
+.subsec > summary.optsub { font-size: 13px; font-weight: 400; color: var(--text); }
+.sec > summary::before, .subsec > summary.optsub::before { font-size: 16px; width: 14px; line-height: 1; font-weight: 400; color: color-mix(in srgb, var(--muted) 60%, var(--text)); }   /* every collapse arrow: same size, light grey */
+/* Setting boxes: a little smaller, text the size of the sub headings (13px); toggles a little smaller. */
+.cb .optrow input[type=number], .cb .optrow input[type=text], .cb .optrow select { height: 21px; font-size: 13px; padding-top: 0; padding-bottom: 0; }
+.optrow .switch { height: 10px; width: 26px; }
+.optrow .switch span::after { width: 10px; height: 10px; }
+.optrow .switch input:checked + span::after { transform: translateX(16px); }
+.cb .optrow input[type=number], .cb .optrow select { box-sizing: border-box; height: 21px; min-height: 21px; line-height: 19px; font-size: 13px; }
+.cb .optrow select.pick { padding: 0 6px 0 8px; gap: 4px; }   /* the arrow is built in: no extra room */
+.optrow.sep { border-bottom: 0; padding-bottom: 0; margin-bottom: 6px; }   /* no separator lines (the sub headings separate) */
+/* Edit Data window (ui/js/charts/data-window.js): floats over the page, dragged by its header. */
+.dwin { position: fixed; z-index: 45; width: 280px; max-height: calc(100vh - 140px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 10px 30px #0008; }
+.dwin[hidden] { display: none; }
+.dw-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: move; user-select: none; }
+.dw-head b { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.dw-x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 2px; }
+.dw-x:hover { color: var(--text); }
+.dw-body { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-height: 0; }
+.dw-q { width: 100%; box-sizing: border-box; }
+.dw-sample { align-self: flex-start; }
+.dw-list { overflow: auto; scrollbar-width: none; scroll-behavior: smooth; min-height: 0; font-family: var(--mono); }
+.dw-list::-webkit-scrollbar { display: none; }
+.dw-dh { display: flex; align-items: center; gap: 6px; padding: 4px 2px; cursor: pointer; user-select: none; font-size: 13px; color: var(--text); }
+.dw-dh small { margin-left: auto; color: var(--muted); font-size: 11px; }
+.dw-ds.cur > .dw-dh .dw-dn { color: var(--blue); }
+.dw-tw { display: inline-block; width: 14px; text-align: center; font-size: 16px; line-height: 1; color: color-mix(in srgb, var(--muted) 60%, var(--text)); transform: rotate(-90deg); transition: transform .12s; }
+.dw-tw.on { transform: none; }
+.dw-g { margin: 2px 0 6px 20px; display: flex; flex-direction: column; gap: 3px; }
+.dw-gh { font-family: 'Exo 2', system-ui, sans-serif; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: flex; gap: 6px; margin-top: 4px; }
+.dw-f { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); cursor: grab; font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+.dw-f:hover { border-color: var(--muted); }
+.dw-f span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.dw-f .t { flex: none; width: 20px; text-align: center; font-size: 11px; }
+.dw-f.num, .dw-f.num .t { color: var(--ok); }
+.dw-f.text .t { color: var(--c1); } .dw-f.date .t { color: var(--c5); }
+.dw-none { font-family: 'Exo 2', system-ui, sans-serif; font-size: 12px; color: var(--muted); }
+.ctxmenu { position: fixed; top: 0; left: 0; z-index: 50; box-shadow: 0 6px 20px #0006; }   /* right-click menu at the mouse */
+.optrow.fmt-other[hidden] { display: none; }
+.cb .optrow.fmt-other input[type=text] { width: 100%; box-sizing: border-box; height: 21px; font-size: 13px; }
+/* Sections and sub groups fold / unfold smoothly (so closing one, then opening the next, can be seen). */
+:root { interpolate-size: allow-keywords; }
+.sec::details-content, .subsec::details-content { block-size: 0; overflow: hidden; transition: block-size .09s ease-out, content-visibility .09s allow-discrete; }
+.sec[open]::details-content, .subsec[open]::details-content { block-size: auto; }
+/* Panel drop-downs (Position, Format, Text Angle): 12 options in view, smooth scrolling, no scroll bar; the current one blue. */
+@supports (appearance: base-select) {
+  .cb select.pick::picker(select) { max-height: calc(12 * 24px + 10px); overflow-y: auto; scrollbar-width: none; scroll-behavior: smooth; overscroll-behavior: contain; }
+  .cb select.pick::picker(select)::-webkit-scrollbar { display: none; }
+  .cb select.pick option { height: 24px; box-sizing: border-box; display: flex; align-items: center; }
+  .cb select.pick option:checked { background: var(--blue); color: #fff; }
+}
+.dw-samples { display: flex; flex-direction: column; gap: 3px; }
+.dw-samples .dw-s { justify-content: flex-start; text-align: left; width: 100%; }
+.dw-samples .dw-s.on { border-color: var(--blue); color: var(--blue); }
+.dw-rand { width: 100%; justify-content: center; }
+.dw-rand[hidden] { display: none; }
+.cb.empty #del { display: none; }
+/* Everything (chart types, name, chart, buttons) centred on the window: the grid fills it, the settings panel lies over its right side. */
+.cb > .stage, .cb.empty > .stage { right: 0; }
+.cb > aside.right { z-index: 20; }
+/* Chart Builder: the settings panel as its own window (Chart Settings), moved by its header like Edit Data. */
+.cb > aside.right.float { position: fixed; top: 96px; left: auto; right: auto; bottom: auto; width: 290px; max-height: calc(100vh - 120px); padding: 0; gap: 0;
+  overflow: hidden; transform: none; transition: none; z-index: 44; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 10px 30px #0008; }
+.cb > aside.right.float[hidden], .cb.empty > aside.right.float { display: none; }
+.cb > aside.right.float > .cs-body { overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; scrollbar-width: none; }
+.cb > aside.right.float > .cs-body::-webkit-scrollbar { display: none; }
+/* Chart Settings window: as wide as its widest setting (it grows to the right); labels in one column, boxes lined up in the next. */
+.cb > aside.right.float { width: max-content; min-width: 260px; max-width: calc(100vw - 32px); }
+.cb > aside.right.float .optrow { grid-template-columns: 120px max-content; }
+.cb > aside.right.float .swatches { width: 262px; }                          /* colours keep their 3-per-row layout */
+.cb > aside.right.float .optrow.fmt-other input[type=text] { width: 160px; }  /* typed format example */
+.cb > aside.right.float .hintbox, .cb > aside.right.float .badge-custom { max-width: 262px; }
+.cb > aside.right.float { width: 400px; min-width: 0; max-width: calc(100vw - 32px); }   /* Chart Settings window: 400px wide */
+.sec[open] { background: none; }   /* open sections: no lighter background */

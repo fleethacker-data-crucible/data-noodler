@@ -263,11 +263,11 @@ const ApexWidget = (() => {
   return { chartInputs, AGGS, AGG_LABEL, KINDS, isApex, kindOf, detect, merge, inputsOf, axisOf, labelOf, autoBind, hasTop, ready, query, objects, shape, render, dispose, theme, useStyle, cssParts, getAt, setAt, binding, sortOf, topOf };
 })();
 
-// Chart packages: a folder with a valid chart.json (D3 Studio: workspace/chart-builder/dev/<id>/ = work in progress, workspace/chart-builder/live/<id>/
+// Chart packages: a folder with a valid chart.json (D3 Studio: workspace/chart-builder/dev/<id>/ = work in progress, workspace/chart-builder/published/<id>/
 // = published). The Dashboard lists LIVE charts only (id "chart-<folder>", m.chart = true), plus the built-in Data Grid
 // (ui/js/grid/data-grid-pkg.js, id "data-grid") so grids already on a dashboard keep drawing. m.dir = the package folder.
 const ChartRegistry = (() => {
-  const CHARTS_DEV = 'workspace/chart-builder/dev', CHARTS_LIVE = 'workspace/chart-builder/live', MANIFEST = 'chart.json';
+  const CHARTS_DEV = 'workspace/chart-builder/dev', CHARTS_LIVE = 'workspace/chart-builder/published', MANIFEST = 'chart.json';
   let cache = null;
   const valid = m => m && typeof m.id === 'string' && m.name && !!ApexWidget.KINDS[m.kind];
   // Every package folder under root (a folder with a valid chart.json). prefix = id prefix.

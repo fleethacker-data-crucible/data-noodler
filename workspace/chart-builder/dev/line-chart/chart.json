@@ -1,0 +1,571 @@
+{
+  "id": "line-chart",
+  "name": "Line Chart",
+  "description": "",
+  "category": "Line",
+  "version": 4,
+  "kind": "d3",
+  "spec": "spec.json",
+  "style": "style.css",
+  "code": "d3-code.js",
+  "sample": "sample.json",
+  "thumb": "thumb.svg",
+  "inputs": [
+    {
+      "key": "x",
+      "label": "X",
+      "role": "dimension",
+      "axis": "x"
+    },
+    {
+      "key": "y",
+      "label": "Y",
+      "role": "measure",
+      "axis": "y",
+      "agg": "sum"
+    }
+  ],
+  "options": [
+    {
+      "path": "colors.0",
+      "label": "Color 1",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.1",
+      "label": "Color 2",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.2",
+      "label": "Color 3",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.3",
+      "label": "Color 4",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.4",
+      "label": "Color 5",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.5",
+      "label": "Color 6",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.6",
+      "label": "Color 7",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.7",
+      "label": "Color 8",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "xaxis.position",
+      "label": "Position",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "bottom",
+        "top"
+      ],
+      "labels": [
+        "Bottom",
+        "Top"
+      ],
+      "default": "bottom",
+      "show": true
+    },
+    {
+      "path": "xaxis.fontSize",
+      "label": "Font Size",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 13,
+      "min": 6,
+      "max": 32,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "xaxis.format",
+      "label": "Format",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "format",
+      "input": "x",
+      "default": "Jan 2026",
+      "show": true
+    },
+    {
+      "path": "xaxis.rotate",
+      "label": "Text Orientation",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "auto",
+        "0",
+        "-90",
+        "90",
+        "-45",
+        "45"
+      ],
+      "labels": [
+        "Auto",
+        "Horizontal",
+        "Vertical Left",
+        "Vertical Right",
+        "Diag. Left",
+        "Diag. Right"
+      ],
+      "default": "auto",
+      "show": true
+    },
+    {
+      "path": "xaxis.line",
+      "label": "Border",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true
+    },
+    {
+      "path": "grid.x",
+      "label": "Grid Lines",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": false,
+      "show": true,
+      "sep": true
+    },
+    {
+      "path": "yaxis.position",
+      "label": "Position",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "left",
+        "right"
+      ],
+      "labels": [
+        "Left",
+        "Right"
+      ],
+      "default": "left",
+      "show": true
+    },
+    {
+      "path": "yaxis.fontSize",
+      "label": "Font Size",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 13,
+      "min": 6,
+      "max": 32,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "yaxis.format",
+      "label": "Format",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "format",
+      "input": "y",
+      "default": "1,234",
+      "show": true
+    },
+    {
+      "path": "yaxis.line",
+      "label": "Border",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": false,
+      "show": true
+    },
+    {
+      "path": "grid.y",
+      "label": "Grid Lines",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true,
+      "sep": true
+    },
+    {
+      "path": "background",
+      "label": "Background",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true
+    },
+    {
+      "path": "border",
+      "label": "Border",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": false,
+      "show": true
+    },
+    {
+      "path": "topSpace",
+      "label": "Top Space",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "line.width",
+      "label": "Width",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "show": true,
+      "order": 1
+    },
+    {
+      "path": "line.smooth",
+      "label": "Data Smoothness",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "show": true
+    },
+    {
+      "path": "line.smoothTo",
+      "label": "Data Smoothness Target",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "mean",
+        "median"
+      ],
+      "labels": [
+        "Average (Mean)",
+        "Median"
+      ],
+      "default": "mean",
+      "show": true
+    },
+    {
+      "path": "line.curve",
+      "label": "Curve",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "linear",
+        "smooth",
+        "step"
+      ],
+      "labels": [
+        "Straight",
+        "Smooth",
+        "Steps"
+      ],
+      "default": "linear",
+      "show": true,
+      "order": 2
+    },
+    {
+      "path": "line.smoothAmount",
+      "label": "Smooth Amount",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 100,
+      "step": 5,
+      "show": true,
+      "order": 3
+    },
+    {
+      "path": "dotShape",
+      "label": "Dot Shape",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "none",
+        "circle",
+        "square",
+        "diamond",
+        "triangle-up",
+        "triangle-down",
+        "cross",
+        "x",
+        "star",
+        "wye"
+      ],
+      "labels": [
+        "None",
+        "Circle",
+        "Square",
+        "Diamond",
+        "Triangle Up",
+        "Triangle Down",
+        "Cross",
+        "X",
+        "Star",
+        "Y"
+      ],
+      "default": "circle",
+      "show": true
+    },
+    {
+      "path": "dotFill",
+      "label": "Dot Fill",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": false,
+      "show": true
+    },
+    {
+      "path": "dotWidth",
+      "label": "Dot Thickness",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "dotSize",
+      "label": "Dot Size",
+      "sub": "Line",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 3,
+      "min": 1,
+      "max": 12,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "labelShare",
+      "label": "Density",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "5",
+        "10",
+        "15",
+        "20",
+        "25",
+        "30",
+        "35",
+        "40",
+        "45",
+        "50",
+        "55",
+        "60",
+        "65",
+        "70",
+        "75",
+        "80",
+        "85",
+        "90",
+        "95",
+        "100"
+      ],
+      "labels": [
+        "5%",
+        "10%",
+        "15%",
+        "20%",
+        "25%",
+        "30%",
+        "35%",
+        "40%",
+        "45%",
+        "50%",
+        "55%",
+        "60%",
+        "65%",
+        "70%",
+        "75%",
+        "80%",
+        "85%",
+        "90%",
+        "95%",
+        "100%"
+      ],
+      "default": "100",
+      "show": true,
+      "sub": "Point Values"
+    },
+    {
+      "path": "labels",
+      "label": "Show",
+      "sub": "Point Values",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true
+    },
+    {
+      "path": "labelPos",
+      "label": "Position",
+      "sub": "Point Values",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "above",
+        "below"
+      ],
+      "labels": [
+        "Above",
+        "Below"
+      ],
+      "default": "above",
+      "show": true
+    },
+    {
+      "path": "labelFont",
+      "label": "Font Size",
+      "sub": "Point Values",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 13,
+      "min": 6,
+      "max": 32,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "labelFormat",
+      "label": "Format",
+      "sub": "Point Values",
+      "group": "X-Axis",
+      "type": "format",
+      "input": "y",
+      "default": "1,234",
+      "show": true
+    },
+    {
+      "path": "labelRotate",
+      "label": "Text Orientation",
+      "sub": "Point Values",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "auto",
+        "0",
+        "-90",
+        "90",
+        "-45",
+        "45"
+      ],
+      "labels": [
+        "Auto",
+        "Horizontal",
+        "Vertical Left",
+        "Vertical Right",
+        "Diag. Left",
+        "Diag. Right"
+      ],
+      "default": "auto",
+      "show": true
+    }
+  ],
+  "builder": {
+    "template": "line",
+    "custom": false,
+    "opts": {
+      "xaxis.position": "bottom",
+      "xaxis.fontSize": 13,
+      "xaxis.format": "Jan 2026",
+      "xaxis.rotate": "90",
+      "xaxis.line": true,
+      "grid.x": false,
+      "yaxis.position": "left",
+      "yaxis.fontSize": 13,
+      "yaxis.format": "Auto",
+      "yaxis.line": false,
+      "grid.y": true,
+      "background": true,
+      "border": false,
+      "topSpace": 5,
+      "line.width": 1,
+      "line.smooth": 50,
+      "line.smoothTo": "median",
+      "line.curve": "smooth",
+      "line.smoothAmount": 100,
+      "dotShape": "none",
+      "dotFill": false,
+      "dotWidth": 1,
+      "dotSize": 3,
+      "labelShare": "40",
+      "labels": true,
+      "labelPos": "above",
+      "labelFont": 13,
+      "labelFormat": "Auto",
+      "labelRotate": "auto",
+      "dots": true,
+      "labelCount": 11
+    },
+    "size": {
+      "w": 26,
+      "h": 14
+    }
+  },
+  "updated": "2026-10-12T05:35:30.281Z"
+}

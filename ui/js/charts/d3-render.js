@@ -111,7 +111,7 @@ const D3Render = (() => {
   // its new place / size / colour (ease-in: starts slow, ramps up fast). Data changes take MOTION.data ms; a new box size
   // (resize) is drawn at once (MOTION.size 0), frame by frame. Elements are matched under the same parent by tag and order (axis ticks by their label);
   // new ones fade in. The first drawing of a chart is not animated.
-  const MOTION = { data: 420, size: 0, toggle: 150 };   // toggle: a setting turned on / off fades its parts in / out   // size 0: a resize redraws every frame and follows the box at once (no catch-up)
+  const MOTION = { data: 550, size: 550, toggle: 150 };   // size: the chart made wider / narrower (resize handles, window) moves the same way   // toggle: a setting turned on / off fades its parts in / out   // size 0: a resize redraws every frame and follows the box at once (no catch-up)
   const ease = t => t * t * t;   // cubic ease-in
   const ATTRS = ['x', 'y', 'width', 'height', 'rx', 'ry', 'cx', 'cy', 'r', 'x1', 'x2', 'y1', 'y2', 'd', 'transform', 'points', 'opacity', 'fill-opacity', 'stroke-opacity', 'fill', 'stroke', 'stroke-width'];
   const keyOf = (el, n) => el.classList?.contains('tick') ? `tick:${el.textContent}` : `${el.tagName}#${n}`;
@@ -127,8 +127,7 @@ const D3Render = (() => {
     return out;
   }
   // A setting turned on / off (same code, data and colours): parts that are the same stay still, parts that appeared fade
-  // in, parts that went away fade out (a copy of the old part, removed after). Parts that changed (the plot got smaller
-  // for a legend) move as with a data change.
+  // in, parts that went away fade out (a copy of the old part, removed after). Parts that changed are drawn in place at once.
   function toggle(oldSvg, svg, ms) {
     if (!oldSvg || typeof d3.transition !== 'function') return;
     const kids = el => [...el.children].filter(c => c instanceof SVGElement);
@@ -146,22 +145,42 @@ const D3Render = (() => {
       const ghost = o.cloneNode(true); ghost.setAttribute('pointer-events', 'none'); svg.append(ghost);
       d3.select(ghost).transition('dn').duration(ms).attr('opacity', 0).on('end interrupt', () => ghost.remove());
     }
+    // Parts that changed (a font size, an axis moved to the other side: the plot got wider / narrower): their bars, lines
+    // and values move there the same way as a data change; the rest is drawn where it now is.
     for (const [o, n] of moved) morph(o, n, MOTION.data);
   }
   function animate(oldSvg, svg, ms) { if (oldSvg && ms) morph(oldSvg, svg, ms); }
+  // A data change: only the bars and lines move: fast at first, slowing down into their new values (ease-out), drawn every
+  // animation frame (d3 transitions run on requestAnimationFrame: 60 fps where the screen allows); everything else (axes,
+  // labels, grid) is simply drawn in its new state.
+  const pop = typeof d3.easeCubicOut === 'function' ? d3.easeCubicOut : t => 1 - Math.pow(1 - t, 3);
+  // Marks = bars, lines and the values written on them (text that is not an axis label): values ride with their bar.
+  const isMark = n => (n.tagName === 'rect' && n.parentNode !== n.ownerSVGElement && !n.classList.contains('chart-border')) || ((n.tagName === 'path' || n.tagName === 'text' || n.tagName === 'circle') && !n.classList.contains('domain') && !n.closest('.tick'));
   function morph(oldSvg, svg, ms) {
     if (!oldSvg || !ms || typeof d3.transition !== 'function') return;
     for (const [o, n] of pairs(oldSvg, svg, [])) {
-      if (!(n instanceof SVGElement) || n.tagName === 'svg') continue;
-      const sel = d3.select(n);
+      if (!(n instanceof SVGElement) || n.tagName === 'svg' || !isMark(n)) continue;
+      const sel = d3.select(n), ease = pop;
       // Interrupted (the next redraw came first) or ended: the element is put at its final values, so the next drawing
       // always starts from where this one was going, never from a half-faded / half-moved state.
       const done = fin => () => { for (const [a, v] of fin) v == null ? n.removeAttribute(a) : n.setAttribute(a, v); };
       if (!o) { const op = n.getAttribute('opacity'), fin = [['opacity', op]]; sel.attr('opacity', 0).transition('dn').duration(ms).ease(ease).attr('opacity', op ?? 1).on('end interrupt', done(fin)); continue; }
       let t = null; const fin = [];
+      // A value that changed direction (Text Orientation) is simply drawn the new way, where it belongs: no slide.
+      const turn = v => (/rotate\(\s*(-?[\d.]+)/.exec(v || '') || [])[1] || '0';
+      if (n.tagName === 'text' && turn(o.getAttribute('transform')) !== turn(n.getAttribute('transform'))) continue;
       for (const a of ATTRS) {
         const was = o.getAttribute(a), now = n.getAttribute(a);
         if (was == null || now == null || was === now) continue;
+        // A turn (rotate(angle, x, y): values written sideways) is never swung around: another angle flips in place at
+        // once; the same angle slides with its bar / point, still turned (plain number steps, not a transform blend).
+        if (a === 'transform') {
+          const ang = v => (/rotate\(\s*(-?[\d.]+)/.exec(v) || [])[1];
+          if (ang(was) !== ang(now)) continue;
+          fin.push([a, now]); sel.attr(a, was);
+          (t ||= sel.transition('dn').duration(ms).ease(ease)).attrTween(a, () => d3.interpolateString(was, now));
+          continue;
+        }
         fin.push([a, now]); sel.attr(a, was);
         (t ||= sel.transition('dn').duration(ms).ease(ease)).attr(a, now);
       }
@@ -176,8 +195,11 @@ const D3Render = (() => {
     const oldSvg = [...box.children].find(n => n.tagName?.toLowerCase() === 'svg') || null, was = box.__dnSize, wasSig = box.__dnSig;
     // Animate only a real change (other data, code, settings or colours) at the same size. A redraw of the same thing
     // (resize frames, refreshes, repeated redraws) is drawn at its final state at once, so nothing is ever left mid-move.
-    let sig = '', base = ''; try { base = JSON.stringify([code, data, colors]); sig = base + JSON.stringify(opts); } catch { sig = base = String(Math.random()); }
+    let sig = '', base = ''; try { base = JSON.stringify([code, data, colors]); sig = base + JSON.stringify(opts) + JSON.stringify(theme) + JSON.stringify(inputs); } catch { sig = base = String(Math.random()); }
     const wasBase = box.__dnBase;
+    // The very same drawing again (same code, data, settings, colours and size): keep what is there, so a running
+    // animation is not cut short by a second redraw of the same thing.
+    if (oldSvg && sig === wasSig && was && was[0] === W && was[1] === H && box.__dnLast) return box.__dnLast;
     oldSvg?.querySelectorAll('*').forEach(n => d3.select(n).interrupt('dn'));   // its current (mid-move) values are the start
     box.innerHTML = '';
     const redirected = [];
@@ -194,7 +216,7 @@ const D3Render = (() => {
     finish();
     box.__dnSize = [W, H]; box.__dnSig = sig; box.__dnBase = base;
     if (out && typeof out.then === 'function') out.then(finish, () => {});   // drawn later: fit / round / animate it then
-    return { el: box, destroy() { box.innerHTML = ''; box.__dnSize = box.__dnSig = box.__dnBase = null; }, result: out, redirected };
+    return (box.__dnLast = { el: box, destroy() { box.innerHTML = ''; box.__dnSize = box.__dnSig = box.__dnBase = box.__dnLast = null; }, result: out, redirected });
   }
   // Chart colours: the spec's chosen ones (opts "colors.N"), else the style sheet's --w-c1..c8.
   const colorsOf = (s, th) => Array.from({ length: 8 }, (_, i) => s?.colors?.[i] || th.colors?.[i] || '#888888');

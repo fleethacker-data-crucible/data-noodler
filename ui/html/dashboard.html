@@ -2,62 +2,38 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Dashboard</title>
+<title>Dashboard Builder</title>
 <script src="../js/core/embed.js"></script>
 <script src="../js/core/theme.js"></script>
 <script src="../js/core/no-autofill.js"></script>
 <script src="../js/core/icons.js"></script>
 <link rel="stylesheet" href="../css/theme.css">
+<link rel="stylesheet" href="../css/chart-studio.css">
 <style>
-  html, body { height: 100%; overflow: hidden; }
-  /* Global header (embedded) sits above .app: share the window height instead of adding to it. */
-  body { display: flex; flex-direction: column; }
-  body > .app { flex: 1; min-height: 0; height: auto; }
-  /* Menus: the global drop-down look (theme.css .dd-menu, ui/js/core/menus.js); the right-click one floats at the mouse. */
+  /* Dashboard Builder: Chart Builder's look (ui/css/chart-studio.css). Only what differs is here: many chart cards, the
+     settings panel slides in over the grid (the charts never move when it opens), the right-click menu, Add chart. */
+  .cb > .stage, .cb.empty > .stage { right: 0; }
+  .cb > aside.right { z-index: 20; }
+  #cards { position: absolute; inset: 0; isolation: isolate; z-index: 1; }   /* chart stacking (w.z) stays under the slots and tools */
+  .cb .slots { z-index: 5; }
+  .cb.empty .card { display: block; }
+  .card { cursor: move; user-select: none; }
+  .card.sel { border-color: var(--blue); }
+  .card.moving { opacity: .85; }
+  .card:not(.sel) .rz, .card:not(.sel) .sz { display: none; }
+  .card .ttl { position: absolute; left: 10px; right: 10px; top: 6px; font-size: 12px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card.titled .pv { top: 26px; }
+  .card .note { height: 100%; display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 12px; padding: 10px; box-sizing: border-box; }
+  .card .note.err { color: var(--err); }
+  .card .meta { position: absolute; left: 4px; bottom: -22px; font: 11px var(--mono); color: var(--muted); white-space: nowrap; }
+  .card:not(.sel) .meta { display: none; }
+  .ghostbox { position: absolute; border: 1px dashed var(--blue); border-radius: 4px; background: color-mix(in srgb, var(--blue) 10%, transparent); pointer-events: none; z-index: 100000; }
+  .hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
+  .namebox .nrow { display: flex; align-items: center; justify-content: space-between; }
+  .namebox .close { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 2px; }
+  .namebox .close:hover { color: var(--text); }
   .ctxmenu { position: fixed; top: 0; left: 0; z-index: 50; box-shadow: 0 6px 20px #0006; }
-
-  /* Canvas: fills the whole window (the toolbar floats over its top). Widgets snap to its 24px cells. */
-  .app { position: relative; }
-  .canvas-wrap { position: absolute; inset: 0; overflow: hidden; margin: 0; }
-  /* Toolbar lives in the header: centred on the page, 5px above the header's bottom edge. */
-  .hdr-host { position: relative; }
-  .hdr-tools { position: absolute; left: 50%; bottom: 5px; transform: translateX(-50%); display: flex; gap: 5px; z-index: 35; }
-  /* No global header (module windows): the page's own top row holds the toolbar, centred, in the normal flow. */
-  .app > .topbar.hdr-host { position: absolute; top: 0; left: 0; right: 0; z-index: 35; padding: 6px 20px; justify-content: center; border: 0; background: none; pointer-events: none; }
-  .app > .topbar.hdr-host .hdr-tools { pointer-events: auto; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: max-content; }   /* every button as wide as the longest */
-  .app > .topbar.hdr-host .hdr-tools button { width: 100%; text-align: center; justify-content: center; }
-  .app > .topbar .hdr-tools { position: absolute; left: 50%; top: 24px; bottom: auto; transform: translate(-50%, -50%); }   /* centred on the first grid line down */
-  .app > .topbar.hdr-host .spacer { display: none; }
-  /* Grid: 24 x 24 px cells, 1px lines, endless: it fills the window. Its top edge is the window top and a grid line is
-     locked to the window's centre (--gx = centre mod 24); resizing only adds or removes cells around that line. */
-  .canvas { position: absolute; inset: 0;
-    background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 45%, transparent) var(--lw, 1px), transparent var(--lw, 1px)),
-                      linear-gradient(to bottom, color-mix(in srgb, var(--border) 45%, transparent) var(--lw, 1px), transparent var(--lw, 1px));
-    background-size: 24px 24px; background-position: var(--gx, 0px) 0; }
-  .canvas .hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
-
-  .wd { position: absolute; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
-  .wd.sel { border-color: var(--blue); outline: 1px solid var(--blue); outline-offset: -2px; }
-  .wd.moving { opacity: .85; }
-  /* Stacking: each widget's z-index is its w.z (saved); selecting one gives it the highest, so the whole widget (header,
-     body, edges, its menus) is drawn above every other. The canvas is its own stacking layer, so widget order never reaches the toolbar menus or dialogs. */
-  .canvas { isolation: isolate; }
-  .wd .wh { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: move; user-select: none; border-bottom: 1px solid var(--border); }
-  .wd .wh b { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .wd .wh small { color: var(--muted); font-size: 11px; white-space: nowrap; }
-  .wd .wb { flex: 1; min-height: 0; overflow: hidden; padding: 6px 8px; cursor: pointer; }   /* charts are sized to the box: never a scroll bar */
-  .wd .wb .table-wrap { max-height: none; }
-  .wd .note { height: 100%; display: grid; place-items: center; text-align: center; color: var(--muted); padding: 10px; }
-  /* Resize handles on every edge and corner (data-dir = n s e w ne nw se sw). */
-  .wd .rz { position: absolute; z-index: 3; }
-  .wd .rz[data-dir="n"], .wd .rz[data-dir="s"] { left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
-  .wd .rz[data-dir="e"], .wd .rz[data-dir="w"] { top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
-  .wd .rz[data-dir="n"] { top: 0; } .wd .rz[data-dir="s"] { bottom: 0; } .wd .rz[data-dir="w"] { left: 0; } .wd .rz[data-dir="e"] { right: 0; }
-  .wd .rz[data-dir$="e"]:not([data-dir="e"]), .wd .rz[data-dir$="w"]:not([data-dir="w"]) { width: 12px; height: 12px; }
-  .wd .rz[data-dir="ne"] { top: 0; right: 0; cursor: nesw-resize; } .wd .rz[data-dir="nw"] { top: 0; left: 0; cursor: nwse-resize; }
-  .wd .rz[data-dir="se"] { bottom: 0; right: 0; cursor: nwse-resize; } .wd .rz[data-dir="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
-  .wd:hover .rz[data-dir="se"] { background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); }
-  /* Add chart popup: categories (collapsible, arrow far left), 8 tiles per row; tile = 100 x 80 picture + name under it. */
+  /* Add chart: published charts by category (collapsible), 100 x 80 tiles. */
   .wpick { position: fixed; inset: 0; z-index: 60; background: #0008; display: grid; place-items: center; }
   .wpick[hidden] { display: none; }
   .wp-box { width: min(944px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 12px 40px #0008; }
@@ -65,51 +41,57 @@
   .wp-head b { font-weight: 600; font-size: 14px; }
   .wp-head .spacer { flex: 1; }
   .wp-body { overflow: auto; padding: 6px 14px 14px; scrollbar-width: none; }
-  .wp-body::-webkit-scrollbar { display: none; }
-  .wp-ch { display: flex; align-items: center; gap: 8px; padding: 8px 0 6px; cursor: pointer; user-select: none; text-align: left; }
-  .wp-ch b { font-weight: 600; }
-  .wp-ch small { color: var(--muted); }
-  .wp-grid { display: none; grid-template-columns: repeat(8, 100px); gap: 12px 12px; justify-content: start; padding: 4px 0 8px 20px; }
+  .wp-ch { display: flex; align-items: center; gap: 8px; padding: 8px 0 6px; cursor: pointer; user-select: none; }
+  .wp-ch b { font-weight: 600; } .wp-ch small { color: var(--muted); }
+  .wp-grid { display: none; grid-template-columns: repeat(8, 100px); gap: 12px; padding: 4px 0 8px 20px; }
   .wp-cat.open .wp-grid { display: grid; }
-  .wp-tile { width: 100px; cursor: pointer; text-align: left; }
-  .wp-img { width: 100px; height: 80px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: 11px; }
+  .wp-tile { width: 100px; cursor: pointer; }
+  .wp-img { width: 100px; height: 80px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); display: grid; place-items: center; overflow: hidden; }
   .wp-img img { width: 100%; height: 100%; object-fit: contain; }
   .wp-tile:hover .wp-img { border-color: var(--blue); outline: 1px solid var(--blue); }
-  .wp-name { margin-top: 4px; font-size: 12px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ghostbox { position: absolute; border: 1px dashed var(--blue); border-radius: 4px; background: color-mix(in srgb, var(--blue) 10%, transparent); pointer-events: none; z-index: 2147483000; }
-
+  .wp-name { margin-top: 4px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
-<div class="app">
-  <header class="topbar">
-    <div class="brand"><span class="logo">DN</span><div><h1 id="title">Dashboard</h1><div class="sub" id="sub"></div></div></div>
-    <div class="row hdr-tools" id="tools">
-      <button id="addChart" class="ghost" title="Add a chart (D3 Studio's published charts)">Charts</button>
-      <div class="dd-wrap"><button id="opts" class="ghost">Options ▾</button>
-        <div class="dd-menu" id="optmenu">
-          <div data-act="refresh">Refresh All<small>Re-run every widget (ignores the cache)</small></div>
-        </div>
-      </div>
+<div class="cb empty" id="cb">
+  <main class="stage" id="stage">
+    <div class="tools" id="tools">
+      <button id="addChart" title="Add a published chart (Chart Builder > Publish)">Add chart</button>
+      <button id="refresh" class="ghost" title="Re-run every chart (ignores the cache)">Refresh</button>
     </div>
-    <div class="spacer"></div>
-  </header>
-  <div class="dd-menu ctxmenu" id="ctxmenu">
-  <div data-act="settings"><span id="ctxSet">Widget Settings</span><small>Open the settings window for this <span class="ctxWhat">widget</span> (data fields, options)</small></div>
-  <div data-act="grid">Data Grid<small>Open the rows under this <span class="ctxWhat">widget</span> in a Data Grid window</small></div>
-  <div data-act="refresh">Refresh<small>Re-run this <span class="ctxWhat">widget</span> (ignores the cache)</small></div>
-  <div data-act="delete" class="danger last"><span id="ctxDel">Delete widget</span><small>Remove it from the dashboard</small></div>
+    <div id="cards"></div>
+    <div class="slots" id="slots"></div>
+  </main>
+
+  <aside class="right">
+    <div class="namebox"><div class="nrow"><label class="nlbl" for="name">Chart name</label><button class="close" id="close" title="Close the settings (Esc)">×</button></div>
+      <input id="name" type="text" spellcheck="false"></div>
+    <details class="sec" open id="xBox"><summary>Chart</summary>
+      <div id="optsX"></div></details>
+    <details class="sec" open id="yBox"><summary>Y-Axis</summary>
+      <div id="optsY"></div></details>
+    <details class="sec" open id="colourBox"><summary>Colors</summary>
+      <div class="swatches" id="colours"></div></details>
+    <details class="sec" open hidden id="setBox"><summary>Settings</summary>
+      <div id="opts"></div></details>
+    <details class="sec" open id="orderBox" hidden><summary>Order</summary>
+      <div class="row2"><select id="sort"><option value="desc">Largest first</option><option value="asc">Smallest first</option><option value="label">A to Z / in order</option></select>
+        <input id="top" type="number" min="1" max="100000" title="How many categories to show"></div></details>
+  </aside>
 </div>
-<div class="canvas-wrap" id="wrap"><div class="canvas" id="canvas"></div></div>
+<div class="dd-menu ctxmenu" id="ctxmenu">
+  <div data-act="data">Edit Data<small>Datasets and their fields: drag a field onto X or Y</small></div>
+  <div data-act="settings">Chart Settings<small>Open this chart's settings on the right (data, colours, settings)</small></div>
+  <div data-act="grid">Data Grid<small>Open the rows under this chart in a Data Grid window</small></div>
+  <div data-act="refresh">Refresh<small>Re-run this chart (ignores the cache)</small></div>
+  <div data-act="delete" class="danger last">Delete chart<small>Remove it from the dashboard</small></div>
 </div>
 <div class="wpick" id="wpick" hidden>
   <div class="wp-box">
-    <div class="wp-head"><b id="wp-title">Add chart</b><span class="spacer"></span>
-      <button id="wp-close" class="ghost small">Close</button></div>
+    <div class="wp-head"><b>Add chart</b><span class="spacer"></span><button id="wp-close" class="ghost small">Close</button></div>
     <div class="wp-body" id="wp-body"></div>
   </div>
 </div>
-
 
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/engine-client.js"></script>
@@ -119,447 +101,377 @@
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
 <script src="../js/charts/color-picker.js"></script>
+<script src="../js/charts/chart-panel.js"></script>
+<script src="../js/charts/data-window.js"></script>
 <script src="../js/vendor/apexcharts.min.js"></script>
 <script src="../js/vendor/apextree.min.js"></script>
 <script src="../js/vendor/d3.min.js"></script>
 <script src="../js/charts/d3-render.js"></script>
-<script src="../js/core/windows.js"></script>
 <script src="../js/charts/apex-render.js"></script>
 <script src="../js/charts/apex-options.js"></script>
 <script src="../js/charts/apex-widget.js"></script>
 <script src="../js/grid/data-grid-pkg.js"></script>
 <script src="../js/grid/grid-remote.js"></script>
-<script src="../js/charts/chart-settings.js"></script>
 <script>
-// Dashboard canvas. State: <project>/dashboard/dashboard.json = { version: 3, cols, rows, widgets: [...] }
-// Every widget is a package from the widgets/ folder (ApexCharts / ApexGrid / ApexTree; ui/js/charts/apex-widget.js). Positions / sizes are
-// in grid cells; drag the header to move, an edge to resize (both snap to the grid). Right-click a widget > Widget Settings opens its settings
-// (always in the Pop-out Settings window: ui/html/dashboard-settings.html via window.DashBridge).
+// Dashboard Builder: place published charts (workspace/chart-builder/published/, Chart Builder > Publish) on the 24px grid,
+// move them (drag the chart), resize them (the handles of the selected chart), and set each one up with Right-click > Chart
+// Settings: the same panel as Chart Builder's (ui/js/charts/chart-panel.js), built from the published chart's inputs and
+// options, so settings added to a chart later show up here at their defaults and older dashboards keep working.
+// State: <project>/dashboard/dashboard.json = { version: 3, widgets: [{ id, type: 'widget', pkg, title, dataset, x, y, w, h, z,
+//   inputs: { <key>: { col, agg } }, opts: { <path>: value }, sort, top }] } (positions in grid cells; read by Publish).
 const { $, esc } = UI;
-const COLS = 48, ROWS = 27;                     // the old fixed grid: columns are still counted from its left edge (centre = COLS / 2)
-const G = 24;                                   // cell size, px (fixed)
-let OX = 0;                                     // px of grid column 0: the window centre minus COLS / 2 cells (widgets keep their columns)
-const SIZE = [16, 9], MIN = [4, 3];             // new widget: 16:9 tile
-let ctx, dash = { version: 3, widgets: [] }, selId = null;
-const results = new Map();                      // id -> last result (redraw on resize without re-querying)
-// Packages: published charts (workspace/chart-builder/live/) and the built-in Data Grid (ui/js/grid/data-grid-pkg.js).
+const COLS = 48, G = 24, SIZE = [16, 9], MIN = [4, 3];
+let OX = 0;                                     // px of grid column 0: the stage centre minus COLS / 2 cells
+let ctx, dash = { version: 3, widgets: [] }, selId = null, panelId = null;
+const results = new Map();                      // id -> last result (redraw on resize / look changes without re-querying)
 let pkgs = new Map();
 const pkgOf = w => pkgs.get(w.pkg);
+const isChart = w => pkgOf(w)?.kind === 'd3';
 const isReady = w => { const m = pkgOf(w); return !!m && ApexWidget.ready(m, w); };
-const queryOf = w => { const m = pkgOf(w); if (!m) throw new Error(`Widget package "${w.pkg}" not found (workspace/chart-builder/live/).`); return ApexWidget.query(m, { ...w, where: whereOf(w) }); };
-// ---- Filter widgets: w.filters = [{ col, label, sort }], w.sel = { col: value }. Every selection is ANDed into the WHERE of each
-// widget on the same dataset (a Filter's own dropdown ignores its own field so its list stays complete).
-const isFilter = w => pkgOf(w)?.kind === 'filter';
-const isChart = w => pkgOf(w)?.kind === 'd3';   // D3 Studio charts: inputs linked as TABLE.FIELD (Chart Settings)
-const setName = w => isChart(w) ? 'Chart Settings' : 'Widget Settings';
-const qid = c => `"${String(c).replace(/"/g, '""')}"`;
-const lit = v => v === null ? null : typeof v === 'number' ? String(v) : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : `'${String(v).replace(/'/g, "''")}'`;
-const cond = (c, v) => v === null ? `${qid(c)} IS NULL` : typeof v === 'string' ? `CAST(${qid(c)} AS VARCHAR) = ${lit(v)}` : `${qid(c)} = ${lit(v)}`;
-function filterConds(dataset, skip) {
-  const out = [];
-  for (const f of dash.widgets) {
-    if (f.dataset !== dataset || !isFilter(f)) continue;
-    for (const [c, v] of Object.entries(f.sel || {})) if (v !== undefined && !(skip && skip.w === f && skip.col === c)) out.push(cond(c, v));
-  }
-  return out;
-}
-const whereOf = (w, skip) => [w.where?.trim(), ...filterConds(w.dataset, skip)].filter(Boolean).map(x => `(${x})`).join(' AND ') || undefined;
-function paint(el, w, r) {
-  const m = pkgOf(w);
-  return ApexWidget.render(el, m, m.specJson, w, r.objs ||= ApexWidget.objects(r), { columns: dsOf(w.dataset)?.columns || [] }).catch(e => { el.innerHTML = `<div class="note err">${esc(String(e.message || e).split('\n')[0])}</div>`; });
-}
+const byId = id => dash.widgets.find(w => w.id === id);
+const cardOf = w => document.querySelector(`.card[data-id="${w.id}"]`);
+const titleOf = w => w.title || pkgOf(w)?.name || w.pkg || 'Chart';
 const FILE = () => `${ctx.dir}/dashboard/dashboard.json`;
 const cachePath = w => `${ctx.dir}/data/cache/widget-${w.id}.json`;
-const dsOf = name => srcDs.find(d => d.name === name) || (ctx.cfg.datasets || []).find(d => d.name === name);
-// Ready datasets = the ones that exist in <project>/data/source right now (read from disk on load and Refresh: Projects.sourceDatasets).
 let srcDs = [];
-const readyDs = () => srcDs;
+const dsOf = name => srcDs.find(d => d.name === name);
 const loadSrc = async () => { srcDs = await Projects.sourceDatasets(ctx.folder, ctx.cfg); };
-const byId = id => dash.widgets.find(w => w.id === id);
+const viewsOf = name => Engine.views([dsOf(name)]);
 const saveNow = async () => { dash.updated = new Date().toISOString(); await DNFS.writeJSON(FILE(), dash); };
 const save = UI.debounce(() => saveNow().catch(e => UI.toast(`Could not save the dashboard: ${e.message}`, 'err')), 400);
 
-// ---- queries (one at a time; the engine itself runs each query on all its workers) ----
-// Cache key = dataset version + the widget's declarative query: a new dataset version makes the cache stale.
+// ---- queries (one at a time; the engine runs each one on all its workers), cached per chart ----
+const queryOf = w => ApexWidget.query(pkgOf(w), w);
 const keyOf = w => { const d = dsOf(w.dataset); return JSON.stringify({ q: queryOf(w), pv: pkgOf(w)?.version, v: d?.version ?? null, imported: d?.imported }); };
-const countOf = async (dataset, where) => +(await Engine.call('query', { query: { dataset, aggregate: [{ function: 'count', as: 'n' }], where }, views: viewsOf(dataset) })).rows[0]?.[0] || 0;
-// ---- datasets in engine memory: the engine keeps project datasets resident (loaded once from their Arrow parts, shared by
-// every window, refreshed when the dataset changes). Before a widget's first query its dataset is loaded (waits for it),
-// so widgets query RAM. A dataset larger than the engine's in-memory share stays on disk and is read from its parts.
-const memLoads = new Map();   // dataset name -> load promise
+const memLoads = new Map();
 function ensureMem(name) {
   const d = dsOf(name); if (!d) return Promise.resolve();
-  if (!memLoads.has(name)) memLoads.set(name, Engine.memory.load([d.path]).then(([r]) => {
-    if (r?.state === 'resident') ctx.log(`${name}: in engine memory (${UI.num(r.rows)} rows, ${UI.bytes(r.bytes)}).`);
-    else if (r) ctx.log(`${name}: read from disk (${r.reason || r.state}).`, 'warn');
-  }).catch(e => ctx.log(`${name}: could not load into engine memory (${e.message.split('\n')[0]}): reading it from disk.`, 'warn')));
+  if (!memLoads.has(name)) memLoads.set(name, Engine.memory.load([d.path]).catch(e => ctx.log(`${name}: could not load into engine memory (${e.message.split('\n')[0]}): reading it from disk.`, 'warn')));
   return memLoads.get(name);
 }
-const viewsOf = name => Engine.views([dsOf(name)]);
 async function compute(w, fresh) {
-  const d = dsOf(w.dataset); if (!d) throw new Error(`Dataset "${w.dataset}" not found.`);
+  if (!dsOf(w.dataset)) throw new Error(`Dataset "${w.dataset}" not found.`);
   if (!fresh) { try { const c = await DNFS.readJSONOr(cachePath(w), {}); if (c.key === keyOf(w)) return { ...c.res, cached: true }; } catch {} }
   const t0 = performance.now();
   await ensureMem(w.dataset);
   const res = await Engine.call('query', { query: queryOf(w), views: viewsOf(w.dataset) });
-  const count = await countOf(w.dataset, whereOf(w));
-  const out = { cols: res.cols, rows: res.rows, count, ms: performance.now() - t0, engineMs: res.ms };
+  const out = { cols: res.cols, rows: res.rows, ms: performance.now() - t0 };
   DNFS.writeJSON(cachePath(w), { key: keyOf(w), at: new Date().toISOString(), res: out }).catch(() => {});
   return out;
+}
+function paint(el, w, r) {
+  const m = pkgOf(w);
+  return ApexWidget.render(el, m, m.specJson, w, r.objs ||= ApexWidget.objects(r), { columns: dsOf(w.dataset)?.columns || [] }).catch(e => { el.innerHTML = `<div class="note err">${esc(String(e.message || e).split('\n')[0])}</div>`; });
 }
 let queue = Promise.resolve();
 function draw(w, fresh = false) {
   queue = queue.then(async () => {
-    const el = document.querySelector(`.wd[data-id="${w.id}"]`); if (!el) return;
-    const body = el.querySelector('.wb'), meta = el.querySelector('.wh small');
+    const card = cardOf(w); if (!card) return;
+    const pv = card.querySelector('.pv'), meta = card.querySelector('.meta');
     results.delete(w.id);
-    const fail = h => { ApexWidget.dispose(body); body.innerHTML = h; meta.textContent = ''; };
-    if (!pkgOf(w)) return fail(`<div class="note err">Chart "${esc(w.pkg)}" not found (workspace/chart-builder/live/): publish it in Chart Builder, or delete it here.</div>`);
-    if (pkgOf(w).kind === 'apexgrid' && isReady(w)) { try { await drawGrid(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
-    if (isFilter(w) && isReady(w)) { try { await drawFilter(w, body, meta); } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); } return; }
-    if (!isReady(w) && isChart(w)) {   // a chart not linked yet: drawn with no data (its axes / grid) until its fields are linked
-      try { await ApexWidget.render(body, pkgOf(w), pkgOf(w).specJson, w, [], { sample: true }); meta.textContent = 'no data · Right-click > Chart Settings to link the fields'; }
-      catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); }
+    const note = (h, err) => { ApexWidget.dispose(pv); pv.innerHTML = `<div class="note ${err ? 'err' : ''}">${h}</div>`; meta.textContent = ''; };
+    const m = pkgOf(w);
+    if (!m) return note(`Chart "${esc(w.pkg)}" is not published (workspace/chart-builder/published/). Publish it in Chart Builder, or delete it here.`, true);
+    if (m.kind === 'apexgrid' && isReady(w)) {   // a Data Grid placed by an older dashboard
+      try { await ensureMem(w.dataset); const d = dsOf(w.dataset), cols = ApexWidget.binding(m, w, ApexWidget.inputsOf(m).find(i => i.role === 'fields')).cols || [];
+        await ApexWidget.render(pv, m, m.specJson, w, [], { columns: d.columns || [], remote: (g, bar) => GridRemote.attach(g, { dataset: w.dataset, views: () => viewsOf(w.dataset), cols, columns: d.columns || [] }, bar) });
+      } catch (e) { note(esc(e.message.split('\n')[0]), true); }
       return;
     }
     if (!isReady(w)) {
-      ApexWidget.dispose(body); meta.textContent = '';
-      body.innerHTML = `<div class="note">${!w.dataset ? `Right-click > ${setName(w)} to choose a dataset` : `Right-click > ${setName(w)} to connect the data inputs`}</div>`;
+      if (!isChart(w)) return note('Right-click > Chart Settings to pick its data');
+      try { await ApexWidget.render(pv, m, m.specJson, w, (m.sampleRows || []).map(r => ({ ...r })), { sample: true }); meta.textContent = 'sample data · Right-click > Chart Settings to link the fields'; }
+      catch (e) { note(esc(e.message.split('\n')[0]), true); }
       return;
     }
-    if (!body._inst) body.innerHTML = '<div class="note">Loading…</div>';   // a chart already there stays until the new values animate in
     try {
       const r = await compute(w, fresh);
       results.set(w.id, r);
-      await paint(body, w, r);
-      meta.textContent = `${r.count != null ? `${r.count.toLocaleString()} rows · ` : ''}${r.cached ? 'cached' : UI.ms(r.ms)}`;
-    } catch (e) { fail(`<div class="note err">${esc(e.message.split('\n')[0])}</div>`); }
+      await paint(pv, w, r);
+      meta.textContent = `${r.rows.length.toLocaleString()} rows · ${r.cached ? 'cached' : UI.ms(r.ms)}`;
+    } catch (e) { note(esc(e.message.split('\n')[0]), true); }
   });
   return queue;
 }
-const titleOf = w => w.title || pkgOf(w)?.name || w.pkg || 'Widget';
-// Filter widget: one dropdown per field; values (+ row counts) come from a GROUP BY over the whole dataset, narrowed by the
-// other filters. Picking a value re-runs every widget on the dataset.
-async function drawFilter(w, body, meta) {
-  await ensureMem(w.dataset);
-  ApexWidget.useStyle(pkgOf(w), body);   // its look: the package's style.css only
-  const views = viewsOf(w.dataset), fields = (w.filters || []).filter(f => f.col);
-  w.sel ||= {};
-  if (!fields.length) { body.innerHTML = '<div class="note">Right-click > Widget Settings to add filter fields</div>'; meta.textContent = ''; return; }
-  const t0 = performance.now(), lists = [];
-  for (const f of fields) {
-    const sort = f.sort === 'count' ? [{ column: 'n', direction: 'desc' }] : [{ column: f.col, direction: f.sort === 'desc' ? 'desc' : 'asc' }];
-    const r = await Engine.call('query', { query: { dataset: w.dataset, groupBy: [f.col], aggregate: [{ function: 'count', as: 'n' }], where: whereOf(w, { w, col: f.col }), sort, limit: +w.maxValues || 1000 }, views });
-    lists.push(r.rows);
-  }
-  const count = await countOf(w.dataset, whereOf(w));
-  const fmt = v => v === null ? '(blank)' : String(v);
-  body.innerHTML = `<div class="flt">${fields.map((f, k) => `<label>${esc(f.label || f.col)}<select data-col="${esc(f.col)}"><option value="">(All)</option>${lists[k].map((r, j) =>
-    `<option value="${j}" ${f.col in w.sel && w.sel[f.col] === r[0] ? 'selected' : ''}>${esc(fmt(r[0]))}${w.showCounts !== false ? ` (${(+r[1]).toLocaleString()})` : ''}</option>`).join('')}</select></label>`).join('')}
-    ${Object.keys(w.sel).length ? '<button class="ghost small clr">Clear</button>' : ''}</div>`;
-  body.querySelectorAll('select').forEach((s, k) => s.onchange = () => {
-    const col = s.dataset.col;
-    if (s.value === '') delete w.sel[col]; else w.sel[col] = lists[k][+s.value][0];
-    filtersChanged(w);
-  });
-  body.querySelector('.clr')?.addEventListener('click', () => { w.sel = {}; filtersChanged(w); });
-  meta.textContent = `${count.toLocaleString()} rows · ${UI.ms(performance.now() - t0)}`;
-}
-// Data Grid: rows come from the engine 100 at a time (more on scroll); its search / filters / sort / pages run as engine
-// queries on all workers against the dataset's in-memory table (ui/js/grid/grid-remote.js), narrowed by the Filter widgets.
-async function drawGrid(w, body, meta) {
-  const m = pkgOf(w), d = dsOf(w.dataset), f = ApexWidget.inputsOf(m).find(i => i.role === 'fields');
-  const cols = ApexWidget.binding(m, w, f).cols || [];
-  meta.textContent = '';
-  await ensureMem(w.dataset);
-  const remote = (g, bar) => GridRemote.attach(g, { dataset: w.dataset, views: () => viewsOf(w.dataset), cols, columns: d.columns || [], where: whereOf(w),
-    onCount: (total, loaded, st) => { meta.textContent = `${total.toLocaleString()} rows${loaded < total ? ` · ${loaded.toLocaleString()} loaded` : ''} · ${UI.ms(st.wall)}`; } }, bar);   // time of the last query
-  await ApexWidget.render(body, m, m.specJson, w, [], { columns: d.columns || [], remote });
-}
-// A filter changed: save and re-run every widget on that dataset (charts animate to the new values).
-function filtersChanged(f) { save(); dash.widgets.filter(x => x.dataset === f.dataset).forEach(x => draw(x)); }
+const repaint = w => { const r = results.get(w.id), c = cardOf(w); if (!c) return; if (r) paint(c.querySelector('.pv'), w, r); else if (!isReady(w)) draw(w); };
+let rpFrame = 0, rpSet = new Set();
+const repaintSoon = w => { rpSet.add(w); if (!rpFrame) rpFrame = requestAnimationFrame(() => { rpFrame = 0; const s = [...rpSet]; rpSet.clear(); s.forEach(repaint); }); };
 
-// ---- canvas ----
+// ---- stage: a grid line locked to the centre (as Chart Builder); charts keep their columns counted from it ----
+function fitGrid() {
+  const st = $('stage'), dp = devicePixelRatio || 1, c = Math.floor(st.clientWidth * dp / 2) / dp;
+  st.style.setProperty('--gx', `${((c % G) + G) % G}px`);
+  const ox = c - (COLS / 2) * G; if (ox === OX) return false;
+  OX = ox; return true;
+}
 function place(el, w) {
   el.style.zIndex = w.z || 1;
-  Object.assign(el.style, { left: `${OX + w.x * G}px`, top: `${w.y * G}px`, width: `${w.w * G - 1}px`, height: `${w.h * G - 1}px` });
+  Object.assign(el.style, { left: `${OX + w.x * G}px`, top: `${w.y * G}px`, width: `${w.w * G + 1}px`, height: `${w.h * G + 1}px` });
+  const sz = el.querySelector?.('.sz'); if (sz) sz.textContent = `${w.w * G} x ${w.h * G} px`;
 }
-function widgetEl(w) {
+const RZ = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(d => `<div class="rz ${d}" data-dir="${d}"></div>`).join('');
+function cardEl(w) {
   const el = document.createElement('div');
-  el.className = 'wd' + (w.id === selId ? ' sel' : ''); el.dataset.id = w.id;
-  el.innerHTML = `<div class="wh"><b></b><small></small></div><div class="wb"></div>${["n", "s", "e", "w", "ne", "nw", "se", "sw"].map(d => `<div class="rz" data-dir="${d}"></div>`).join("")}`;
-  el.querySelector('b').textContent = titleOf(w);
-  place(el, w);
+  el.className = 'card' + (w.id === selId ? ' sel' : ''); el.dataset.id = w.id;
+  el.innerHTML = `<div class="ttl"></div><div class="pv"></div>${RZ}<div class="sz"></div><div class="meta"></div>`;
+  setTitle(el, w); place(el, w);
   return el;
 }
-// The grid is endless sideways and down; a widget only has to start at or below the top row.
+function setTitle(el, w) { el.querySelector('.ttl').textContent = w.title || ''; el.classList.toggle('titled', !!w.title); }
 const clamp = w => { w.w = Math.max(MIN[0], Math.round(w.w)); w.h = Math.max(MIN[1], Math.round(w.h)); w.x = Math.round(w.x); w.y = Math.max(0, Math.round(w.y)); return w; };
-// Centre line: a grid line at the window centre (whole px); column 0 sits COLS / 2 cells left of it. True when it moved.
-function fitGrid() {
-  const dp = devicePixelRatio || 1, c = Math.floor($('wrap').clientWidth * dp / 2) / dp, ox = c - (COLS / 2) * G;   // centre on a whole screen pixel
-  if (ox === OX && document.documentElement.style.getPropertyValue('--lw') === `${1 / (devicePixelRatio || 1)}px`) return false;
-  // Lines exactly one screen pixel wide at any Windows scaling (125%, 150%: 1px CSS would be blurred over 2 pixels).
-  const d = devicePixelRatio || 1, st = document.documentElement.style;
-  OX = ox; st.setProperty('--gx', `${((c % G) + G) % G}px`); st.setProperty('--lw', `${1 / d}px`);
-  return true;
-}
-function fitCanvas() {
-  const c = $('canvas');
-  c.querySelector('.hint')?.remove();
-  if (!dash.widgets.length) c.insertAdjacentHTML('beforeend', '<div class="hint">Empty dashboard. Use Charts to place a chart.</div>');
+function fitHint() {
+  $('cards').querySelector('.hint')?.remove();
+  if (!dash.widgets.length) $('cards').insertAdjacentHTML('beforeend', '<div class="hint">Empty dashboard. Add chart places a chart published in Chart Builder.</div>');
 }
 function renderAll(fresh = false) {
-  const c = $('canvas');
-  c.querySelectorAll('.wd').forEach(e => { ApexWidget.dispose(e.querySelector('.wb')); e.remove(); });
-  for (const w of dash.widgets) c.append(widgetEl(w));
-  fitCanvas();
+  $('cards').querySelectorAll('.card').forEach(e => { ApexWidget.dispose(e.querySelector('.pv')); e.remove(); });
+  for (const w of dash.widgets) $('cards').append(cardEl(w));
+  fitHint(); placePanelSlots();
   for (const w of dash.widgets) draw(w, fresh);
 }
+new ResizeObserver(() => { if (fitGrid()) { dash.widgets.forEach(w => { const e = cardOf(w); if (e) place(e, w); }); placePanelSlots(); } }).observe($('stage'));
 
-// Move / resize with the pointer; both snap to the grid. A press without movement = click (opens settings).
-$('canvas').addEventListener('pointerdown', ev => {
-  const el = ev.target.closest('.wd'); if (!el || ev.button !== 0 || ev.target.closest('.flt select, .flt button')) return;
-  const w = byId(el.dataset.id), mode = ev.target.closest('.rz') ? 'size:' + ev.target.closest('.rz').dataset.dir : ev.target.closest('.wh') ? 'move' : null;
-  if (!mode) return;   // body: plain click
+// Move (drag the chart) / resize (handles of the selected chart), snapped to the grid. A press without movement selects.
+$('cards').addEventListener('pointerdown', ev => {
+  const el = ev.target.closest('.card'); if (!el || ev.button !== 0) return;
+  const w = byId(el.dataset.id), dir = ev.target.closest('.rz')?.dataset.dir;
+  if (ev.target.closest('.dngrid, input, select, button')) return;   // a Data Grid's own controls
   ev.preventDefault();
-  const sx = ev.clientX, sy = ev.clientY, start = { ...w };
-  const ghost = Object.assign(document.createElement('div'), { className: 'ghostbox' });
+  const sx = ev.clientX, sy = ev.clientY, start = { ...w }, ghost = Object.assign(document.createElement('div'), { className: 'ghostbox' });
   let moved = false;
   const onMove = e => {
-    const dx = Math.round((e.clientX - sx) / G), dy = Math.round((e.clientY - sy) / G);
     if (!moved && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 4) return;
-    if (!moved) { moved = true; el.classList.add('moving'); toFront(w); $('canvas').append(ghost); }   // dragged = on top
-    if (mode === 'move') {
+    if (!moved) { moved = true; select(w.id); el.classList.add('moving'); $('cards').append(ghost); }
+    const dx = Math.round((e.clientX - sx) / G), dy = Math.round((e.clientY - sy) / G);
+    if (!dir) {
       w.x = start.x + dx; w.y = Math.max(0, start.y + dy);
       place(ghost, w); Object.assign(el.style, { left: `${OX + start.x * G + e.clientX - sx}px`, top: `${Math.max(0, start.y * G + e.clientY - sy)}px` });
     } else {
-      // Edges: the dragged side moves, the opposite side stays put (in grid cells).
-      const dir = mode.slice(5), right = start.x + start.w, bottom = start.y + start.h;
+      const right = start.x + start.w, bottom = start.y + start.h;
       let x = start.x, y = start.y, x2 = right, y2 = bottom;
       if (dir.includes('e')) x2 = Math.max(start.x + MIN[0], right + dx);
       if (dir.includes('w')) x = Math.min(right - MIN[0], start.x + dx);
       if (dir.includes('s')) y2 = Math.max(start.y + MIN[1], bottom + dy);
       if (dir.includes('n')) y = Math.max(0, Math.min(bottom - MIN[1], start.y + dy));
       Object.assign(w, { x, y, w: x2 - x, h: y2 - y });
-      place(ghost, w); place(el, w);   // the widget follows the snapped box
-      const r = results.get(w.id); if (r) liveRedraw(el.querySelector('.wb'), w, r); else if (isChart(w) && !isReady(w)) draw(w);   // charts redraw live to the new size
+      place(ghost, w); place(el, w); repaintSoon(w);   // the chart follows the new size live
     }
+    if (sw()?.id === w.id) placePanelSlots();
   };
   const onUp = () => {
     removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp);
     ghost.remove(); el.classList.remove('moving'); place(el, w);
     if (!moved) return select(w.id);
-    fitCanvas(); save();
-    if (mode !== 'move') { const r = results.get(w.id); if (r) paint(el.querySelector('.wb'), w, r); }
+    if (sw()?.id === w.id) placePanelSlots();
+    save();
   };
   addEventListener('pointermove', onMove); addEventListener('pointerup', onUp);
 });
-// Apex widgets are heavier to redraw: at most once per frame while dragging.
-let lrFrame = 0, lrArgs;
-function liveRedraw(el, w, r) { lrArgs = [el, w, r]; if (!lrFrame) lrFrame = requestAnimationFrame(() => { lrFrame = 0; paint(...lrArgs); }); }
-$('canvas').addEventListener('click', ev => {
-  const el = ev.target.closest('.wd');
-  if (!el) return select(null);
-  if (ev.target.closest('.wb') && !ev.target.closest('.flt select, .flt button')) select(el.dataset.id);
-});
-
-// Data Grid Export menu (.csv / .parquet / .sqlite): UI only for now.
-$('canvas').addEventListener('grid-export', e => UI.toast(`Export to .${e.detail.format}: not built yet.`));
-// ---- add ----
-// Every menu here lists its items alphabetically (A to Z, by the item name without its tip).
-document.querySelectorAll('.dd-menu').forEach(Menus.sort);
-
-// ---- Add popup (Charts button = D3 Studio's published charts): by category
-// (collapsible; the open ones are remembered), 8 tiles per row.
-// Tile = the package's thumb.svg (D3 Studio saves one) or a blank 100 x 80 placeholder, name under it. Click = add it.
-const WP_OPEN = 'dn-dashboard-picker-open';
-const catOf = m => m.category || { apexgrid: 'Tables', filter: 'Controls' }[m.kind] || 'Other';
-function pickerOpen() { try { return JSON.parse(localStorage.getItem(WP_OPEN)) || {}; } catch { return {}; } }
-const pickCharts = true;   // the popup lists D3 Studio's published charts (no widgets)
-function drawPicker() {
-  const open = pickerOpen(), cats = new Map();
-  for (const m of [...pkgs.values()].filter(m => !!m.chart === pickCharts).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))) { const c = catOf(m); if (!cats.has(c)) cats.set(c, []); cats.get(c).push(m); }
-  $('wp-body').innerHTML = [...cats].sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b)).map(([c, list]) =>
-    `<div class="wp-cat ${open[c] !== false ? 'open' : ''}" data-cat="${esc(c)}"><div class="wp-ch">${Icons.caret(0, 'wp-arrow')}<b>${esc(c)}</b><small>${list.length}</small></div>
-    <div class="wp-grid">${list.map(m => `<div class="wp-tile" data-pkg="${esc(m.id)}" title="${esc(m.description || m.name)}">
-      <div class="wp-img">${m.thumb ? `<img src="/${m.dir.split('/').map(encodeURIComponent).join('/')}/${encodeURIComponent(m.thumb)}?v=${esc(m.version || 0)}" alt="">` : ''}</div>
-      <div class="wp-name">${esc(m.name)}</div></div>`).join('')}</div></div>`).join('') || `<div class="muted" style="padding:12px 0">${pickCharts ? 'No published charts yet. Build one in D3 Studio and Publish it.' : 'No widgets in the widgets folder.'}</div>`;
-}
-const showPicker = UI.guard(async () => { $('wpick').hidden = false; drawPicker(); await loadPkgs(); drawPicker(); });   // picks up packages added to widgets/ meanwhile
-const hidePicker = () => { $('wpick').hidden = true; };
-$('addChart').onclick = ev => { ev.stopPropagation(); $('optmenu').classList.remove('open'); showPicker(); };
-$('wp-close').onclick = hidePicker;
-$('wpick').addEventListener('click', ev => { if (ev.target === $('wpick')) hidePicker(); });
-$('wp-body').addEventListener('click', ev => {
-  const head = ev.target.closest('.wp-ch');
-  if (head) {
-    const cat = head.parentElement, open = pickerOpen();
-    cat.classList.toggle('open'); open[cat.dataset.cat] = cat.classList.contains('open');
-    try { localStorage.setItem(WP_OPEN, JSON.stringify(open)); } catch {}
-    return;
-  }
-  const t = ev.target.closest('.wp-tile'); if (t) { hidePicker(); addWidget(t.dataset.pkg); }
-});
-addEventListener('keydown', e => { if (e.key === 'Escape' && !$('wpick').hidden) { e.stopImmediatePropagation(); hidePicker(); } }, true);
-
-// ---- options ----
-Menus.bind($('opts'), $('optmenu'), act => {
-  if (act === 'refresh') refreshAll();
-});
-const addWidget = UI.guard(async pid => {
-  const m = pkgs.get(pid), ds = readyDs(); if (!m) return;
-  // A chart starts with no data (its fields are linked in Chart Settings); a widget gets the only dataset at once.
-  const w = { id: crypto.randomUUID().slice(0, 8), type: 'widget', pkg: m.id, title: '', dataset: ds.length === 1 && m.kind !== 'd3' ? ds[0].name : '',
-    // A new widget always opens in the middle of the grid (and on top: select() below).
-    x: (COLS - SIZE[0]) / 2, y: Math.max(0, Math.floor(($('wrap').clientHeight / G - SIZE[1]) / 2)), w: SIZE[0], h: SIZE[1], inputs: {}, opts: {} };
-  clamp(w);
-  if (w.dataset) ApexWidget.autoBind(m, w, dsOf(w.dataset)?.columns || []);   // one dataset: connected at once
-  dash.widgets.push(w); await saveNow();
-  $('canvas').append(widgetEl(w)); fitCanvas(); draw(w);
-  select(w.id);
-  document.querySelector(`.wd[data-id="${w.id}"]`).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  ctx.log(`Widget added: ${m.name}`);
-});
-const refreshAll = UI.guard(async () => { await ctx.reload(); await loadSrc(); renderAll(true); await Projects.touchModule(ctx.folder, 'dashboard'); });
-
-// ---- settings: always in the Pop-out Settings window (ui/html/dashboard-settings.html), which reads / writes the selected
-// widget through window.DashBridge. Selecting a widget opens the window when it is not open yet.
-let pop = null;
-const popped = () => pop && !pop.closed;
-function openPop() {
-  if (popped()) return pop.focus();
-  const W = 800, H = 800, L = (screen.availLeft ?? 0) + screen.availWidth - W, T = (screen.availTop ?? 0) + screen.availHeight - H;
-  pop = open('dashboard-settings.html', 'dn-dashboard-settings', `popup,width=${W},height=${H},left=${L},top=${T}`);
-  // The browser may reuse a saved window size / place: force 800 x 800 in the bottom-right corner.
-  try { pop?.resizeTo(W, H); pop?.moveTo(L, T); } catch {}
-  if (!pop) UI.toast('The settings window was blocked by the browser. Allow pop-ups for this site.', 'err');
-}
-// Bring a widget to the front: the highest z of all (renumbered 1..n, saved with the dashboard).
+$('stage').addEventListener('pointerdown', ev => { if (!ev.target.closest('.card, .tools, .slots .slot') && ev.button === 0) { select(null); closePanel(); } });
 function toFront(w) {
-  if (!w) return;
-  const order = dash.widgets.filter(x => x !== w).sort((a, b) => (a.z || 0) - (b.z || 0));
-  if (dash.widgets.every(x => x === w || (x.z || 0) < (w.z || 0))) return;   // already on top
-  [...order, w].forEach((x, i) => { x.z = i + 1; const e = document.querySelector(`.wd[data-id="${x.id}"]`); if (e) e.style.zIndex = x.z; });
+  if (!w || dash.widgets.every(x => x === w || (x.z || 0) < (w.z || 0))) return;
+  [...dash.widgets.filter(x => x !== w).sort((a, b) => (a.z || 0) - (b.z || 0)), w].forEach((x, i) => { x.z = i + 1; const e = cardOf(x); if (e) e.style.zIndex = x.z; });
   save();
 }
 function select(id) {
-  selId = id;
-  toFront(byId(id));
-  document.querySelectorAll('.wd').forEach(e => e.classList.toggle('sel', e.dataset.id === id));
-  if (popped()) pop.DNSettings?.show();   // the settings window follows the selection once it is open (right click > Widget / Chart Settings)
+  selId = id; toFront(byId(id));
+  document.querySelectorAll('.card').forEach(e => e.classList.toggle('sel', e.dataset.id === id));
+  if (panelId && id && id !== panelId) openPanel(byId(id));   // the open panel follows the selection
+  if (dataId && id && id !== dataId) { dataId = id; drawSlots(); DataWindow.update({ current: byId(id)?.dataset || null, ctx: id }); }   // so does Edit Data
 }
-const look = w => { const r = results.get(w.id), el = document.querySelector(`.wd[data-id="${w.id}"] .wb`); if (r && el) liveRedraw(el, w, r); };
-window.DashBridge = {
-  state() {
-    const w = byId(selId); if (!w) return null;
-    const ds = readyDs().map(d => d.name);   // only datasets that exist in data/source (a deleted one is not offered)
-    // tables: every ready dataset's columns (charts link each input to TABLE.FIELD).
-    return { w, m: pkgOf(w), columns: w.dataset ? dsOf(w.dataset)?.columns || [] : null, datasets: ds, title: titleOf(w), pkgName: pkgOf(w)?.name || w.pkg,
-      chart: isChart(w), tables: Object.fromEntries(readyDs().map(d => [d.name, d.columns || []])) };
-  },
-  change(w, kind, live) { if (kind === 'look') { look(w); if (!live) save(); } else changed(w); },
-  setTitle(w, v) { w.title = v; changed(w, false); },
-  setDataset(w, v) {
-    const old = w.dataset; w.dataset = v; w.inputs = {};
-    if (!isFilter(w)) ApexWidget.autoBind(pkgOf(w), w, dsOf(v)?.columns || []);   // plug and play: inputs connected at once
-    if (isFilter(w)) { w.sel = {}; w.filters = []; dash.widgets.filter(x => x.dataset === old && x !== w).forEach(x => draw(x)); }
-    changed(w);
-  },
-  del: w => delWidget(w),
-  // Data Grid window (ui/html/dashboard-grid.html): the widget's dataset, columns and WHERE (its own + the Filter widgets).
-  drill(id) {
-    const w = byId(id), d = w && dsOf(w.dataset); if (!d) return null;
-    return { title: titleOf(w), dataset: w.dataset, columns: d.columns || [], where: isFilter(w) ? whereOf({ dataset: w.dataset }) : whereOf(w), views: viewsOf(w.dataset) };
-  },
-};
-// Right-click > Data Grid: the rows under the widget in their own window (one window per widget).
-const openDrill = UI.guard(async w => {
-  if (!w.dataset || !dsOf(w.dataset)) throw new Error(isChart(w) ? 'Link the chart\'s fields first (Chart Settings).' : 'Pick a dataset for this widget first (Widget Settings).');
-  await ensureMem(w.dataset);
-  const W = 1200, H = 750, g = open(`dashboard-grid.html?id=${encodeURIComponent(w.id)}`, `dn-grid-${w.id}`, `popup,width=${W},height=${H}`);
-  if (!g) UI.toast('The Data Grid window was blocked by the browser. Allow pop-ups for this site.', 'err'); else g.focus();
+
+// ---- Chart Settings: Chart Builder's panel, for the chart picked with Right-click > Chart Settings ----
+const pw = () => byId(panelId);
+const inputsOf = w => ApexWidget.inputsOf(pkgOf(w) || {});
+function openPanel(w) {
+  if (!w) return;
+  panelId = w.id; select(w.id);
+  $('cb').classList.remove('empty');
+  drawPanel();
+}
+function closePanel() { panelId = null; $('cb').classList.add('empty'); drawSlots(); }
+$('close').onclick = closePanel;
+function drawPanel() {
+  const w = pw(); if (!w) return closePanel();
+  const m = pkgOf(w) || { options: [], inputs: [] };
+  $('name').value = w.title || ''; $('name').placeholder = m.name || w.pkg;
+  const cs = (m.options || []).filter(o => o.type === 'color');
+  $('colourBox').hidden = !cs.length;
+  w.opts ||= {};
+  ChartPanel.colours($('colours'), cs.map(o => o.path in w.opts ? w.opts[o.path] : o.default ?? null), (i, v) => { w.opts[cs[i].path] = v; look(w); });
+  const val = p => p in w.opts ? w.opts[p] : (m.options.find(o => o.path === p) || {}).default, set = (p, v) => { w.opts[p] = v; look(w); };
+  const SECS = { 'X-Axis': 'X', 'Y-Axis': 'Y' }, os = m.options || [];   // X-Axis / Y-Axis sections, Settings: the rest
+  // What is on each input (the linked column's type, else the chart's sample rows): the Format drop-downs offer its formats.
+  const cols = dsOf(w.dataset)?.columns || [], kinds = Object.fromEntries(inputsOf(w).map(i => { const c = cols.find(x => x.name === w.inputs?.[i.key]?.col);
+    const k = c ? ChartPanel.kindOf(c.type) : ChartPanel.valueKind(m.sampleRows, i.key);
+    return [i.key, c && i.role === 'measure' && w.inputs[i.key].agg !== 'none' ? 'number' : k === 'num' ? 'number' : k]; }));
+  for (const [g, k] of Object.entries(SECS)) { const list = os.filter(o => o.group === g); $(k.toLowerCase() + 'Box').hidden = !list.length; ChartPanel.settings($('opts' + k), list, val, set, kinds); }
+  ChartPanel.settings($('opts'), os.filter(o => !SECS[o.group]), val, set, kinds);
+  drawOrder(); drawSlots();
+}
+function drawOrder() {
+  const w = pw(), m = pkgOf(w);
+  $('orderBox').hidden = true || !m || !ApexWidget.hasTop(m) || !inputsOf(w).some(i => i.role === 'measure' && ApexWidget.binding(m, w, i).agg !== 'none');
+  if (m) { $('sort').value = ApexWidget.sortOf(m, w); $('top').value = ApexWidget.topOf(m, w); }
+}
+const links = w => Object.fromEntries(Object.entries(w.inputs || {}).filter(([, l]) => l?.col));
+// The chart whose X / Y slots show: the one in Edit Data, else the one in Chart Settings.
+let dataId = null;
+const sw = () => byId(dataId) || pw();
+function drawSlots() { const w = sw(); $('slots').innerHTML = w && isChart(w) ? ChartPanel.slots(inputsOf(w), links(w)) : ''; placePanelSlots(); }
+function placePanelSlots() {
+  const w = sw(); if (!w || !$('slots').children.length) return;
+  ChartPanel.placeSlots($('slots'), inputsOf(w), { left: OX + w.x * G, top: w.y * G, w: w.w * G, h: w.h * G }, pkgOf(w)?.builder?.template === 'hbar' && !pkgOf(w)?.builder?.custom);   // Bar (horizontal): X is down the left
+}
+// A setting that only changes the look: redraw from the last result (no query).
+const look = w => { save(); repaintSoon(w); };
+// A data change: save, re-run the chart (debounced while typing / dragging).
+const rerun = UI.debounce(w => draw(w), 250);
+function dataChanged(w) { save(); if (panelId === w.id) drawPanel(); else drawSlots(); drawOrder(); rerun(w); }   // the panel: formats follow the linked fields
+$('name').oninput = () => { const w = pw(); if (!w) return; w.title = $('name').value; const c = cardOf(w); if (c) { setTitle(c, w); repaintSoon(w); } save(); };
+// ---- Edit Data (right-click a chart): the project's clean datasets in a window; drag a field onto X / Y ----
+const dsList = () => srcDs.map(d => ({ key: d.name, name: d.name, columns: d.columns || [] }));
+function openData(w) {
+  dataId = w.id; select(w.id); drawSlots();
+  DataWindow.open({ datasets: dsList(), current: w.dataset || null, ctx: w.id,
+    onSample: () => { const x = sw(); if (!x) return; x.inputs = {}; x.dataset = ''; dataChanged(x); DataWindow.update({ current: null }); },
+    onClose: () => { dataId = null; drawSlots(); } });
+}
+// A field of another dataset: the chart reads that one now (fields keep their slot where it has them).
+function useDataset(w, name) {
+  if (!name || name === w.dataset) return;
+  w.dataset = name; w.inputs ||= {};
+  const cols = dsOf(name)?.columns || [];
+  for (const k of Object.keys(w.inputs)) if (!cols.some(c => c.name === w.inputs[k]?.col)) delete w.inputs[k];
+  DataWindow.update({ current: name });
+}
+function link(key, col) {
+  const w = sw(), i = inputsOf(w).find(x => x.key === key); if (!i) return;
+  const num = ChartPanel.NUMERIC.test(dsOf(w.dataset)?.columns.find(c => c.name === col)?.type || '');
+  w.inputs ||= {};
+  w.inputs[key] = { col, ...(i.role === 'measure' ? { agg: w.inputs[key]?.agg || (i.agg === 'none' ? 'none' : num ? i.agg || 'sum' : 'count') } : {}) };
+  dataChanged(w);
+}
+function autoPlace(col) {
+  const w = sw(), ins = inputsOf(w), has = k => !!w.inputs?.[k]?.col;
+  const num = ChartPanel.NUMERIC.test(dsOf(w.dataset)?.columns.find(c => c.name === col)?.type || '');
+  const fits = i => num ? i.role === 'measure' : i.role !== 'measure';
+  const i = ins.find(x => !has(x.key) && fits(x)) || ins.find(x => !has(x.key)) || ins.find(fits);
+  if (i) link(i.key, col);
+}
+$('slots').addEventListener('change', e => { const k = e.target.dataset.agg, w = sw(); if (k && w?.inputs?.[k]) { w.inputs[k].agg = e.target.value; dataChanged(w); } });
+$('slots').addEventListener('click', e => { const k = e.target.dataset.clear, w = sw(); if (k && w) { delete w.inputs[k]; dataChanged(w); } });
+const over = (el, on) => el?.classList.toggle('over', on);
+const dropCard = e => { const c = e.target.closest('.card'); return c && c.dataset.id === sw()?.id ? c : null; };
+$('slots').addEventListener('dragover', e => { if (!e.dataTransfer.types.includes('text/x-field')) return; e.preventDefault(); over(e.target.closest('.slot'), true); });
+$('slots').addEventListener('dragleave', e => over(e.target.closest('.slot'), false));
+$('cards').addEventListener('dragover', e => { if (!e.dataTransfer.types.includes('text/x-field') || !dropCard(e)) return; e.preventDefault(); over(dropCard(e), true); });
+$('cards').addEventListener('dragleave', e => over(dropCard(e), false));
+for (const zone of [$('slots'), $('cards')]) zone.addEventListener('drop', e => {
+  const col = e.dataTransfer.getData('text/x-field'); if (!col || !sw()) return;
+  e.preventDefault(); document.querySelectorAll('.over').forEach(x => x.classList.remove('over'));
+  useDataset(sw(), e.dataTransfer.getData('text/x-dataset'));
+  const s = e.target.closest('.slot'); if (s) link(s.dataset.key, col); else if (dropCard(e)) autoPlace(col);
 });
-// A setting changed: save, update the title, re-run the widget (debounced while typing).
-const rerun = UI.debounce(w => draw(w), 350), rerunAll = UI.debounce(w => filtersChanged(w), 350);
-function changed(w, query = true) {
-  save();
-  const el = document.querySelector(`.wd[data-id="${w.id}"]`); if (el) el.querySelector('b').textContent = titleOf(w);
-  if (query) isFilter(w) ? rerunAll(w) : rerun(w);
-}
-addEventListener('keydown', e => { if (e.key === 'Escape' && !document.querySelector('dialog[open]')) { $('ctxmenu').classList.remove('open'); select(null); } });
-// ---- right-click menu on a widget: Widget Settings / Chart Settings (opens the settings window), Refresh, Delete ----
+$('sort').onchange = () => { const w = pw(); if (w) { w.sort = $('sort').value; dataChanged(w); } };
+$('top').onchange = () => { const w = pw(); if (w) { w.top = Math.max(1, +$('top').value || 20); dataChanged(w); } };
+document.querySelectorAll('details.sec').forEach(d => {   // folded sections stay folded (same keys as Chart Builder)
+  const key = 'chartbuilder.fold.' + d.querySelector('summary').textContent;
+  try { if (localStorage.getItem(key) === '1') d.open = false; } catch {}
+  d.addEventListener('toggle', () => { try { localStorage.setItem(key, d.open ? '0' : '1'); } catch {} });
+});
+
+// ---- right-click menu ----
 let ctxId = null;
-$('canvas').addEventListener('contextmenu', ev => {
-  const el = ev.target.closest('.wd'); if (!el) return;
+$('cards').addEventListener('contextmenu', ev => {
+  const el = ev.target.closest('.card'); if (!el) return;
   ev.preventDefault(); ctxId = el.dataset.id; select(ctxId);
-  const cw = byId(ctxId), what = cw && isChart(cw) ? 'chart' : 'widget';
-  $('ctxSet').textContent = cw ? setName(cw) : 'Widget Settings'; $('ctxDel').textContent = `Delete ${what}`;
-  document.querySelectorAll('#ctxmenu .ctxWhat').forEach(e => { e.textContent = what; });
   const m = $('ctxmenu'); Menus.closeAll(); Menus.tips(m, false); m.classList.add('open');
-  const x = Math.min(ev.clientX, innerWidth - m.offsetWidth - 4), y = Math.min(ev.clientY, innerHeight - m.offsetHeight - 4);
-  m.style.left = `${Math.max(0, x)}px`; m.style.top = `${Math.max(0, y)}px`;
-  if (ev.shiftKey) Menus.tips(m, true);   // Shift tips: ui/js/core/menus.js (every .dd-menu)
+  m.style.left = `${Math.max(0, Math.min(ev.clientX, innerWidth - m.offsetWidth - 4))}px`; m.style.top = `${Math.max(0, Math.min(ev.clientY, innerHeight - m.offsetHeight - 4))}px`;
+  if (ev.shiftKey) Menus.tips(m, true);
 });
+addEventListener('pointerdown', e => { if (!e.target.closest('#ctxmenu')) $('ctxmenu').classList.remove('open'); }, true);
 addEventListener('blur', () => $('ctxmenu').classList.remove('open'));
 $('ctxmenu').onclick = ev => {
   const act = ev.target.closest('[data-act]')?.dataset.act, w = byId(ctxId); if (!act || !w) return;
   $('ctxmenu').classList.remove('open');
-  if (act === 'settings') { select(w.id); openPop(); pop?.DNSettings?.show(); }
+  if (act === 'data') openData(w);
+  else if (act === 'settings') openPanel(w);
   else if (act === 'grid') openDrill(w);
-  else if (act === 'refresh') isFilter(w) ? filtersChanged(w) : draw(w, true);
+  else if (act === 'refresh') draw(w, true);
   else if (act === 'delete') delWidget(w);
 };
-addEventListener('beforeunload', () => { if (popped()) pop.close(); });
+addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+  if (!$('wpick').hidden) return hidePicker();
+  $('ctxmenu').classList.remove('open');
+  if (panelId) closePanel(); else select(null);
+});
+// Data Grid window (ui/html/dashboard-grid.html) reads the chart's dataset through window.DashBridge.drill.
+window.DashBridge = {
+  drill(id) { const w = byId(id), d = w && dsOf(w.dataset); return d ? { title: titleOf(w), dataset: w.dataset, columns: d.columns || [], where: w.where?.trim() || undefined, views: viewsOf(w.dataset) } : null; },
+};
+const openDrill = UI.guard(async w => {
+  if (!dsOf(w.dataset)) throw new Error('Link the chart\'s fields first (Right-click > Chart Settings).');
+  await ensureMem(w.dataset);
+  const g = open(`dashboard-grid.html?id=${encodeURIComponent(w.id)}`, `dn-grid-${w.id}`, 'popup,width=1200,height=750');
+  if (!g) UI.toast('The Data Grid window was blocked by the browser. Allow pop-ups for this site.', 'err'); else g.focus();
+});
 const delWidget = UI.guard(async w => {
-  if (!w) return;
-  focus();   // the confirm dialog is in this window
   if (!await UI.confirm(`Delete "${titleOf(w)}"?`, { danger: true, ok: 'Delete' })) return;
+  if (panelId === w.id) closePanel();
+  if (dataId === w.id) DataWindow.close();
   dash.widgets = dash.widgets.filter(x => x !== w); results.delete(w.id);
-  const del = document.querySelector(`.wd[data-id="${w.id}"]`); if (del) { ApexWidget.dispose(del.querySelector('.wb')); del.remove(); }
-  select(null); fitCanvas(); await saveNow(); DNFS.remove(cachePath(w)).catch(() => {});
-  if (isFilter(w)) filtersChanged(w);   // its selections no longer apply
-  ctx.log(`Widget deleted: ${titleOf(w)}`);
+  const c = cardOf(w); if (c) { ApexWidget.dispose(c.querySelector('.pv')); c.remove(); }
+  select(null); fitHint(); await saveNow(); DNFS.remove(cachePath(w)).catch(() => {});
+  ctx.log(`Chart deleted: ${titleOf(w)}`);
 });
 
-// Add list = every chart in workspace/chart-builder/live/ with a valid chart.json (+ the built-in Data Grid for grids already placed).
-async function loadPkgs() {
-  const list = await ChartRegistry.list(true);
-  pkgs = new Map(list.map(m => [m.id, m]));
+// ---- Add chart: the published charts by category, 8 tiles per row; click = place it in the middle ----
+const WP_OPEN = 'dn-dashboard-picker-open';
+const pickerOpen = () => { try { return JSON.parse(localStorage.getItem(WP_OPEN)) || {}; } catch { return {}; } };
+async function loadPkgs() { pkgs = new Map((await ChartRegistry.list(true)).map(m => [m.id, m])); }
+function drawPicker() {
+  const open = pickerOpen(), cats = new Map();
+  for (const m of [...pkgs.values()].filter(m => m.chart)) { const c = m.category || 'Other'; if (!cats.has(c)) cats.set(c, []); cats.get(c).push(m); }
+  $('wp-body').innerHTML = [...cats].sort(([a], [b]) => (a === 'Other') - (b === 'Other') || a.localeCompare(b)).map(([c, list]) =>
+    `<div class="wp-cat ${open[c] !== false ? 'open' : ''}" data-cat="${esc(c)}"><div class="wp-ch">${Icons.caret(0, 'wp-arrow')}<b>${esc(c)}</b><small>${list.length}</small></div>
+    <div class="wp-grid">${list.map(m => `<div class="wp-tile" data-pkg="${esc(m.id)}" title="${esc(m.description || m.name)}">
+      <div class="wp-img">${m.thumb ? `<img src="/${m.dir.split('/').map(encodeURIComponent).join('/')}/${encodeURIComponent(m.thumb)}?v=${esc(m.version || 0)}" alt="">` : ''}</div>
+      <div class="wp-name">${esc(m.name)}</div></div>`).join('')}</div></div>`).join('') || '<div class="muted" style="padding:12px 0">No published charts yet. Build one in Chart Builder and Publish it.</div>';
 }
-// Window resized: redraw charts at their new pixel size (from the last result, no re-query).
-// The canvas area changed size (window resize, header added): re-fit the grid, move / redraw the widgets.
-// Live while resizing: grid, boxes and charts every frame (charts follow the new size at once).
-// Every frame while the window resizes (refit is frame-throttled): charts follow the new size live, no wait.
-// A chart with no fields linked yet (no result) is drawn empty at the new size.
-const repaint = () => dash.widgets.forEach(w => { const e = document.querySelector(`.wd[data-id="${w.id}"] .wb`), r = results.get(w.id); if (e && r) paint(e, w, r); else if (e && isChart(w) && !isReady(w)) draw(w); });
-let fitFrame = 0;
-function refit() {
-  if (!fitGrid()) return;
-  fitCanvas();
-  dash.widgets.forEach(w => { const e = document.querySelector(`.wd[data-id="${w.id}"]`); if (e) place(e, w); });
-  repaint();
-}
-new ResizeObserver(() => { if (!fitFrame) fitFrame = requestAnimationFrame(() => { fitFrame = 0; refit(); }); }).observe($('wrap'));
-// Toolbar into the header: the global header when embedded (added by embed.js on DOMContentLoaded), else the page's own.
-function mountTools() {
-  const h = document.querySelector('.topbar.gh') || document.querySelector('.app > .topbar');
-  h.classList.add('hdr-host'); if ($('tools').parentNode !== h) h.append($('tools'));
-}
-// embed.js (loaded first) adds the global header on DOMContentLoaded; this listener runs after it.
-if (document.readyState === 'loading') addEventListener('DOMContentLoaded', mountTools); else mountTools();
+const showPicker = UI.guard(async () => { $('wpick').hidden = false; drawPicker(); await loadPkgs(); drawPicker(); });
+const hidePicker = () => { $('wpick').hidden = true; };
+$('addChart').onclick = showPicker;
+$('wp-close').onclick = hidePicker;
+$('wpick').addEventListener('click', ev => { if (ev.target === $('wpick')) hidePicker(); });
+$('wp-body').addEventListener('click', ev => {
+  const head = ev.target.closest('.wp-ch');
+  if (head) { const cat = head.parentElement, o = pickerOpen(); cat.classList.toggle('open'); o[cat.dataset.cat] = cat.classList.contains('open'); try { localStorage.setItem(WP_OPEN, JSON.stringify(o)); } catch {} return; }
+  const t = ev.target.closest('.wp-tile'); if (t) { hidePicker(); addWidget(t.dataset.pkg); }
+});
+const addWidget = UI.guard(async pid => {
+  const m = pkgs.get(pid); if (!m) return;
+  const w = clamp({ id: crypto.randomUUID().slice(0, 8), type: 'widget', pkg: m.id, title: '', dataset: '', x: (COLS - SIZE[0]) / 2,
+    y: Math.max(0, Math.floor(($('stage').clientHeight / G - SIZE[1]) / 2)), w: m.builder?.size?.w || SIZE[0], h: m.builder?.size?.h || SIZE[1], inputs: {}, opts: {} });
+  w.x = Math.round((COLS - w.w) / 2);
+  dash.widgets.push(w); await saveNow();
+  $('cards').append(cardEl(w)); fitHint(); draw(w); openPanel(w);
+  ctx.log(`Chart added: ${m.name}`);
+});
+$('refresh').onclick = UI.guard(async () => { await loadSrc(); await loadPkgs(); renderAll(true); if (panelId) drawPanel(); });
 
 (async () => {
   try {
-    ctx = await ModulePage.init('dashboard', 'Dashboard');
-    await loadSrc();
-    mountTools(); fitGrid();
-    await loadPkgs();
+    ctx = await ModulePage.init('dashboard', 'Dashboard Builder');
+    await Promise.all([loadSrc(), loadPkgs()]);
+    fitGrid();
     const raw = await DNFS.readJSONOr(FILE(), null);
-    dash = raw?.version === 3 ? raw : { version: 3, widgets: [] };   // older dashboards (built-in chart / table widgets) start empty
-    dash.widgets = dash.widgets.filter(w => w.type === 'widget').map(clamp); dash.cols = COLS; dash.rows = ROWS;
-    if (raw && raw.version !== 3) { await saveNow(); ctx.log('Dashboard reset: built-in widgets were removed (Apex widgets only).', 'warn'); }
+    dash = raw?.version === 3 ? raw : { version: 3, widgets: [] };
+    dash.widgets = (dash.widgets || []).filter(w => w.type === 'widget').map(clamp);
     renderAll();
-  } catch (e) { UI.toast(e.message, 'err'); $('canvas').innerHTML = `<div class="hint err">${esc(e.message)}</div>`; }
+    const dw = DataWindow.wasOpen(), dwW = dw && byId(dw.ctx); if (dwW) openData(dwW);   // Edit Data was open before the refresh
+  } catch (e) { UI.toast(e.message, 'err'); $('cards').innerHTML = `<div class="hint err">${esc(e.message)}</div>`; }
 })();
 </script>
 </body>

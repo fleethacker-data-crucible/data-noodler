@@ -1,0 +1,22 @@
+{
+  "$kind": "d3",
+  "data": [
+    {
+      "key": "x",
+      "label": "X",
+      "role": "dimension",
+      "axis": "x"
+    },
+    {
+      "key": "y",
+      "label": "Y",
+      "role": "measure",
+      "axis": "y",
+      "agg": "sum"
+    }
+  ],
+  "query": {
+    "sort": "desc",
+    "top": 20
+  }
+}

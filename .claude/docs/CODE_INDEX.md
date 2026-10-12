@@ -96,11 +96,11 @@ CSS/JS) and `server/server.ps1` (split into dot-sourced parts if it grows, like 
 
 | Path | Purpose |
 |---|---|
-| `workspace/chart-builder/dev/<id>/`, `workspace/chart-builder/live/<id>/` | Chart packages: `chart.json` (+ `spec.json`, `d3-code.js`, `sample.json`, `style.css`, `thumb.svg`). dev = Save, live = Publish (the Dashboard reads only live). Edit only `dev/<id>/d3-code.js`. |
+| `workspace/chart-builder/dev/<id>/`, `workspace/chart-builder/published/<id>/` | Chart packages: `chart.json` (+ `spec.json`, `d3-code.js`, `sample.json`, `style.css`, `thumb.svg`). dev = Save, published = Publish (the Dashboard Builder reads only published). Edit only `dev/<id>/d3-code.js`. |
 | `ui/js/charts/apex-widget.js` | `ApexWidget` (inputs, query, row shaping, theme, style per chart) and `ChartRegistry` (live charts + the built-in Data Grid). |
 | `ui/js/charts/d3-render.js` | `D3Render`: compile / draw a chart's code in its `<div>` (`d3, data, el, W, H, colors, opts, theme, inputs` + accessors), fit, rounded bars, redraw animation. |
 | `ui/js/charts/apex-render.js`, `apex-options.js` | ApexCharts / ApexTree drawing for dashboards made before D3 charts (kept so they still draw); option catalog. |
-| `ui/js/charts/chart-settings.js`, `color-picker.js` | Chart Settings pop-out (inputs → TABLE.FIELD, options); colour swatch. |
+| `ui/js/charts/chart-panel.js` (+ `ui/css/chart-studio.css`), `color-picker.js` | `ChartPanel`: the settings panel shared by Chart Builder and the Dashboard Builder (field chips, X / Y slots, Colors, Settings), built from the chart's inputs / options; colour swatch. |
 | `ui/js/grid/data-grid.js` (+ `data-grid.css`, `data-grid-pkg.js`, `grid-remote.js`) | `DNGrid`: Dashboard Data Grid (sort / filter / search, export, pop-out); engine paging (`GridRemote`). |
 | `ui/js/grid/data-table.js` (+ `ui/html/table-pop.html`) | `DataTable`: Import / Transform preview tables (schema-table look; Search, Pop-out, Export). |
 | `ui/js/d3studio/studio.js`, `d3-api.js`, `d3-assist.js`, `observable.js` | D3 Studio: editor, inputs, data from a CLEAN_ dataset via the engine, live code file, Save / Publish; D3 API list, suggestions / checks, Observable import. |
@@ -112,8 +112,8 @@ CSS/JS) and `server/server.ps1` (split into dot-sourced parts if it grows, like 
 | Path | Purpose |
 |---|---|
 | `project_manager.html` | App entry point (hard-coded `$entryPage` in server.ps1); red Server Control button → `/api/panel`. |
-| `import.html`, `transform.html`, `dashboard.html`, `d3-studio.html`, `publish.html` | Modules. |
-| `dashboard-settings.html`, `dashboard-grid.html`, `grid-pop.html` | Dashboard pop-outs: Chart Settings, Data Grid drill-down, any grid's Pop-out. |
+| `import.html`, `transform.html`, `dashboard.html` (Dashboard Builder: places published charts; Chart Builder's look), `d3-studio.html`, `publish.html` | Modules. |
+| `dashboard-grid.html`, `grid-pop.html` | Dashboard Builder pop-outs: Data Grid drill-down, any grid's Pop-out. |
 | `syntax-library.html` | SQL syntax / function reference (Transform's Syntax Library button). |
 | `benchmark.html` | Benchmark (Project Manager > Utilities): engine speed by rows, rows per batch and workers. |
 | `app.html` | Redirect only (old shell links → the module page). |

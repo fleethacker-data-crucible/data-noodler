@@ -4,7 +4,7 @@
 // Until they are linked the Sample data is drawn. The Generated box shows what the code gets ready made (data, the X / Y
 // accessors, W x H, colors, opts, theme, inputs); Starter code writes the scales, svg, grid and axes from the inputs, so
 // only the marks are left to write. The chart is drawn in a <div> and its svg always scales to fit it (D3Render.fit).
-// Save = the chart package into workspace/chart-builder/dev/<id>/ (work in progress); Publish = Save + copy to workspace/chart-builder/live/<id>/
+// Save = the chart package into workspace/chart-builder/dev/<id>/ (work in progress); Publish = Save + copy to workspace/chart-builder/published/<id>/
 // (Dashboard > Charts lists only live charts). On the Dashboard a chart starts with no data (axes / grid only) until its
 // inputs are linked in Right-click > Chart Settings; the links made here are only for testing (chart.json "studio").
 // A chart package (kind 'd3'):

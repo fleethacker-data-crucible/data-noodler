@@ -1,0 +1,365 @@
+{
+  "id": "column-chart",
+  "name": "Column Chart",
+  "description": "",
+  "category": "Column",
+  "version": 26,
+  "kind": "d3",
+  "spec": "spec.json",
+  "style": "style.css",
+  "code": "d3-code.js",
+  "sample": "sample.json",
+  "thumb": "thumb.svg",
+  "inputs": [
+    {
+      "key": "x",
+      "label": "X",
+      "role": "dimension",
+      "axis": "x"
+    },
+    {
+      "key": "y",
+      "label": "Y",
+      "role": "measure",
+      "axis": "y",
+      "agg": "sum"
+    }
+  ],
+  "options": [
+    {
+      "path": "colors.0",
+      "label": "Color 1",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.1",
+      "label": "Color 2",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.2",
+      "label": "Color 3",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.3",
+      "label": "Color 4",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.4",
+      "label": "Color 5",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.5",
+      "label": "Color 6",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.6",
+      "label": "Color 7",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "colors.7",
+      "label": "Color 8",
+      "group": "Colors",
+      "type": "color",
+      "default": null,
+      "show": true
+    },
+    {
+      "path": "xaxis.position",
+      "label": "Position",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "bottom",
+        "top"
+      ],
+      "labels": [
+        "Bottom",
+        "Top"
+      ],
+      "default": "bottom",
+      "show": true
+    },
+    {
+      "path": "xaxis.fontSize",
+      "label": "Font Size",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 13,
+      "min": 6,
+      "max": 32,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "xaxis.format",
+      "label": "Format",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "format",
+      "input": "x",
+      "default": "Title Case",
+      "show": true
+    },
+    {
+      "path": "xaxis.rotate",
+      "label": "Text Orientation",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "auto",
+        "0",
+        "-90",
+        "90",
+        "-45",
+        "45"
+      ],
+      "labels": [
+        "Auto",
+        "Horizontal",
+        "Vertical Left",
+        "Vertical Right",
+        "Diag. Left",
+        "Diag. Right"
+      ],
+      "default": "auto",
+      "show": true
+    },
+    {
+      "path": "xaxis.line",
+      "label": "Border",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true
+    },
+    {
+      "path": "grid.x",
+      "label": "Grid Lines",
+      "sub": "X-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true,
+      "sep": true
+    },
+    {
+      "path": "yaxis.position",
+      "label": "Position",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "left",
+        "right"
+      ],
+      "labels": [
+        "Left",
+        "Right"
+      ],
+      "default": "left",
+      "show": true
+    },
+    {
+      "path": "yaxis.fontSize",
+      "label": "Font Size",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 13,
+      "min": 6,
+      "max": 32,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "yaxis.format",
+      "label": "Format",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "format",
+      "input": "y",
+      "default": "1,234",
+      "show": true
+    },
+    {
+      "path": "yaxis.line",
+      "label": "Border",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": false,
+      "show": true
+    },
+    {
+      "path": "grid.y",
+      "label": "Grid Lines",
+      "sub": "Y-Axis",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true,
+      "sep": true
+    },
+    {
+      "path": "background",
+      "label": "Background",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true
+    },
+    {
+      "path": "border",
+      "label": "Border",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": false,
+      "show": true
+    },
+    {
+      "path": "topSpace",
+      "label": "Top Space",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "labels",
+      "label": "Show",
+      "sub": "Column Values",
+      "group": "X-Axis",
+      "type": "boolean",
+      "default": true,
+      "show": true
+    },
+    {
+      "path": "labelPos",
+      "label": "Position",
+      "sub": "Column Values",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "outside",
+        "inside"
+      ],
+      "labels": [
+        "Outside",
+        "Inside"
+      ],
+      "default": "outside",
+      "show": true
+    },
+    {
+      "path": "labelFont",
+      "label": "Font Size",
+      "sub": "Column Values",
+      "group": "X-Axis",
+      "type": "number",
+      "default": 13,
+      "min": 6,
+      "max": 32,
+      "step": 1,
+      "show": true
+    },
+    {
+      "path": "labelFormat",
+      "label": "Format",
+      "sub": "Column Values",
+      "group": "X-Axis",
+      "type": "format",
+      "input": "y",
+      "default": "1,234",
+      "show": true
+    },
+    {
+      "path": "labelRotate",
+      "label": "Text Orientation",
+      "sub": "Column Values",
+      "group": "X-Axis",
+      "type": "pick",
+      "choices": [
+        "auto",
+        "0",
+        "-90",
+        "90",
+        "-45",
+        "45"
+      ],
+      "labels": [
+        "Auto",
+        "Horizontal",
+        "Vertical Left",
+        "Vertical Right",
+        "Diag. Left",
+        "Diag. Right"
+      ],
+      "default": "auto",
+      "show": true
+    }
+  ],
+  "builder": {
+    "template": "bar",
+    "custom": false,
+    "opts": {
+      "xaxis.position": "bottom",
+      "xaxis.fontSize": 14,
+      "xaxis.format": "Title Case",
+      "xaxis.rotate": "auto",
+      "xaxis.line": true,
+      "grid.x": true,
+      "yaxis.position": "left",
+      "yaxis.fontSize": 14,
+      "yaxis.format": "Auto",
+      "yaxis.line": false,
+      "grid.y": true,
+      "background": true,
+      "border": false,
+      "topSpace": 5,
+      "labels": true,
+      "labelPos": "outside",
+      "labelFont": 13,
+      "labelFormat": "Auto",
+      "labelRotate": "auto"
+    },
+    "size": {
+      "w": 32,
+      "h": 18
+    }
+  },
+  "updated": "2026-10-12T05:36:32.088Z"
+}

@@ -857,6 +857,17 @@ try {
     }
 } catch { Add-Log 'server' "Rename staged -> imported failed: $($_.Exception.Message)" }
 
+# --- one-time rename: workspace/chart-builder/live -> published (published charts, read by the Dashboard Builder) ---
+try {
+    $cbLive = Join-Path $root 'workspace\chart-builder\live'; $cbPub = Join-Path $root 'workspace\chart-builder\published'
+    if (Test-Path $cbLive) {
+        if (-not (Test-Path $cbPub)) { New-Item -ItemType Directory -Path $cbPub | Out-Null }
+        Get-ChildItem $cbLive -Force | ForEach-Object { if (-not (Test-Path (Join-Path $cbPub $_.Name))) { Move-Item -LiteralPath $_.FullName -Destination $cbPub } }
+        if (-not (Get-ChildItem $cbLive -Force)) { Remove-Item -LiteralPath $cbLive }
+        Add-Log 'server' 'Moved workspace\chart-builder\live to published'
+    }
+} catch { Add-Log 'server' "Rename chart-builder live -> published failed: $($_.Exception.Message)" }
+
 # --- native data engine: C# sources in engine\, compiled by Add-Type (cached DLL), runs in this process ---
 . (Join-Path $here 'engine-loader.ps1')
 $engine = $null; $script:engineError = 'The data engine is not loaded; see the server log.'

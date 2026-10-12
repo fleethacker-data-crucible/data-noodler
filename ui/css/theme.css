@@ -233,7 +233,8 @@ a.log-more { display: inline-block; font-size: 12px; line-height: 1.2; text-deco
 .modules { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 0; }
 
 /* ---- charts ---- */
-svg text { fill: var(--text-2); font-size: 11px; font-family: 'Exo 2', system-ui, sans-serif; }
+/* Not inside a chart box (.dn-widget): a chart's text is set by its own code and style.css only. */
+svg text:not(.dn-widget text) { fill: var(--text-2); font-size: 11px; font-family: 'Exo 2', system-ui, sans-serif; }
 /* ApexCharts writes its own font-family on every label: keep the app font everywhere in a chart. */
 svg .gridline { stroke: var(--border); stroke-width: 1; }
 .gtip { position: fixed; z-index: 1000; pointer-events: none; display: none; max-width: 420px; padding: 5px 9px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.35); font-size: 12px; line-height: 1.4; white-space: pre-line; overflow-wrap: anywhere; }   /* title tooltips (ui/js/core/embed.js) */

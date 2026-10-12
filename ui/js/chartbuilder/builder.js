@@ -1,8 +1,8 @@
 // Chart Builder (ui/html/chart-builder.html): the simple way to make a chart. Pick a chart type, pick a dataset, drag its
 // fields onto the slots (Category, Value ...), set colours and a few settings; Code shows the D3 code behind it, which
 // can be edited or replaced with code from the web (the chart is then "custom": the chart type no longer rewrites it).
-// It saves the same chart package as D3 Studio (workspace/chart-builder/dev/<id>/; Publish copies it to workspace/chart-builder/live/<id>/ for
-// Dashboard > Charts), plus chart.json "builder" { template, custom, links, size } so it reopens here as it was.
+// It saves the same chart package as D3 Studio (workspace/chart-builder/dev/<id>/; Publish copies it to workspace/chart-builder/published/<id>/ for
+// Dashboard Builder), plus chart.json "builder" { template, custom, links, size } so it reopens here as it was.
 (() => {
   const { $, esc } = UI;
   const DEV = ChartRegistry.CHARTS_DEV, LIVE = ChartRegistry.CHARTS_LIVE, G = 24;
@@ -34,44 +34,71 @@
     sources = [];
     for (const p of projs) for (const d of await Projects.sourceDatasets(p.folder).catch(() => [])) if (/^CLEAN_/i.test(d.name)) sources.push({ key: `${p.folder}/${d.name}`, folder: p.folder, proj: p.name, d });
     sources.sort((a, b) => a.d.name.localeCompare(b.d.name, undefined, { sensitivity: 'base', numeric: true }));
-    const many = new Set(sources.map(s => s.folder)).size > 1;
-    $('src').innerHTML = `<option value="">Sample data</option>${sources.map(s => `<option value="${esc(s.key)}">${esc(s.d.name)}${many ? ` (${esc(s.proj)})` : ''}</option>`).join('')}`;
   }
   function setSource(key) {
     source = sources.find(s => s.key === key) || null;
-    $('src').value = source?.key || '';
     // Links keep their field where the new dataset has it.
     for (const k of Object.keys(links)) if (!columns().some(c => c.name === links[k].col)) delete links[k];
-    drawFields(); drawSlots(); loadData();
+    drawSlots(); loadData(); dataWin();
   }
-  $('src').onchange = () => setSource($('src').value);
 
-  function drawFields() {
-    const q = $('fq').value.trim().toLowerCase();
-    const cols = columns().filter(c => !q || c.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
-    $('fields').innerHTML = cols.map(c => { const k = kindOf(c.type); return `<div class="chip" draggable="true" data-col="${esc(c.name)}" title="${esc(c.name)} (${esc(c.type)})"><span class="t ${k}">${k === 'num' ? '#' : k === 'date' ? 'D' : 'Aa'}</span><span>${esc(c.name)}</span></div>`; }).join('');
-    $('fhint').hidden = !!columns().length && !q;
-    if (!source) $('fhint').textContent = 'Pick a dataset, then drag its fields onto X (under the chart) and Y (left of it), or straight onto the chart.';
-    else if (q && !cols.length) { $('fhint').hidden = false; $('fhint').textContent = 'No field matches.'; }
+  // ---- Edit Data (right-click the chart): the clean datasets and their fields in a window; drag a field onto X / Y ----
+  const dsList = () => { const many = new Set(sources.map(s => s.folder)).size > 1; return sources.map(s => ({ key: s.key, name: s.d.name, note: many ? s.proj : '', columns: s.d.columns || [] })); };
+  const dataWin = () => DataWindow.update({ datasets: dsList(), current: source?.key || null });
+  // Sample data: the chart type's sample sets (Small ... Huge), else its one sample.
+  let sampleIdx = 0;
+  let randomRows = null;   // Randomize selected sample: new values for the sample set in use (not saved)
+  const sampleRows = () => randomRows || tpl?.samples?.[sampleIdx]?.rows || tpl?.sample || editing?.sampleRows || [];
+  // New random values, the same size of numbers as the set's own (each value between half and twice the set's range).
+  function randomize() {
+    const base = tpl?.samples?.[sampleIdx]?.rows || tpl?.sample || editing?.sampleRows || [];
+    const ys = base.map(r => +r.y).filter(Number.isFinite), lo = Math.max(Math.min(...ys) / 2, 1e-9), hi = Math.max(...ys) * 1.2;
+    randomRows = base.map(r => typeof r.y === 'number' ? { ...r, y: Math.round(lo * Math.pow(hi / lo, Math.random()) * 100) / 100 } : { ...r });
+    links = {}; source = null; drawSlots(); loadData();
   }
-  $('fq').oninput = drawFields;
-  $('fields').addEventListener('dragstart', e => { const c = e.target.closest('.chip'); if (c) { e.dataTransfer.setData('text/x-field', c.dataset.col); e.dataTransfer.effectAllowed = 'copy'; document.body.classList.add('dragging'); } });
-  $('fields').addEventListener('dragend', () => document.body.classList.remove('dragging'));
-  // Double-click a field: it goes into the first empty slot that suits it.
-  $('fields').addEventListener('dblclick', e => { const c = e.target.closest('.chip'); if (c) autoPlace(c.dataset.col); });
+  const samples = () => (tpl?.samples || []).map(x => x.label);
+  const openData = () => DataWindow.open({ datasets: dsList(), current: source?.key || null, samples: samples(), sample: sampleIdx, onRandom: randomize,
+    onSample: i => { links = {}; source = null; sampleIdx = +i || 0; randomRows = null; drawSlots(); loadData(); DataWindow.update({ datasets: dsList(), current: null, samples: samples(), sample: sampleIdx }); } });
+  $('card').addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    const m = $('ctxmenu'); Menus.closeAll(); m.classList.add('open');
+    m.style.left = `${Math.max(0, Math.min(ev.clientX, innerWidth - m.offsetWidth - 4))}px`; m.style.top = `${Math.max(0, Math.min(ev.clientY, innerHeight - m.offsetHeight - 4))}px`;
+  });
+  addEventListener('pointerdown', e => { if (!e.target.closest('#ctxmenu')) $('ctxmenu').classList.remove('open'); }, true);
+  addEventListener('blur', () => $('ctxmenu').classList.remove('open'));
+  $('ctxmenu').onclick = e => { const act = e.target.closest('[data-act]')?.dataset.act; $('ctxmenu').classList.remove('open'); if (act === 'data') openData(); else if (act === 'settings') setWin(true); };
+
+  // ---- Chart Settings: the settings panel in its own window, moved by its header; open / closed and its place survive a refresh ----
+  const SET_KEY = 'dn-chartsettings:' + location.pathname;
+  let setPos = null, setOpen = true;
+  try { const st = JSON.parse(sessionStorage.getItem(SET_KEY) || 'null'); if (st) { setPos = st.pos || null; setOpen = st.open !== false; } } catch {}
+  const setSave = () => { try { sessionStorage.setItem(SET_KEY, JSON.stringify({ open: setOpen, pos: setPos })); } catch {} };
+  function setPlace() {
+    const el = $('cset'), p = setPos || { x: Math.max(0, innerWidth - el.offsetWidth - 24), y: 96 };
+    Object.assign(el.style, { left: `${Math.max(0, Math.min(innerWidth - 60, p.x))}px`, top: `${Math.max(0, Math.min(innerHeight - 30, p.y))}px` });
+  }
+  function setWin(open) { setOpen = open; $('cset').hidden = !open; if (open) setPlace(); setSave(); }
+  $('csetX').onclick = () => setWin(false);
+  $('csetHead').addEventListener('pointerdown', e => {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault();
+    const r = $('cset').getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    const mv = ev => { setPos = { x: ev.clientX - dx, y: ev.clientY - dy }; setPlace(); };
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); setSave(); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
+  addEventListener('resize', setPlace);
+  setWin(setOpen);
 
   // ---- slots: one per input; drop a field on it ----
-  const AGG_TXT = { sum: 'Sum', avg: 'Average', count: 'Count', count_distinct: 'Count distinct', median: 'Median', min: 'Min', max: 'Max', none: 'Each row' };
   function drawSlots() {
-    $('slots').innerHTML = inputs.map(i => {
-      const l = links[i.key];
-      const agg = i.role === 'measure' ? `<select data-agg="${esc(i.key)}" title="How the values are combined">${Object.entries(AGG_TXT).map(([v, t]) => `<option value="${v}" ${(l?.agg || i.agg || 'sum') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : '';
-      return `<div class="slot ${l ? 'set' : ''}" data-key="${esc(i.key)}"><b>${esc(i.label || i.key)}</b>${l ? `<span class="f">${esc(l.col)}</span>${agg}<button class="x" data-clear="${esc(i.key)}" title="Remove">×</button>` : `<span>drop a field</span>`}</div>`;
-    }).join('');
+    $('slots').innerHTML = ChartPanel.slots(inputs, links);
     layout();
   }
-  $('slots').addEventListener('change', e => { const k = e.target.dataset.agg; if (k && links[k]) { links[k].agg = e.target.value; loadData(); } });
-  $('slots').addEventListener('click', e => { const k = e.target.dataset.clear; if (k) { delete links[k]; drawSlots(); loadData(); } });
+  for (const el of [$('slots')]) {
+    el.addEventListener('change', e => { const k = e.target.dataset.agg; if (k && links[k]) { links[k].agg = e.target.value; drawSlots(); loadData(); } });
+    el.addEventListener('click', e => { const k = e.target.dataset.clear; if (k) { delete links[k]; drawSlots(); loadData(); } });
+  }
   function link(key, col) {
     const i = inputs.find(x => x.key === key); if (!i) return;
     links[key] = { col, ...(i.role === 'measure' ? { agg: links[key]?.agg || (i.agg === 'none' ? 'none' : NUMERIC.test(columns().find(c => c.name === col)?.type || '') ? i.agg || 'sum' : 'count') } : {}) };
@@ -91,6 +118,7 @@
     zone.addEventListener('drop', e => {
       const col = e.dataTransfer.getData('text/x-field'); if (!col) return;
       e.preventDefault(); document.querySelectorAll('.over').forEach(x => x.classList.remove('over'));
+      const ds = e.dataTransfer.getData('text/x-dataset'); if (ds && ds !== source?.key) setSource(ds);   // a field of another dataset: the chart reads that one now
       const s = e.target.closest('.slot'); if (s) link(s.dataset.key, col); else autoPlace(col);
     });
   }
@@ -119,16 +147,19 @@
 
   // ---- colours and settings ----
   function drawColours() {
-    $('colours').innerHTML = '';
-    colours.forEach((c, i) => $('colours').append(ColorPicker.swatch(c, { allowTheme: true, onInput: v => { colours[i] = v || null; draw(); }, onChange: v => { colours[i] = v || null; draw(); } })));
+    ChartPanel.colours($('colours'), colours, (i, v) => { colours[i] = v; draw(); });
   }
   function drawOpts() {
-    $('opts').innerHTML = options.filter(o => o.type === 'boolean').map(o => `<label class="opt"><input type="checkbox" data-p="${esc(o.path)}" ${opts[o.path] ? 'checked' : ''}> ${esc(o.label)}</label>`).join('') || '<div class="hintbox">This chart has no settings.</div>';
+    // X-Axis / Y-Axis sections: the options in those groups; Settings: the rest.
+    const SECS = { 'X-Axis': 'X', 'Y-Axis': 'Y' }, get = p => opts[p], set = (p, v) => { opts[p] = v; draw(); };
+    // What is on each input now (numbers, dates, text): the Format drop-downs offer the formats for it.
+    const shown = rows || sampleRows(), kinds = Object.fromEntries(inputs.map(i => [i.key, ChartPanel.valueKind(shown, i.key)]));
+    for (const [g, k] of Object.entries(SECS)) { const os = options.filter(o => o.group === g); $(k.toLowerCase() + 'Box').hidden = !os.length; ChartPanel.settings($('opts' + k), os, get, set, kinds); }
+    ChartPanel.settings($('opts'), options.filter(o => !SECS[o.group]), get, set, kinds);
     const ordered = inputs.some(i => i.role === 'measure' && (links[i.key]?.agg || i.agg) !== 'none');
-    $('orderBox').hidden = !ordered;
+    $('orderBox').hidden = true || !ordered;   // Order and Settings sections are not shown for now (sort / top keep their values)
     $('sort').value = sort; $('top').value = top;
   }
-  $('opts').onchange = e => { const p = e.target.dataset.p; if (p) { opts[p] = e.target.checked; draw(); } };
   $('sort').onchange = () => { sort = $('sort').value; loadData(); };
   $('top').onchange = () => { top = Math.max(1, +$('top').value || 20); loadData(); };
   const syncCat = () => {};   // the category is the chart type picked (catOf); nothing to show
@@ -169,13 +200,10 @@
     const cw = size.w * G, ch = Math.min(size.h * G, Math.max(6 * G, Math.floor((avail - 8 * G) / G) * G));
     const left = Math.round(c - cw / 2), topPx = Math.max(4 * G, Math.round(avail / 2 - ch / 2));
     Object.assign($('card').style, { left: `${left}px`, top: `${topPx}px`, width: `${cw + 1}px`, height: `${ch + 1}px` });
+    $('types').style.left = `${left + cw / 2}px`;   // the chart types: centred on the chart
+    Object.assign($('name').style, { left: `${left + cw / 2}px`, top: `${topPx - 10}px` });   // the name: 10px above the chart, centred
     // X slot: centred under the chart; Y slot: centred on its left side; any other slot under X.
-    let below = 0;
-    for (const el of $('slots').children) {
-      const i = inputs.find(x => x.key === el.dataset.key), a0 = i?.axis || (i?.role === 'measure' ? 'y' : 'x'), axis = tpl?.flip && !custom ? { x: 'y', y: 'x' }[a0] || a0 : a0;   // Bar (horizontal): X is down the left
-      if (axis === 'y') Object.assign(el.style, { left: `${left - 10}px`, top: `${topPx + ch / 2}px`, transform: 'translate(-100%, -50%)' });
-      else { Object.assign(el.style, { left: `${left + cw / 2}px`, top: `${topPx + ch + 10 + below * 40}px`, transform: 'translateX(-50%)' }); below++; }
-    }
+    ChartPanel.placeSlots($('slots'), inputs, { left, top: topPx, w: cw, h: ch }, tpl?.flip && !custom);   // Bar (horizontal): X is down the left
     $('sz').textContent = `${cw} x ${ch} px`;
     drawNow();   // at once: a resize redraws the chart to its new size in the same frame
   }
@@ -207,8 +235,9 @@
       const t0 = performance.now(), r = await Engine.call('query', { query: ApexWidget.query(m, w), views: Engine.views([source.d]) });
       if (n !== seq) return;
       rows = ApexWidget.shape(m, w, ApexWidget.objects(r), columns());
+      drawOpts();   // the formats follow the data's kinds
       note = `${rows.length.toLocaleString()} rows from ${source.d.name} · ${UI.ms(performance.now() - t0)}`;
-    } catch (e) { if (n !== seq) return; rows = null; note = `Data: ${String(e.message || e).split('\n')[0]}`; }
+    } catch (e) { if (n !== seq) return; rows = null; drawOpts(); note = `Data: ${String(e.message || e).split('\n')[0]}`; }
     draw();
   }
 
@@ -224,6 +253,7 @@
 }
 .CHART > div { position: relative; }
 .CHART > div > svg { display: block; width: 100%; height: 100%; font-family: var(--w-font); color: var(--w-text-2); }
+.CHART text { font-family: var(--w-font); }   /* every label in Exo 2 (D3 axes write sans-serif on their own) */
 `;
   const colourBlock = () => `/* ===== COLOURS (D3 Studio) ===== */\n.CHART { ${colours.map((c, i) => `--w-c${i + 1}: ${c || `var(--c${i + 1})`};`).join(' ')} }\n`;
   const COLOUR_BLOCK = /\/\*\s*=====\s*COLOURS[^*]*\*\/[^}]*\}\n?/;
@@ -241,7 +271,7 @@
     ApexWidget.useStyle({ id: 'chart-builder-preview', styleCss: styleCss($('name').value || 'Chart') }, pv);
     if (pv.children.length !== 1) pv.innerHTML = '<div style="width:100%;height:100%;overflow:hidden"></div>';
     const W = Math.max(60, Math.floor(pv.clientWidth)), H = Math.max(60, Math.floor(pv.clientHeight)), th = ApexWidget.theme(pv);
-    const data = (rows || tpl?.sample || editing?.sampleRows || []).map(r => ({ ...r }));
+    const data = (rows || sampleRows()).map(r => ({ ...r }));
     const ins = Object.fromEntries(inputs.map(i => [i.key, { key: i.key, label: i.label, role: i.role, agg: links[i.key]?.agg || i.agg, field: links[i.key] ? `${source?.d.name}.${links[i.key].col}` : '' }]));
     try {
       D3Render.draw(pv.firstElementChild, code, data, { W, H, colors: colours.map((c, i) => c || th.colors[i]), opts: clone(nest(opts)), theme: th, inputs: ins, motion: !still });
@@ -266,6 +296,8 @@
       custom = !tpl || !!b.custom || (m.codeJs || '') !== tpl.code;
       code = m.codeJs || ''; inputs = clone(m.inputs || []);
       options = (m.options || []).filter(o => o.type !== 'color');
+      if (tpl && !custom) options = clone(tpl.options);   // not custom: exactly the chart type's settings now (added ones in, removed ones out)
+      else if (tpl) options = [...options, ...clone(tpl.options).filter(o => !options.some(x => x.path === o.path))];
       links = clone(b.links || {}); sort = m.specJson?.query?.sort || 'desc'; top = +m.specJson?.query?.top || 20;
       size = b.size || { w: 26, h: 14 };
       colours = Array(8).fill(null); for (const [, n, v] of String(m.styleCss || '').matchAll(/--w-c(\d):\s*(#[0-9a-f]{3,8})\s*;/gi)) colours[+n - 1] = v;
@@ -274,9 +306,9 @@
     opts = { ...defaults(options), ...(m?.builder?.opts || {}) };
     $('name').value = m?.name || ''; 
     pushCode();
-    drawTypes(); drawColours(); drawOpts(); drawFields(); drawSlots(); drawCustom(); syncCat(); loadData();
+    drawTypes(); drawColours(); drawOpts(); drawSlots(); drawCustom(); syncCat(); loadData();
   }
-  function setSourceQuiet(key) { source = sources.find(s => s.key === key) || source; $('src').value = source?.key || ''; }
+  function setSourceQuiet(key) { source = sources.find(s => s.key === key) || source; }
   $('new').onclick = async () => {
     if (active && !await UI.confirm('Start a new chart? Unsaved changes to this one are lost.', { ok: 'New chart' })) return;
     show(); openChart(null);
@@ -296,7 +328,7 @@
   let stateT = 0, stateText = '';
   function saveState() {
     const text = JSON.stringify(!active ? { active: false } : { active: true, editing: editing?.id || null, tpl: tpl?.id || null, custom, code, inputs, options, links, opts, colours, sort, top, size,
-      source: source?.key || '', name: $('name').value });
+      source: source?.key || '', sampleIdx, name: $('name').value });
     if (text === stateText) return;
     stateText = text; clearTimeout(stateT);
     stateT = setTimeout(() => DNFS.writeText(STATE_FILE, text).catch(() => {}), 150);
@@ -307,29 +339,38 @@
     stateText = JSON.stringify(st || {});
     if (!st?.active) return false;
     editing = all.find(x => x.id === st.editing) || null;
-    tpl = st.tpl ? ChartTemplates.get(st.tpl) : null; custom = !!st.custom; code = st.code || tpl?.code || '';
+    tpl = st.tpl ? ChartTemplates.get(st.tpl) : null; custom = !!st.custom; code = !custom && tpl ? tpl.code : st.code || '';   // not custom: the chart type's current code
     inputs = st.inputs || clone(tpl?.inputs || []); options = st.options || clone(tpl?.options || []);
+    if (tpl && !custom) options = clone(tpl.options);   // not custom: exactly the chart type's settings now (added ones in, removed ones out)
+    else if (tpl) options = [...options, ...clone(tpl.options).filter(o => !options.some(x => x.path === o.path))];
+    for (const o of options) if (!(o.path in (st.opts || {})) && o.type !== 'color') (st.opts ||= {})[o.path] = o.default;
     links = st.links || {}; opts = st.opts || defaults(options); colours = st.colours || Array(8).fill(null);
     sort = st.sort || 'desc'; top = +st.top || 20; size = st.size || { w: 26, h: 14 };
     if (st.source) setSourceQuiet(st.source);
+    sampleIdx = +st.sampleIdx || 0;
     $('name').value = st.name || '';
     active = true; $('cb').classList.add('instant'); $('cb').classList.remove('empty');
     setTimeout(() => $('cb').classList.remove('instant'), 300);
-    drawTypes(); drawColours(); drawOpts(); drawFields(); drawSlots(); drawCustom(); loadData();
+    drawTypes(); drawColours(); drawOpts(); drawSlots(); drawCustom(); loadData();
     return true;
   }
 
   function thumb() {
     const svg = $('pv').querySelector('svg'); if (!svg) return null;
-    const c = svg.cloneNode(true), cs = getComputedStyle(svg);
+    // The thumbnail (Dashboard Builder > Add chart) = the chart exactly as drawn here: every element keeps its computed
+    // look (fonts, colours), and the border around the chart (Chart > Border) is left out.
+    const c = svg.cloneNode(true), cs = getComputedStyle(svg), src = [svg, ...svg.querySelectorAll('*')], dst = [c, ...c.querySelectorAll('*')];
+    src.forEach((n, i) => { const k = getComputedStyle(n), d = dst[i];
+      for (const p of ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'opacity', 'font-family', 'font-size', 'font-weight', 'display']) d.style.setProperty(p, k.getPropertyValue(p)); });
+    c.querySelectorAll('.chart-border').forEach(n => n.remove());
     if (!c.getAttribute('viewBox')) c.setAttribute('viewBox', `0 0 ${svg.clientWidth || 100} ${svg.clientHeight || 80}`);
     c.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); c.setAttribute('width', '100'); c.setAttribute('height', '80');
-    c.removeAttribute('class'); c.setAttribute('style', `color:${cs.color};font-family:${cs.fontFamily}`);
+    c.removeAttribute('class'); c.style.color = cs.color; c.style.width = c.style.height = ''; c.style.display = 'block';
     const root = getComputedStyle($('pv'));
     return new XMLSerializer().serializeToString(c).replace(/var\((--[\w-]+)\)/g, (s, v) => root.getPropertyValue(v).trim() || s);
   }
   async function save() {
-    const name = $('name').value.trim(); if (!name) { $('name').focus(); throw new Error('Give the chart a name (Chart name, top right).'); }
+    const name = $('name').value.trim(); if (!name) { $('name').focus(); throw new Error('Enter a Chart name (above the chart) before you Save or Publish.'); }
     if (!code.trim()) throw new Error('The chart has no code.');
     D3Render.compile(code, inputs.map(i => i.key));   // a syntax error stops the save
     const id = editing?.id || ChartRegistry.slug(name);
@@ -342,8 +383,8 @@
       ...(pic ? { thumb: 'thumb.svg' } : {}), inputs: ins,
       options: colours.map((_, i) => ({ path: `colors.${i}`, label: `Color ${i + 1}`, group: 'Colors', type: 'color', default: null, show: true }))
         .concat(options.map(o => ({ ...o, default: o.type === 'boolean' ? !!opts[o.path] : o.default }))),
-      studio: { project: source?.folder || '', table: source?.d.name || '', links: Object.fromEntries(Object.entries(links).map(([k, l]) => [k, `${source?.d.name}.${l.col}`])) },
-      builder: { template: tpl?.id || null, custom, links, opts, size, source: source?.key || '' },
+      // No data paths: the fields attached here are for the preview only; each dashboard links its own (Dashboard Builder).
+      builder: { template: tpl?.id || null, custom, opts, size },
       updated: new Date().toISOString(),
     };
     await DNFS.writeText(`${dir}/d3-code.js`, code);
@@ -356,16 +397,38 @@
     editing = all.find(x => x.id === id) || editing;
     return { id, dir, m };
   }
-  $('save').onclick = UI.guard(async () => { const s = await save(); if (s) UI.toast(`Saved "${s.m.name}". Publish puts it in Dashboard > Charts.`, 'ok'); });
+  $('save').onclick = UI.guard(async () => { const s = await save(); if (s) UI.toast(`Saved "${s.m.name}". Publish puts it in the Dashboard Builder.`, 'ok'); });
   $('publish').onclick = UI.guard(async () => {
     const s = await save(); if (!s) return;
     const to = `${LIVE}/${s.id}`;
-    if (!live.has(s.id) && !await UI.confirm(`Publish "${s.m.name}"? It is listed in Dashboard > Charts (${s.m.category}).`, { ok: 'Publish' })) return;
+    if (!live.has(s.id) && !await UI.confirm(`Publish "${s.m.name}"? It is listed in the Dashboard Builder's Add chart (${s.m.category}).`, { ok: 'Publish' })) return;
     await DNFS.remove(to, { recursive: true }).catch(() => {});
     await DNFS.copy(s.dir, to, { overwrite: true });
     await refreshList();
-    UI.toast(`Published "${s.m.name}": Dashboard > Charts (${s.m.category}).`, 'ok');
+    UI.toast(`Published "${s.m.name}": Dashboard Builder > Add chart (${s.m.category}).`, 'ok');
   });
+  // Delete: the chart's folder in the dev folder (workspace/chart-builder/dev/<id>/) and nothing else. The published
+  // copy (workspace/chart-builder/published/) is NEVER touched: Dashboard Builder charts keep working.
+  $('del').onclick = UI.guard(async () => {
+    const id = editing?.id, name = $('name').value.trim() || 'this chart';
+    if (!id) {   // never saved: just drop it
+      if (!await UI.confirm(`Discard ${name}? It was never saved.`, { danger: true, ok: 'Discard' })) return;
+      return resetPage();
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(id) || id.startsWith('_')) throw new Error(`Not a chart folder: "${id}".`);
+    const dir = `${DEV}/${id}`;
+    if (!dir.startsWith(DEV + '/') || dir.startsWith(LIVE)) throw new Error('Refused: only the dev folder can be deleted from here.');
+    const pub = live.has(id) ? ' Its published copy stays (Dashboard Builder charts keep working).' : '';
+    if (!await UI.confirm(`Delete "${name}" from Chart Builder (${dir})?${pub}`, { danger: true, ok: 'Delete' })) return;
+    await DNFS.remove(dir, { recursive: true });
+    await refreshList();
+    UI.toast(`Deleted "${name}" (dev folder).${pub}`, 'ok');
+    resetPage();
+  });
+  function resetPage() {   // back to the empty grid
+    editing = null; active = false; rows = null; links = {}; source = null;
+    $('cb').classList.add('empty'); $('name').value = ''; DataWindow.close(); saveState();
+  }
   $('name').oninput = () => draw();
 
   // Folded sections stay folded next time (this browser).
@@ -382,5 +445,6 @@
     const want = UI.params().chart, m = want ? all.find(x => x.id === want) : null;
     if (m) { if (m.builder?.source) setSourceQuiet(m.builder.source); show(); openChart(m); }
     else if (!await restoreState()) saveState();   // nothing to come back to: the empty grid
+    if (active && DataWindow.wasOpen()) openData();   // Edit Data was open before the refresh
   })();
 })();

@@ -10,3 +10,6 @@ document.addEventListener('focusin', e => {
   el.setAttribute('data-lpignore', 'true');
   if (el.form) el.form.setAttribute('autocomplete', 'off');
 }, true);
+
+// No browser right-click menu in any app window (the app's own menus still open: their handlers run after this).
+window.addEventListener('contextmenu', e => e.preventDefault(), true);
