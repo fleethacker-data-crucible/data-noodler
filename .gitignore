@@ -33,3 +33,6 @@ workspace/sample-data/*
 
 # Claude test scripts (local only)
 .claude/tests/
+
+# VS Code workspace (local only)
+*.code-workspace
