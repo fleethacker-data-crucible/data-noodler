@@ -582,7 +582,8 @@ namespace NativeDataEngine
             internal EngineException CatchErr;
             internal Catalog Cat;
             internal int Seq;
-            internal readonly List<string> Spills = new List<string>();   // spill folders of tables that went to disk
+            internal readonly List<string> Spills = new List<string>();
+            internal Job Job;   // set by WriteTables: rows read count toward its progress   // spill folders of tables that went to disk
             public void Dispose()
             {
                 foreach (MemoryLease l in Leases) l.Dispose(); Leases.Clear(); Tables.Clear();
@@ -597,14 +598,15 @@ namespace NativeDataEngine
 
         // Splits sql into statements; a plain single query is returned as is (no session). Otherwise every statement
         // before the final query runs now, and the final query is returned to be planned with the session catalog.
-        QueryStmt Prepare(string sql, Dictionary<string, string> views, out Catalog cat, CancellationToken ct)
+        // job (optional): the script's reads count toward its rows processed (WriteTables progress).
+        QueryStmt Prepare(string sql, Dictionary<string, string> views, out Catalog cat, CancellationToken ct, Job job = null)
         {
             List<Stmt> stmts = Parser.ParseScript(sql);
             if (stmts.Count == 0) throw new EngineException("SQL_SYNTAX", "The query is empty.");
             cat = new Catalog(this, views);
             QueryS only = stmts.Count == 1 ? stmts[0] as QueryS : null;
             if (only != null && !only.HasInto) return only.Q;
-            ScriptSession s = new ScriptSession(); s.Sql = sql; s.Cat = cat; cat.Session = s;
+            ScriptSession s = new ScriptSession(); s.Sql = sql; s.Cat = cat; cat.Session = s; s.Job = job;
             try { return RunScript(s, stmts, ct); }
             catch { cat.Dispose(); throw; }
         }
@@ -752,7 +754,7 @@ namespace NativeDataEngine
         Result RunQ(ScriptSession s, QueryStmt q, CancellationToken ct)
         {
             Planned p = PlanQ(q, s.Cat);
-            ExecCtx ctx = Ctx(null, 0, ct);
+            ExecCtx ctx = Ctx(s.Job, 0, ct);
             Result r = new Result(); r.Schema = p.Op.Schema;
             try { foreach (Batch b in p.Op.Run(ctx)) if (b.Rows > 0) r.Batches.Add(b); }
             finally { ctx.End(); }
@@ -823,7 +825,7 @@ namespace NativeDataEngine
         // A query's rows, one batch at a time (for NewTable: big results go to disk instead of piling up in memory).
         IEnumerable<Batch> Stream(ScriptSession s, Planned p, CancellationToken ct)
         {
-            ExecCtx ctx = Ctx(null, 0, ct);
+            ExecCtx ctx = Ctx(s.Job, 0, ct);
             try { foreach (Batch b in p.Op.Run(ctx)) if (b.Rows > 0) yield return b; }
             finally { ctx.End(); }
         }

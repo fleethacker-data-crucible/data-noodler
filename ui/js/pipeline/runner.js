@@ -88,7 +88,8 @@ const PipelineRunner = (() => {
   async function views(ctx) { await ctx.reload(); return Engine.views(ctx.cfg.datasets || []); }
 
   // Returns the run record { at, ms, ok, outputs: [{ name, rows, before }], error }.
-  async function run(ctx, pipe, log = () => {}, changed = null, onJob = () => {}) {
+  // onQuery(q, 'start' | 'done'): each ticked query as it starts and when its tables are saved (Transform's status).
+  async function run(ctx, pipe, log = () => {}, changed = null, onJob = () => {}, onQuery = () => {}) {
     const t0 = performance.now(), rec = { at: new Date().toISOString(), outputs: [], ok: true };
     try {
       if (!selected(pipe).length) throw new Error('Tick at least one query.');
@@ -98,6 +99,7 @@ const PipelineRunner = (() => {
         const cfg = await ctx.reload(), ds = cfg.datasets || [];
         let lastStage = '';
         log(`Running query "${q.name}" (saves ${tables(q.sql).map(t => t.name).join(', ')})…`);
+        onQuery(q, 'start');
         const meta = { lineage: { transformQuery: q.id, transformName: q.name, pipelineVersion: pipe.rev || 0 } };
         const r = await Engine.writeTables({ sql: q.sql, views: Engine.views(ds), dir: `${ctx.dir}/data/source`, prefix: PRE, meta }, j => {
           onJob(j, q);
@@ -111,6 +113,7 @@ const PipelineRunner = (() => {
           rec.outputs.push({ name, rows: w.rowCount, before: before?.rows ?? null });
           log(`${name}: ${UI.num(w.rowCount)} rows, ${(w.columns || []).length} columns, ${(w.files || []).length} part(s), ${UI.bytes(w.bytes)}`, 'ok');
         }
+        onQuery(q, 'done');
       }
     } catch (e) { rec.ok = false; rec.error = e.message; }
     rec.ms = Math.round(performance.now() - t0);

@@ -76,7 +76,7 @@ const SqlEditor = (() => {
       return [a, b];
     }
     // Where the caret is decides the colour: on the error's line = orange (still working on it), elsewhere = red.
-    const caretLine = t => document.activeElement === ta ? lineOf(t, ta.selectionStart) : -1;
+    const caretLine = t => ta.ownerDocument.activeElement === ta ? lineOf(t, ta.selectionStart) : -1;   // ownerDocument: the editor may sit in a pop-out window
     function stateOf(t, a) { return lineOf(t, a) === caretLine(t) ? 'warn' : 'bad'; }
     function flash(a, b, cls, ms) {
       flashes.push({ a, b, cls, until: Date.now() + ms });
@@ -177,7 +177,7 @@ const SqlEditor = (() => {
 
     // Replace selection with text, keeping browser undo.
     let quiet = false, prev = '';
-    function insert(text) { ta.focus(); quiet = true; try { if (!document.execCommand('insertText', false, text)) ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end'); } finally { quiet = false; } changed(); }
+    function insert(text) { ta.focus(); quiet = true; try { if (!ta.ownerDocument.execCommand('insertText', false, text)) ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, 'end'); } finally { quiet = false; } changed(); }
     // Old error positions follow the edit until the next check answers.
     function shift() {
       const v = ta.value, d = v.length - prev.length;
@@ -223,8 +223,8 @@ const SqlEditor = (() => {
     let cwCache = 0;
     function measure(cs) {
       if (cwCache) return cwCache;
-      const s = document.createElement('span'); s.style.font = cs.font; s.style.position = 'absolute'; s.style.visibility = 'hidden'; s.textContent = 'M'.repeat(50);
-      document.body.append(s); cwCache = s.getBoundingClientRect().width / 50; s.remove(); return cwCache;
+      const d = ta.ownerDocument, s = d.createElement('span'); s.style.font = cs.font; s.style.position = 'absolute'; s.style.visibility = 'hidden'; s.textContent = 'M'.repeat(50);
+      d.body.append(s); cwCache = s.getBoundingClientRect().width / 50; s.remove(); return cwCache;
     }
     // Table names and aliases in the SQL: FROM / JOIN / , name [AS] alias. Returns lower-case name or alias -> table.
     function aliases(fields) {
@@ -345,7 +345,10 @@ const SqlEditor = (() => {
     ta.addEventListener('click', close);
     // Caret moves (arrows, clicks) change the error colours.
     let lastCaret = -1;
-    document.addEventListener('selectionchange', () => { if (document.activeElement === ta && ta.selectionStart !== lastCaret) { lastCaret = ta.selectionStart; if (errs.length) paint(); } });
+    // Watched in whichever document the editor is in (it may be moved into a pop-out window).
+    const watched = new WeakSet();
+    const watchDoc = d => { if (watched.has(d)) return; watched.add(d); d.addEventListener('selectionchange', () => { if (d.activeElement === ta && ta.selectionStart !== lastCaret) { lastCaret = ta.selectionStart; if (errs.length) paint(); } }); };
+    watchDoc(document); ta.addEventListener('focus', () => watchDoc(ta.ownerDocument));
     // ---- find / replace (Ctrl+F, Ctrl+H): matches boxed in the code (the current one brighter), scrolled into view ----
     const fb = el.querySelector('.sqled-find'), fq = fb.querySelector('.f-q'), fr = fb.querySelector('.f-r'), fn = fb.querySelector('.f-n');
     let found = [], cur = -1, matchCase = false;

@@ -12,10 +12,22 @@
   .list div { display: flex; justify-content: space-between; gap: 8px; padding: 5px 8px; cursor: pointer; }
   .list div + div { border-top: 1px solid var(--border); }
   .list div:hover { background: var(--panel); }
-  .list div.sel { background: var(--blue); color: #fff; font-weight: 600; }   /* the dataset shown (Pop-out / Export use it) */
-  .list div.sel small { color: #fff; }
+  .list div.sel { background: var(--sel); color: var(--text); font-weight: 600; }   /* the dataset shown (Pop-out / Export use it) */
+  .list div.sel small { color: var(--text); }
   #schemaBox table.grid td:not(.mono) { font-family: inherit; font-size: inherit; }
   .list small { color: var(--muted); white-space: nowrap; }
+  .list small.tag-raw, .list div.sel small.tag-raw { color: var(--err); }         /* raw file */
+  .list small.tag-imp, .list div.sel small.tag-imp { color: var(--warn); }        /* imported dataset: gold */
+  /* Engine worker lights (same as the Benchmark page): green idle, blue reading / computing, red writing. */
+  .lights { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 5px 0; }
+  .lights .lbl { text-transform: uppercase; letter-spacing: .06em; }
+  #lights { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+  #lights i, .lights .key i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; background: var(--border); transition: background .1s; }
+  .lights .key { display: inline-flex; align-items: center; gap: 4px; }
+  .lights .key i { width: 10px; height: 10px; margin-left: 8px; }
+  #lights i.l0, .lights i.l0 { background: var(--ok); }
+  #lights i.l1, .lights i.l1 { background: var(--blue); }
+  #lights i.l2, .lights i.l2 { background: var(--err); }
   .drop { border: 1px dashed var(--border); border-radius: 4px; padding: 27px 14px 26px; text-align: center; color: var(--muted); margin: 8px 0; }
   .drop.over { border-color: var(--blue); color: var(--text); }
   aside { display: flex; flex-direction: column; gap: 24px; }
@@ -26,7 +38,8 @@
   table.schema td:has(select, input[type=text]) { max-width: none; overflow: visible; }   /* boxes are never cut off by the 300px column cap */
       table.schema input[type=text] { font-family: inherit; }
   #preview .pgrid { height: 480px; }
-  #dsName { width: 440px; }
+  #dsName { width: 100%; box-sizing: border-box; }
+  .req { color: var(--err); }
   /* Long file / dataset names: one line with ..., the size stays on the right (full name on hover). */
   .list > div { display: flex; gap: 8px; min-width: 0; overflow: hidden; }
   .list > div > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -59,7 +72,7 @@
       <aside>
         <section>
           <h2>Raw source files</h2>
-          <div class="row"><button id="pick">Browse</button><button id="fromPath" class="ghost">From Path</button></div>
+          <div class="row"><button id="pick" class="ghost">Browse</button><button id="fromPath" class="ghost">From Path</button></div>
           <input id="file" type="file" multiple hidden accept=".csv,.tsv,.txt,.parquet,.arrow,.feather,.sqlite,.sqlite3,.db">
           <div class="drop" id="drop">Drop CSV, Parquet, Arrow or SQLite files here</div>
           <div class="imode" id="imode">
@@ -69,8 +82,12 @@
           </div>
           <div class="list" id="sources"></div>
         </section>
+        <section id="nameBox" hidden>
+          <h2>Table Name <span class="req" title="Required">*</span></h2>
+          <input id="dsName" type="text" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="UPPER_CASE_NAME" required><span id="dsNameMsg" hidden></span>
+        </section>
         <section>
-          <h2>Imported Datasets</h2>
+          <h2>Tables</h2>
           <div class="list" id="datasets"></div>
         </section>
       </aside>
@@ -88,12 +105,14 @@
           </div></div>
           <div class="row">
             <label class="field" id="tableLbl" hidden>Table<select id="table"></select></label>
-            <label class="field">Output Dataset Name<input id="dsName" type="text" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="UPPER_CASE_NAME"><span id="dsNameMsg" hidden>The name can't start with a number.</span></label>
-            <div style="width:25px"></div>
             <div class="stats"><div class="stat"><label>Rows</label><b id="rowCount">-</b></div><div class="stat"><label>Columns</label><b id="colCount">-</b></div></div>
           </div>
           <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Arrow in data/imported (input for Transform)">Import</button><button id="delDs" class="danger" hidden>Delete</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
           <div class="progress"><i id="bar"></i></div>
+          <div class="lights" title="Engine worker threads: green = ready / idle, blue = reading or computing, red = writing">
+            <span class="lbl">Workers</span><span id="lights"></span>
+            <span class="key"><i class="l0"></i>Idle<i class="l1"></i>Reading<i class="l2"></i>Writing</span>
+          </div>
           <div class="log" id="log"></div>
           <h2 class="hw">Preview</h2>
           <div id="preview"></div>
@@ -122,6 +141,7 @@
 <script src="../js/core/module-page.js"></script>
 <script src="../js/import/external-source.js"></script>
 <script src="../js/grid/data-table.js"></script>
+<script src="../js/core/worker-lights.js"></script>
 <script>
 const { $, esc } = UI;
 // Plain-English hint shown next to each type in the Change Type list.
@@ -163,7 +183,7 @@ async function listSources(force = true) {
   if (!force && sig === rawSig) return files;
   rawSig = sig;
   $('sources').hidden = !files.length;
-  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${!cur?.ds && cur?.path === f.path ? 'sel' : ''}" title="${esc(f.name)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small>${UI.bytes(f.size)}</small></div>`).join('');
+  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${!cur?.ds && cur?.path === f.path ? 'sel' : ''}" title="${esc(f.name)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small class="tag-raw">raw</small></div>`).join('');
   return files;
 }
 const importedDs = cfg => (cfg.datasets || []).filter(d => d.source && d.source.kind !== 'pipeline').sort((a, b) => a.name.localeCompare(b.name));
@@ -171,7 +191,7 @@ async function listDatasets() {
   const cfg = await ctx.reload();
   // Imported datasets only (transform outputs live in Transform), A to Z.
   const list = importedDs(cfg);
-  $('datasets').innerHTML = list.map(d => `<div data-ds="${esc(d.name)}" class="${cur?.ds === d.name ? 'sel' : ''}" title="${esc(d.path)}"><span>${esc(d.name)}</span><small>${UI.rows(d.rows)} rows</small></div>`).join('') || '<div class="muted">None yet.</div>';
+  $('datasets').innerHTML = list.map(d => `<div data-ds="${esc(d.name)}" class="${cur?.ds === d.name ? 'sel' : ''}" title="${esc(d.path)}"><span>${esc(d.name)}</span><small class="tag-imp">imported</small></div>`).join('') || '<div class="muted">None yet.</div>';
   return list;
 }
 
@@ -199,7 +219,7 @@ $('sources').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-p]'); if (!el) return;
   const path = el.dataset.p;
   if (!Engine.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet, Arrow or SQLite.', 'err');
-  // The raw file itself (its own schema and preview); its imported datasets open from Imported Datasets.
+  // The raw file itself (its own schema and preview); its imported datasets open from Imported Tables.
   await openReader({ path, label: path.split('/').pop() }, () => reader(path));
 });
 // A imported dataset: its source again (data/raw copy, or the linked path) with the column choices it was imported with.
@@ -209,7 +229,7 @@ async function openDataset(d) {
     if (s.path) await openReader({ ...c, path: s.path }, () => reader(s.path));
     else await openReader({ ...c, path: null, ext: { src: s.origin, size: s.size, modified: s.modified } }, () => reader(s.origin));
   } catch (e) {
-    live(null); $('editor').hidden = true; $('empty').hidden = false;
+    live(null); $('editor').hidden = $('nameBox').hidden = true; $('empty').hidden = false;
     $('empty').textContent = `${d.name} cannot be shown: its source ${s.path || s.origin} cannot be read. Import the file again (Browse or From Path) as ${d.name}.`;
     throw new Error(`${d.name}: its source ${s.path || s.origin} cannot be read (${String(e.message).split('\n')[0]}).`);
   }
@@ -222,7 +242,7 @@ async function reader(src) {
 // Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
 async function openReader(c, open) {   // c.table / c.ds + c.apply (a imported dataset: its saved column choices)
   $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Import</b> to convert this raw source (.csv, .sqlite, .parquet or .arrow) into an Arrow dataset (the fast working format of this project; Parquet / CSV / SQLite are for export).`;
-  $('empty').hidden = true; $('editor').hidden = false; live('Reading source…');
+  $('empty').hidden = true; $('editor').hidden = $('nameBox').hidden = false; live('Reading source…');
   const r = await open();
   cur = { ...c, reader: r };
   $('tableLbl').hidden = r.kind !== 'sqlite';
@@ -385,7 +405,14 @@ $('resetTypes').onclick = () => { cur.cols.forEach(c => c.newType = c.type); ren
 const upper = el => { const p = el.selectionStart, u = el.value.toUpperCase(); if (u !== el.value) { el.value = u; el.setSelectionRange(p, p); } };
 $('dsName').addEventListener('input', ev => { const el = ev.target, p = el.selectionStart, u = el.value.toUpperCase().replace(/\s/g, '_'); if (u !== el.value) { el.value = u; el.setSelectionRange(p, p); } checkName(); });   // upper case, spaces become _
 // Dataset names start with a letter (SQL reads 2025_X as a number): red box and a note until fixed.
-function checkName() { const v = $('dsName').value.trim(), bad = /^[0-9]/.test(v); $('dsName').classList.toggle('bad', bad); $('dsNameMsg').hidden = !bad; }
+// Required: blank or starting with a number = red, and Import / Update stay disabled until it is fixed.
+let importing = false;
+function checkName() {
+  const v = $('dsName').value.trim(), msg = !v ? 'A name is required.' : /^[0-9]/.test(v) ? "The name can't start with a number." : '';
+  $('dsName').classList.toggle('bad', !!msg); $('dsNameMsg').textContent = msg; $('dsNameMsg').hidden = !msg;
+  $('import').disabled = importing || !!msg;
+  return !msg;
+}
 $('schema').addEventListener('input', ev => { if (ev.target.dataset.k === 'newName') upper(ev.target); });
 $('schema').onchange = ev => {
   const el = ev.target, c = cur.cols[+el.dataset.i]; if (!c) return;
@@ -461,7 +488,7 @@ async function runImport(direct) {
   const cfg = await ctx.reload();
   if (cfg.datasets?.some(d => d.name === name) && cur.ds !== name && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;   // Update on a imported dataset replaces it without asking
   const t0 = performance.now(), bar = p => $('bar').style.width = `${Math.round(p)}%`;
-  $('import').disabled = true; bar(5);
+  importing = true; $('import').disabled = true; bar(5);
   try {
     const wst = ctx.step('Writing Arrow…');
     const w = await Engine.write({ sql: `SELECT ${select} FROM ${cur.src}`, dest, meta: { source: cur.ext?.src || cur.path } }, j => {
@@ -506,7 +533,7 @@ async function runImport(direct) {
     cur.ds = name; cur.apply = (await ctx.reload()).datasets.find(d => d.name === name); $('delDs').hidden = false; $('import').textContent = 'Update';
     bar(100);
     await listDatasets();
-  } finally { live(null); $('import').disabled = false; setTimeout(() => bar(0), 1200); }
+  } finally { live(null); importing = false; checkName(); setTimeout(() => bar(0), 1200); }
 }
 $('import').onclick = UI.guard(() => runImport(false));
 
@@ -523,7 +550,7 @@ $('delDs').onclick = UI.guard(async () => {
   await DNFS.remove(d.path, { recursive: !/\.(parquet|arrow)$/.test(d.path) }).catch(() => {});
   await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(x => x.name !== d.name) });
   ctx.log(`Deleted dataset ${d.name}`);
-  cur = null; $('editor').hidden = true; $('empty').hidden = false;
+  cur = null; $('editor').hidden = $('nameBox').hidden = true; $('empty').hidden = false;
   await listDatasets(); tried.clear(); await autoOpen();
 });
 // A raw file in data/raw (imported datasets made from it keep their data; Update then needs the file again).
@@ -532,7 +559,7 @@ async function delRaw(path) {
   if (!await UI.confirm(`Delete the raw file ${name} from data/raw?${users.length ? ` ${users.join(', ')} ${users.length > 1 ? 'were' : 'was'} imported from it: the imported data stays, but Update cannot read this file again.` : ''}`, { danger: true, ok: 'Delete' })) return;
   await DNFS.remove(path);
   ctx.log(`Deleted raw file ${name}`, 'ok');
-  cur = null; $('editor').hidden = true; $('empty').hidden = false;
+  cur = null; $('editor').hidden = $('nameBox').hidden = true; $('empty').hidden = false;
   await listSources(); tried.clear(); await autoOpen();
 }
 // Nothing shown yet: the first imported dataset (A to Z); with none, the first raw file. Runs on load, after a delete,

@@ -407,7 +407,16 @@ namespace NativeDataEngine
             {
                 Catalog cat;
                 j.Stage = "Running script";
-                Prepare(sql, views, out cat, j.Cts.Token);
+                // Progress: reading (0 - 50 %) = rows read / rows of the datasets the SQL names; writing (50 - 99 %) =
+                // rows written / rows of the tables saved.
+                long readTotal = ViewRows(sql, views), writeTotal = 0, writeFrom = -1;
+                j.Live = () =>
+                {
+                    long r = j.Rows;
+                    if (writeFrom < 0) return readTotal > 0 ? Math.Min(0.5, 0.5 * r / readTotal) : -1;
+                    return 0.5 + (writeTotal > 0 ? Math.Min(0.49, 0.49 * (r - writeFrom) / writeTotal) : 0);
+                };
+                Prepare(sql, views, out cat, j.Cts.Token, j);
                 try
                 {
                     ScriptSession s = cat.Session;
@@ -415,6 +424,8 @@ namespace NativeDataEngine
                     if (outs.Count == 0) throw new EngineException("SQL_NO_TABLE", "The query creates no table: write CREATE TABLE <name> AS SELECT ... (CREATE TEMP TABLE for helper tables that are not saved).");
                     bool arrow = !string.Equals(Options.DatasetFormat, "parquet", StringComparison.OrdinalIgnoreCase);
                     List<object> done = new List<object>();
+                    foreach (string o in outs) writeTotal += s.Tables[o].Rows;
+                    writeFrom = j.Rows;
                     for (int i = 0; i < outs.Count; i++)
                     {
                         string table = outs[i], up = table.ToUpperInvariant(), name = up.StartsWith(prefix) ? up : prefix + up;
@@ -443,6 +454,21 @@ namespace NativeDataEngine
                 }
                 finally { cat.Dispose(); }
             });
+        }
+
+        // Rows of the request's datasets the SQL names (a word match on the view names; file metadata only, no reads).
+        long ViewRows(string sql, Dictionary<string, string> views)
+        {
+            long n = 0;
+            if (views == null) return 0;
+            foreach (KeyValuePair<string, string> v in views)
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(sql, @"(?<![\w""])" + System.Text.RegularExpressions.Regex.Escape(v.Key) + @"(?![\w""])", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
+                System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(v.Value, @"read_dataset\('((?:[^']|'')*)'\)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (!m.Success) continue;
+                try { foreach (string f in Datasets.Files(PathGuard.Source(Root, m.Groups[1].Value.Replace("''", "'")))) n += DataFiles.Rows(f); } catch { }
+            }
+            return n;
         }
 
         // Rows -> batches of BatchRowCount, encoded on the workers (bounded), appended in order.

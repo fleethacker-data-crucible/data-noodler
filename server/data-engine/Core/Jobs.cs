@@ -15,6 +15,7 @@ namespace NativeDataEngine
         public volatile string State = "queued";
         public volatile string Stage = "";
         public double Progress = -1;
+        public Func<double> Live;   // when set: the progress, worked out on each poll (WriteTables)
         long rows, bytes; public long BytesTotal, RowsTotal;
         public readonly DateTime Created = DateTime.UtcNow;
         public DateTime Finished;
@@ -36,6 +37,7 @@ namespace NativeDataEngine
             Dictionary<string, object> d = new Dictionary<string, object>();
             d["ok"] = true; d["jobId"] = Id; d["kind"] = Kind; d["label"] = Label; d["state"] = State; d["stage"] = Stage;
             double p = Progress;
+            if (Live != null) { try { p = Live(); } catch { } }
             if (p < 0 && RowsTotal > 0) p = Math.Min(0.99, Rows / (double)RowsTotal);
             d["progress"] = p < 0 ? null : (object)Math.Round(p, 4);
             d["rowsProcessed"] = Rows; d["bytesProcessed"] = Interlocked.Read(ref bytes); d["bytesTotal"] = BytesTotal;

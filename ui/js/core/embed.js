@@ -92,16 +92,21 @@
   };
   // Smooth wheel, every page: each notch glides to its target instead of jumping (Data Grids do the same themselves).
   // Selects, text areas and anything marked data-native-wheel keep the browser's own wheel.
-  const EASE = 0.22, glides = new WeakMap();   // el -> { tx, ty, cx, cy, f }
+  const EASE = 0.12, glides = new WeakMap();   // el -> { tx, ty, cx, cy, sx, sy, f }; a slow ease so notches run into one another (no stepping)
   const glideTo = (el, dx, dy) => {
     let g = glides.get(el);
-    if (!g || !g.f) { g = { tx: el.scrollLeft, ty: el.scrollTop, cx: el.scrollLeft, cy: el.scrollTop, f: 0 }; glides.set(el, g); }
+    if (!g || !g.f) { g = { tx: el.scrollLeft, ty: el.scrollTop, cx: el.scrollLeft, cy: el.scrollTop, sx: el.scrollLeft, sy: el.scrollTop, f: 0 }; glides.set(el, g); }
     g.tx = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, g.tx + dx));
     g.ty = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, g.ty + dy));
     const step = () => {
+      // The element moved under the glide (content re-rendered, grew or shrank, or something else scrolled it):
+      // carry on from where it really is, toward a target that still fits, instead of fighting it (no jumps).
+      if (Math.abs(el.scrollTop - g.sy) > 2) { g.ty += el.scrollTop - g.sy; g.cy = el.scrollTop; }
+      if (Math.abs(el.scrollLeft - g.sx) > 2) { g.tx += el.scrollLeft - g.sx; g.cx = el.scrollLeft; }
+      g.tx = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, g.tx)); g.ty = Math.max(0, Math.min(el.scrollHeight - el.clientHeight, g.ty));
       g.cx += (g.tx - g.cx) * EASE; g.cy += (g.ty - g.cy) * EASE;
       if (Math.abs(g.tx - g.cx) < 0.5 && Math.abs(g.ty - g.cy) < 0.5) { g.cx = g.tx; g.cy = g.ty; g.f = 0; }
-      el.scrollLeft = g.cx; el.scrollTop = g.cy;
+      el.scrollLeft = g.cx; el.scrollTop = g.cy; g.sx = el.scrollLeft; g.sy = el.scrollTop;   // where it really landed (whole pixels)
       if (g.f) g.f = requestAnimationFrame(step);
     };
     if (!g.f) g.f = requestAnimationFrame(step);
@@ -118,7 +123,7 @@
     const g = glides.get(el), at = g?.f ? g : { tx: el.scrollLeft, ty: el.scrollTop };
     const room = (dy > 0 ? at.ty < el.scrollHeight - el.clientHeight : dy < 0 ? at.ty > 0 : false)
       || (dx > 0 ? at.tx < el.scrollWidth - el.clientWidth : dx < 0 ? at.tx > 0 : false);
-    if (!room) return;
+    if (!room) { if (g?.f) e.preventDefault(); return; }   // at the end: while a glide is still moving, the browser must not jump there itself
     e.preventDefault();
     glideTo(el === document.scrollingElement ? document.scrollingElement : el, dx, dy);
   }, { passive: false });
