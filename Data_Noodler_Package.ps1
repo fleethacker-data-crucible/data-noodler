@@ -1,6 +1,6 @@
 # Data_Noodler_Package.ps1 - packages the app folder (the folder this script is in) into Data_Noodler_YY_MMDD_HHMM.gz
 # next to it: one text file inside (Data_Noodler_YY_MMDD_HHMM.txt) with the folder list and every file as Base64.
-# Skips everything .gitignore ignores (and old packages and the installer). Install with Data_Noodler_Install.ps1.
+# Skips everything .gitignore ignores (and old packages and the installer), except the $Include folders (the demo project). Install with Data_Noodler_Install.ps1.
 # Right-click > Run with PowerShell (or: powershell -ExecutionPolicy Bypass -File Data_Noodler_Package.ps1).
 $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot.TrimEnd('\')
@@ -39,7 +39,10 @@ function Add-Rule([string]$line) {
 }
 $gi = Join-Path $Root '.gitignore'
 if (Test-Path -LiteralPath $gi) { foreach ($l in [IO.File]::ReadAllLines($gi)) { Add-Rule $l } }
+# Always packaged, even though .gitignore ignores them (whole folder, data files included).
+$Include = @('workspace/projects/demo-project-for-development')
 function Test-Ignored([string]$rel, [bool]$isDir) {
+    foreach ($inc in $Include) { if ($rel -eq $inc -or $rel.StartsWith("$inc/", [StringComparison]::OrdinalIgnoreCase)) { return $false } }
     $ign = $false
     foreach ($r in $Rules) { if ($r.DirOnly -and -not $isDir) { continue }; if ($r.Rx.IsMatch($rel)) { $ign = -not $r.Neg } }
     return $ign
