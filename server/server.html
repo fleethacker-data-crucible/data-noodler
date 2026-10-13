@@ -109,6 +109,9 @@ button.dev { background: #d9822b; }
 .opt .rec { color: var(--ok); font-size: 12px; }
 #port { margin: 2px 0 6px 24px; }
 .sgroup .off { opacity: .45; pointer-events: none; }
+.memrow { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+#efree { width: 9ch; flex: none; height: 18px; font-size: 12px; text-align: right; margin: 0; box-sizing: border-box; }
+#efree.bad, #efree.bad:focus { outline: 2px solid var(--err); outline-offset: -1px; }
 button {
   text-transform: capitalize;
   height: 25px; line-height: 1; padding: 0 14px 2px; border: 0; border-radius: 4px;
@@ -265,10 +268,14 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
     <div class="dialog wide">
       <b>Settings</b>
       <div class="sgroup">
-        <div class="slabel">Port</div>
-        <label class="opt"><input type="radio" name="pmode" value="manual"> Manual</label>
-        <div id="portrow" class="portrow"><input id="port" type="text" inputmode="numeric" maxlength="5" autocomplete="off" spellcheck="false" placeholder="5 digits"><span id="portnote" class="portnote" hidden>Must be a 5-digit port, 10000-65535</span></div>
-        <label class="opt"><input type="radio" name="pmode" value="random"> Random (new 5-digit port each time the server starts)</label>
+        <div class="slabel">Appearance (all windows)</div>
+        <label class="opt"><input type="radio" name="theme" value="dark"> Dark</label>
+        <label class="opt"><input type="radio" name="theme" value="light"> Light</label>
+      </div>
+      <div class="sgroup">
+        <div class="slabel">Data engine memory</div>
+        <label class="opt"><input type="checkbox" id="espill"> Spill to disk when memory runs short <span class="rec">(Recommended)</span></label>
+        <div class="memrow"><span>Memory left for Windows</span><input id="efree" type="text" inputmode="numeric" maxlength="7" autocomplete="off" spellcheck="false"><span>MB</span><span id="efreenote" class="portnote" hidden>At least 256 MB</span></div>
       </div>
       <div class="sgroup">
         <div class="slabel">Default browser</div>
@@ -276,9 +283,10 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
         <label class="opt"><input type="radio" name="browser" value="chrome"> Chrome</label>
       </div>
       <div class="sgroup">
-        <div class="slabel">Appearance (all windows)</div>
-        <label class="opt"><input type="radio" name="theme" value="dark"> Dark</label>
-        <label class="opt"><input type="radio" name="theme" value="light"> Light</label>
+        <div class="slabel">Port</div>
+        <label class="opt"><input type="radio" name="pmode" value="manual"> Manual</label>
+        <div id="portrow" class="portrow"><input id="port" type="text" inputmode="numeric" maxlength="5" autocomplete="off" spellcheck="false" placeholder="5 digits"><span id="portnote" class="portnote" hidden>Must be a 5-digit port, 10000-65535</span></div>
+        <label class="opt"><input type="radio" name="pmode" value="random"> Random (new 5-digit port each time the server starts)</label>
       </div>
       <div class="row">
         <button id="s-save" class="go">Save</button>
@@ -539,8 +547,17 @@ $('settings').onclick = async () => {
   await loadState(false);
   radio('pmode', state.portMode || 'manual'); radio('browser', state.browser || 'edge'); radio('theme', state.theme || 'dark');
   $('port').value = state.portMode === 'manual' ? state.port : ''; $('port').classList.remove('bad'); $('portnote').hidden = true;
+  $('espill').checked = state.engineSpill !== false; $('efree').value = state.engineFreeMb || 1024; $('efree').classList.remove('bad'); $('efreenote').hidden = true;
   syncPortMode(); $('sdlg').hidden = false;
 };
+// Memory left for Windows: whole MB, at least 256.
+const freeError = v => !/^\d+$/.test(v) || +v < 256 ? 'Memory left for Windows must be at least 256 MB.' : '';
+$('efree').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '');
+  const bad = !!freeError(e.target.value);
+  e.target.classList.toggle('bad', bad); $('efreenote').hidden = !bad;
+});
+$('efree').addEventListener('keydown', e => { if (e.key === 'Enter') $('s-save').click(); });
 document.querySelectorAll('input[name=pmode]').forEach(r => r.onchange = syncPortMode);
 $('port').addEventListener('input', e => {
   e.target.value = e.target.value.replace(/\D/g, '');
@@ -550,7 +567,9 @@ $('port').addEventListener('input', e => {
 $('port').addEventListener('keydown', e => { if (e.key === 'Enter') $('s-save').click(); });
 $('s-cancel').onclick = () => { $('sdlg').hidden = true; };
 $('s-save').onclick = async () => {
-  const body = { portMode: radio('pmode'), browser: radio('browser'), theme: radio('theme') };
+  const fe = freeError($('efree').value);
+  if (fe) { note(fe, 'warn'); $('efree').focus(); return; }
+  const body = { portMode: radio('pmode'), browser: radio('browser'), theme: radio('theme'), engineSpill: $('espill').checked, engineFreeMb: +$('efree').value };
   if (body.portMode === 'manual') {
     const err = portError($('port').value);
     if (err) { note(err, 'warn'); $('port').focus(); return; }

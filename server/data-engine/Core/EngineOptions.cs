@@ -9,8 +9,9 @@ namespace NativeDataEngine
         public string WorkspacePath;            // engine temp/cache folder (inside the root)
         public int MaxWorkers;                  // hard cap 64; actual = min(this, logical cores)
         public int BatchRowCount;               // rows per in-memory batch / Parquet row group
-        public long MemoryLimitBytes;           // 0 = use MemoryFraction only
-        public double MemoryFraction;           // share of physical RAM the engine may hold
+        public long MemoryLimitBytes;           // fixed cap on the engine's memory (0 = none: free RAM above FreeFloorBytes, see MemoryGuard)
+        public long FreeFloorBytes;             // free physical RAM always left to the system (default 1 GB)
+        public bool SpillToDisk;                // work that does not fit in memory goes to Arrow files under temp\spill (default on)
         public long PartBytes;                  // a part file also closes at this size
         public long PartRows;                   // rows per Parquet part file (global: 2M)
         public int MaxResultRows;               // rows returned to the browser per query
@@ -22,7 +23,8 @@ namespace NativeDataEngine
             MaxWorkers = 64;
             BatchRowCount = 100000;
             MemoryLimitBytes = 0;
-            MemoryFraction = 0.5;
+            FreeFloorBytes = 1024L * 1024 * 1024;
+            SpillToDisk = true;
             PartBytes = 2L * 1024 * 1024 * 1024;
             PartRows = 2000000;
             MaxResultRows = 200000;

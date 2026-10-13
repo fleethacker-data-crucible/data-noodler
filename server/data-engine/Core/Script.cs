@@ -10,6 +10,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -523,7 +524,27 @@ namespace NativeDataEngine
     {
         public sealed class SessTable
         {
-            public string Name; public Schema Schema; public List<Batch> Batches = new List<Batch>(); public long Rows, Bytes;
+            public string Name; public Schema Schema; public long Rows, Bytes;
+            // Rows live in memory (mem) or, once memory ran short while the table was built, in Arrow parts on disk
+            // (Files, under temp\spill). Queries and writes stream a spilled table from disk (Open); statements that
+            // change rows read it back into memory (Batches).
+            List<Batch> mem = new List<Batch>();
+            public List<string> Files;
+            public List<Batch> Batches
+            {
+                get
+                {
+                    if (Files == null) return mem;
+                    List<Batch> l = new List<Batch>();
+                    Source src = DataFiles.Open(Files);
+                    int n = src.Units(null);
+                    for (int u = 0; u < n; u++) foreach (Batch b in src.RunUnit(null, u)) l.Add(new Batch(Schema, b.Cols, b.Rows));
+                    return l;
+                }
+                set { mem = value; Files = null; }
+            }
+            public Source Open() { return Files != null ? DataFiles.Open(Files) : new MemSource(Schema, mem); }
+            public void ShareRows(SessTable t) { mem = t.mem; Files = t.Files; Rows = t.Rows; Bytes = t.Bytes; }
             public List<string> Pk = new List<string>(); public List<List<string>> Uniques = new List<List<string>>();
             public HashSet<string> NotNull = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             public Dictionary<string, string> Defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -561,7 +582,13 @@ namespace NativeDataEngine
             internal EngineException CatchErr;
             internal Catalog Cat;
             internal int Seq;
-            public void Dispose() { foreach (MemoryLease l in Leases) l.Dispose(); Leases.Clear(); Tables.Clear(); }
+            internal readonly List<string> Spills = new List<string>();   // spill folders of tables that went to disk
+            public void Dispose()
+            {
+                foreach (MemoryLease l in Leases) l.Dispose(); Leases.Clear(); Tables.Clear();
+                foreach (string d in Spills) { DataFiles.Forget(d); DatasetWriter.TryDelete(d); }
+                Spills.Clear();
+            }
         }
         internal sealed class Snapshot
         {
@@ -667,8 +694,7 @@ namespace NativeDataEngine
                     SelectStmt sel = ((SelectStmt)qs.Q.Body).Clone(); string into = sel.Into; sel.Into = null;
                     QueryStmt q = qs.Q.Copy(); q.Body = sel;
                     if (Exists(s, into)) throw new EngineException("TABLE_EXISTS", "Table \"" + into + "\" already exists.");
-                    Result r = RunQ(s, q, ct);
-                    s.Tables[into] = NewTable(s, into, Fix(r.Schema), r.Batches, null);
+                    s.Tables[into] = NewTableQ(s, into, q, ct);
                     s.Dropped.Remove(into); s.LastTable = into;
                 }
                 else if (inTry) RunQ(s, qs.Q, ct);           // inside TRY: run it, so its errors reach CATCH
@@ -761,13 +787,50 @@ namespace NativeDataEngine
             }
             return new Batch(s, cs, b.Rows);
         }
-        SessTable NewTable(ScriptSession s, string name, Schema schema, List<Batch> batches, SessTable meta)
+        // Builds a session table from rows (streamed: a query's batches arrive one at a time). Held in memory while it
+        // fits; when memory runs short (SpillFraction of the budget, or free RAM under the floor) what is held and the
+        // rest go to Arrow parts under temp\spill, deleted when the script ends.
+        SessTable NewTable(ScriptSession s, string name, Schema schema, IEnumerable<Batch> batches, SessTable meta)
         {
             SessTable t = meta != null ? meta.CopyMeta() : new SessTable();
             t.Name = name; t.Schema = schema;
-            foreach (Batch b in batches) { if (b.Rows == 0) continue; Batch c = Conform(b, schema); t.Batches.Add(c); t.Rows += c.Rows; t.Bytes += c.Bytes; }
-            MemoryLease l = new MemoryLease(Mem, "Script table " + name); s.Leases.Add(l); l.Add(t.Bytes);
+            MemoryLease l = new MemoryLease(Mem, "Script table " + name); s.Leases.Add(l);
+            List<Batch> held = t.Batches;
+            DatasetWriter w = null; string dir = null;
+            try
+            {
+                foreach (Batch b in batches)
+                {
+                    if (b.Rows == 0) continue;
+                    Batch c = Conform(b, schema);
+                    t.Rows += c.Rows; t.Bytes += c.Bytes;
+                    if (w == null && Options.SpillToDisk && (Mem.Reserved + c.Bytes > Mem.Budget * SpillFraction || Mem.LowRam))
+                    {
+                        dir = Path.Combine(SpillRoot, "script-" + Guid.NewGuid().ToString("N").Substring(0, 8)); s.Spills.Add(dir);
+                        w = new DatasetWriter(SpillRoot, dir, schema, true, 0, Options.PartBytes, 0);
+                        foreach (Batch h in held) w.Append(ArrowFileWriter.Encode(h));
+                        held.Clear(); l.Dispose();
+                        EngineLog.Write("engine", "Script table " + name + " spills to disk (" + MemoryGuard.Mb(Mem.AvailPhys) + " free RAM)");
+                    }
+                    if (w != null) w.Append(ArrowFileWriter.Encode(c));
+                    else { held.Add(c); l.Add(c.Bytes); }
+                }
+                if (w != null) { w.Commit(null); w.Dispose(); w = null; t.Files = Datasets.Files(dir); }
+            }
+            finally { if (w != null) w.Dispose(); }
             return t;
+        }
+        // A query's rows, one batch at a time (for NewTable: big results go to disk instead of piling up in memory).
+        IEnumerable<Batch> Stream(ScriptSession s, Planned p, CancellationToken ct)
+        {
+            ExecCtx ctx = Ctx(null, 0, ct);
+            try { foreach (Batch b in p.Op.Run(ctx)) if (b.Rows > 0) yield return b; }
+            finally { ctx.End(); }
+        }
+        SessTable NewTableQ(ScriptSession s, string name, QueryStmt q, CancellationToken ct)
+        {
+            Planned p = PlanQ(q, s.Cat);
+            return NewTable(s, name, Fix(p.Op.Schema), Stream(s, p, ct), null);
         }
         // Replaces table t with new rows (and schema), after checking its constraints.
         SessTable Put(ScriptSession s, SessTable meta, Schema schema, List<Batch> rows, CancellationToken ct, bool fillAuto)
@@ -791,8 +854,7 @@ namespace NativeDataEngine
             if (s.Tables.TryGetValue(name, out t)) return t;
             if (s.Views.ContainsKey(name)) throw new EngineException("SQL_VIEW_READONLY", "\"" + name + "\" is a view; change the tables it reads instead.");
             if (!Exists(s, name)) throw new EngineException("TABLE_NOT_FOUND", "Table \"" + name + "\" not found.");
-            Result r = Run(s, "SELECT * FROM " + Q(name), ct);
-            t = NewTable(s, name, Fix(r.Schema), r.Batches, null);
+            t = NewTableQ(s, name, Parser.ParseQuery("SELECT * FROM " + Q(name)), ct);
             s.Tables[name] = t;
             return t;
         }
@@ -916,8 +978,7 @@ namespace NativeDataEngine
             SessTable t;
             if (c.AsQuery != null)
             {
-                Result r = Run(s, c.AsQuery, ct);
-                t = NewTable(s, c.Name, Fix(r.Schema), r.Batches, null);
+                t = NewTableQ(s, c.Name, Parser.ParseQuery(c.AsQuery), ct);
             }
             else
             {
@@ -967,7 +1028,7 @@ namespace NativeDataEngine
                     {
                         s.Indexes.Remove(n);
                         SessTable t;
-                        if (ix.Unique && s.Tables.TryGetValue(ix.Table, out t)) { SessTable c = t.CopyMeta(); c.Batches = t.Batches; c.Rows = t.Rows; c.Bytes = t.Bytes; c.Uniques.RemoveAll(u => u.SequenceEqual(ix.Cols, StringComparer.OrdinalIgnoreCase)); s.Tables[ix.Table] = c; }
+                        if (ix.Unique && s.Tables.TryGetValue(ix.Table, out t)) { SessTable c = t.CopyMeta(); c.ShareRows(t); c.Uniques.RemoveAll(u => u.SequenceEqual(ix.Cols, StringComparer.OrdinalIgnoreCase)); s.Tables[ix.Table] = c; }
                     }
                     else if (!d.IfExists) throw new EngineException("INDEX_NOT_FOUND", "Index \"" + n + "\" not found.");
                     continue;
@@ -1220,7 +1281,7 @@ namespace NativeDataEngine
             }
         }
         // Same rows, copied metadata (for changes that don't touch data).
-        static SessTable Same(SessTable t) { SessTable m = t.CopyMeta(); m.Batches = t.Batches; m.Rows = t.Rows; m.Bytes = t.Bytes; return m; }
+        static SessTable Same(SessTable t) { SessTable m = t.CopyMeta(); m.ShareRows(t); return m; }
         static void Rename(SessTable m, string from, string to)
         {
             if (string.Equals(from, to, StringComparison.Ordinal)) return;

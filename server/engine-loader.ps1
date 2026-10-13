@@ -61,12 +61,13 @@ function Load-DataEngine {
 }
 
 function New-DataEngine {
-    param([Parameter(Mandatory = $true)][string]$Root, [int]$MaxWorkers = 64, [double]$MemoryFraction = 0.5, [long]$MemoryLimitBytes = 0)
+    param([Parameter(Mandatory = $true)][string]$Root, [int]$MaxWorkers = 64, [long]$MemoryLimitBytes = 0, [long]$FreeFloorMb = 1024, [bool]$SpillToDisk = $true)
     $o = New-Object NativeDataEngine.EngineOptions
     $o.RootPath = $Root
     $o.WorkspacePath = Join-Path $Root 'temp'
     $o.MaxWorkers = $MaxWorkers
-    $o.MemoryFraction = $MemoryFraction
     $o.MemoryLimitBytes = $MemoryLimitBytes
+    $o.FreeFloorBytes = $FreeFloorMb * 1MB
+    $o.SpillToDisk = $SpillToDisk
     return New-Object NativeDataEngine.DataEngine($o)
 }

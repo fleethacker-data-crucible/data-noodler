@@ -40,10 +40,11 @@ $mime = @{
 # portMode = 'manual' (keep port) or 'random' (new 5-digit port each time the site starts). browser = 'edge' or 'chrome' for Open Module.
 # theme = 'dark' or 'light': one setting for every window (panel and site), so they all follow the toggle.
 # engineWorkers = max C# engine worker threads (capped at 64 and at the CPU's logical cores).
-# engineMemory = share of physical RAM the engine may hold (0.1 - 0.9).
+# engineFreeMb = free RAM (MB) the engine always leaves to the system (default 1024); it may use the rest.
+# engineSpill = true: work that does not fit in memory spills to Arrow files in temp/spill; false: it fails instead.
 # App entry point (hard-coded): the site's "/" and the app window open this page.
 $entryPage = 'ui/html/project_manager.html'
-$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; fileThreads = 16; engineWorkers = 64; engineMemory = 0.5 }
+$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; fileThreads = 16; engineWorkers = 64; engineFreeMb = 1024; engineSpill = $true }
 if (Test-Path $settingsFile) {
     try {
         $j = Get-Content $settingsFile -Raw | ConvertFrom-Json
@@ -53,7 +54,8 @@ if (Test-Path $settingsFile) {
         if ($j.theme -in 'dark', 'light') { $settings.theme = [string]$j.theme }
         if ($j.fileThreads) { $settings.fileThreads = [Math]::Max(1, [Math]::Min(64, [int]$j.fileThreads)) }
         if ($j.engineWorkers) { $settings.engineWorkers = [Math]::Max(1, [Math]::Min(64, [int]$j.engineWorkers)) }
-        if ($j.engineMemory) { $settings.engineMemory = [Math]::Max(0.1, [Math]::Min(0.9, [double]$j.engineMemory)) }
+        if ($j.engineFreeMb) { $settings.engineFreeMb = [Math]::Max(256, [Math]::Min(1048576, [int]$j.engineFreeMb)) }
+        if ($null -ne $j.engineSpill) { $settings.engineSpill = [bool]$j.engineSpill }
     } catch {}
 }
 function Save-Settings { $settings | ConvertTo-Json | Set-Content $settingsFile -Encoding UTF8 }
@@ -224,7 +226,7 @@ function Start-Site {
     # It must answer a test query before the site opens, so nothing reports ONLINE until both are ready.
     if (-not $script:engine) {
         if (-not ('NativeDataEngine.DataEngine' -as [type])) { throw $script:engineError }
-        try { $script:engine = New-DataEngine -Root $root -MaxWorkers $settings.engineWorkers -MemoryFraction $settings.engineMemory }
+        try { $script:engine = New-DataEngine -Root $root -MaxWorkers $settings.engineWorkers -FreeFloorMb $settings.engineFreeMb -SpillToDisk $settings.engineSpill }
         catch { $script:engineError = "Engine failed to start: $($_.Exception.Message)"; throw $script:engineError }
     }
     try {
@@ -295,7 +297,7 @@ function Handle-Ui($req, $res, $rel) {
         'api/state' {
             Send-Json $res @{
                 ps = "$($PSVersionTable.PSVersion)"; loadMs = $script:loadMs; theme = $settings.theme
-                port = $settings.port; portMode = $settings.portMode; browser = $settings.browser; entry = $entryPage; up = $script:siteUp; engine = [bool]$script:engine; root = $root; user = $env:USERNAME
+                port = $settings.port; portMode = $settings.portMode; browser = $settings.browser; engineFreeMb = $settings.engineFreeMb; engineSpill = $settings.engineSpill; entry = $entryPage; up = $script:siteUp; engine = [bool]$script:engine; root = $root; user = $env:USERNAME
                 pages = Get-Pages; hits = $script:hits; uptime = $(if ($script:siteUp) { [int]((Get-Date) - $script:siteStarted).TotalSeconds } else { 0 })
             }
         }
@@ -310,6 +312,14 @@ function Handle-Ui($req, $res, $rel) {
                 if ($body.portMode) { if ($body.portMode -notin 'manual', 'random') { throw 'Invalid port mode.' }; $settings.portMode = [string]$body.portMode }
                 if ($body.browser) { if ($body.browser -notin 'edge', 'chrome') { throw 'Invalid browser.' }; $settings.browser = [string]$body.browser }
                 if ($body.theme) { Set-Theme ([string]$body.theme) }
+                if ($null -ne $body.engineFreeMb -or $null -ne $body.engineSpill) {
+                    if ($null -ne $body.engineFreeMb) {
+                        $mb = 0; if (-not [int]::TryParse([string]$body.engineFreeMb, [ref]$mb) -or $mb -lt 256) { throw 'Memory left for the system must be a whole number of MB, at least 256.' }
+                        $settings.engineFreeMb = [Math]::Min(1048576, $mb)
+                    }
+                    if ($null -ne $body.engineSpill) { $settings.engineSpill = [bool]$body.engineSpill }
+                    if ($script:engine) { $script:engine.SetMemory([long]$settings.engineFreeMb * 1MB, [bool]$settings.engineSpill) }
+                }
                 Save-Settings
                 if ($body.port -or $body.portMode -or $body.browser) { Add-Log 'sys' "Settings applied: port $($settings.port) ($($settings.portMode)), browser $($settings.browser)" }
                 Send-Json $res @{ ok = $true }
@@ -867,7 +877,7 @@ foreach ($d in 'workspace\dashboard-studio\widgets', 'workspace\sample-data') {
 $engine = $null; $script:engineError = 'The data engine is not loaded; see the server log.'
 try {
     $how = Load-DataEngine -Root $root
-    $engine = New-DataEngine -Root $root -MaxWorkers $settings.engineWorkers -MemoryFraction $settings.engineMemory
+    $engine = New-DataEngine -Root $root -MaxWorkers $settings.engineWorkers -FreeFloorMb $settings.engineFreeMb -SpillToDisk $settings.engineSpill
     Add-Log 'engine' "Engine loaded ($how)."
 } catch {
     $script:engineError = "Engine failed to load: $($_.Exception.Message)"
@@ -1266,4 +1276,13 @@ try {
     $listener.Stop()
     $listener.Close()
     if ((Get-Content $pidFile -ErrorAction SilentlyContinue) -eq "$PID") { Remove-Item $pidFile -ErrorAction SilentlyContinue }
+    # The app is closed: its browser windows (own profiles under temp\browser) go too, so nothing keeps holding RAM.
+    try {
+        $profiles = Join-Path $root 'temp\browser'
+        Get-CimInstance Win32_Process -Filter "Name='msedge.exe' OR Name='chrome.exe'" -Property ProcessId, CommandLine -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($profiles, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
 }
+# End the process outright (no thread or runspace can keep it, and its memory, alive).
+[Environment]::Exit(0)

@@ -1,9 +1,10 @@
 ﻿{
     "fileThreads":  16,
     "engineWorkers":  64,
-    "engineMemory":  0.5,
+    "engineFreeMb":  1024,
     "port":  25000,
     "browser":  "chrome",
     "portMode":  "manual",
-    "theme":  "dark"
+    "theme":  "dark",
+    "engineSpill":  true
 }

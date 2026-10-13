@@ -40,12 +40,63 @@ namespace NativeDataEngine
             int workers = Math.Max(1, Math.Min(Math.Min(64, options.MaxWorkers), Environment.ProcessorCount));
             Pool = new WorkerPool(workers);
             Mem = new MemoryGuard(options);
+            Spill.Enabled = options.SpillToDisk;
             Resident = new ResidentDatasets(this);
             Datasets.TempRoot = string.IsNullOrEmpty(options.WorkspacePath) ? Path.Combine(Root, "temp") : Path.GetFullPath(options.WorkspacePath);
             SpillRoot = Path.Combine(Datasets.TempRoot, "spill");
             Datasets.Sweep(SpillRoot); Datasets.Sweep(Path.Combine(Datasets.TempRoot, "write"));   // left by a crash
-            EngineLog.Write("engine", "Native engine " + Version + ": " + workers + " workers (" + Environment.ProcessorCount + " cores), memory budget " + MemoryGuard.Mb(Mem.Budget) +
-                " of " + MemoryGuard.Mb(Mem.TotalPhys) + (Environment.Is64BitProcess ? "" : " (32-bit process: limited)"));
+            EngineLog.Write("engine", "Native engine " + Version + ": " + workers + " workers (" + Environment.ProcessorCount + " cores), memory: free RAM above " +
+                MemoryGuard.Mb(Mem.MinFree) + " (now " + MemoryGuard.Mb(Mem.Budget) + " of " + MemoryGuard.Mb(Mem.TotalPhys) + "), spill to disk " + (options.SpillToDisk ? "on" : "off") + (Environment.Is64BitProcess ? "" : " (32-bit process: limited)"));
+            monitor = new Timer(_ => Watch(), null, 2000, 2000);
+        }
+
+        // ---------- memory ----------
+        // Monitor (every 2 s): while free RAM is under the floor, resident datasets are dropped, least recently used first.
+        readonly Timer monitor;
+        int watching;
+        void Watch()
+        {
+            if (Interlocked.Exchange(ref watching, 1) == 1) return;
+            try { if (Mem.LowRam) Resident.Trim(); }
+            catch { }
+            finally { Interlocked.Exchange(ref watching, 0); }
+        }
+
+        // Server settings changed: free RAM kept for the system, and spill to disk on / off (apply at once).
+        public void SetMemory(long freeFloorBytes, bool spillToDisk)
+        {
+            if (freeFloorBytes > 0) { Options.FreeFloorBytes = freeFloorBytes; Mem.MinFree = freeFloorBytes; }
+            Options.SpillToDisk = spillToDisk; Spill.Enabled = spillToDisk;
+            EngineLog.Write("engine", "Memory: " + MemoryGuard.Mb(Mem.MinFree) + " kept free for the system, spill to disk " + (spillToDisk ? "on" : "off") + ".");
+        }
+
+        // Frees engine memory: cached tables (and their spills), resident datasets, then a compacting GC so the
+        // process gives the RAM back to Windows.
+        public Dictionary<string, object> Purge()
+        {
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["tables"] = CacheDrop(null); d["datasets"] = Resident.DropUnder(null);
+            Compact();
+            d["managed"] = GC.GetTotalMemory(false);
+            return d;
+        }
+        public static void Compact()
+        {
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        }
+
+        // A module window closed: drops the datasets only it held; when no window holds any, purges everything.
+        public Dictionary<string, object> Release(string client)
+        {
+            int open;
+            int n = Resident.Release(client, out open);
+            if (open == 0) { Dictionary<string, object> p = Purge(); p["windows"] = 0; p["datasets"] = n + (int)p["datasets"]; EngineLog.Write("engine", "Memory purged (no module windows open): " + p["datasets"] + " dataset(s), " + p["tables"] + " table(s)."); return p; }
+            if (n > 0) Compact();
+            Dictionary<string, object> d = new Dictionary<string, object>();
+            d["datasets"] = n; d["windows"] = open; d["managed"] = GC.GetTotalMemory(false);
+            if (n > 0) EngineLog.Write("engine", "Memory released by a closed window: " + n + " dataset(s).");
+            return d;
         }
         public int WorkerCount { get { return Pool.WorkerCount; } }
 
@@ -82,7 +133,7 @@ namespace NativeDataEngine
                 if (Session != null)
                 {
                     SessTable st;
-                    if (Session.Tables.TryGetValue(name, out st)) return new MemSource(st.Schema, st.Batches);
+                    if (Session.Tables.TryGetValue(name, out st)) return st.Open();
                     if (Session.Dropped.Contains(name)) return null;
                 }
                 MemTable t; if (!e.tables.TryGetValue(name, out t)) return null;
@@ -556,7 +607,7 @@ namespace NativeDataEngine
                     foreach (Batch b in p.Op.Run(ctx))
                     {
                         m.Rows += b.Rows; m.Bytes += b.Bytes;
-                        if (w == null && (Mem.Reserved + b.Bytes > Mem.Budget * SpillFraction || Mem.AvailPhys < Mem.MinFree))
+                        if (w == null && Options.SpillToDisk && (Mem.Reserved + b.Bytes > Mem.Budget * SpillFraction || Mem.LowRam))
                         {
                             m.Spill = Path.Combine(SpillRoot, name + "-" + Guid.NewGuid().ToString("N").Substring(0, 8));
                             w = new DatasetWriter(SpillRoot, m.Spill, m.Schema, true, 0, Options.PartBytes, 0);
@@ -739,7 +790,7 @@ namespace NativeDataEngine
             d["workers"] = Pool.WorkerCount; d["maxWorkers"] = 64; d["cores"] = Environment.ProcessorCount; d["busy"] = Pool.Busy;
             d["is64"] = Environment.Is64BitProcess; d["clr"] = Environment.Version.ToString();
             Dictionary<string, object> m = new Dictionary<string, object>();
-            m["budget"] = Mem.Budget; m["reserved"] = Mem.Reserved; m["managed"] = Mem.Managed; m["availPhys"] = Mem.AvailPhys; m["totalPhys"] = Mem.TotalPhys; m["cached"] = CachedBytes; m["spills"] = Spill.Count; m["resident"] = Resident.Bytes; m["residentCap"] = Resident.Cap;
+            m["budget"] = Mem.Budget; m["reserved"] = Mem.Reserved; m["managed"] = Mem.Managed; m["availPhys"] = Mem.AvailPhys; m["totalPhys"] = Mem.TotalPhys; m["cached"] = CachedBytes; m["spills"] = Spill.Count; m["resident"] = Resident.Bytes; m["residentCap"] = Resident.Cap; m["freeFloor"] = Mem.MinFree; m["windows"] = Resident.Windows;
             m["process"] = Process.GetCurrentProcess().PrivateMemorySize64;
             d["memory"] = m;
             d["jobs"] = Jobs.Running; d["batchRows"] = Options.BatchRowCount; d["partBytes"] = Options.PartBytes;
@@ -749,10 +800,12 @@ namespace NativeDataEngine
 
         public void Dispose()
         {
+            monitor.Dispose();
             Jobs.CancelAll();
             CacheDrop(null);
             Resident.DropUnder(null);
             Pool.Dispose();
+            Compact();
         }
     }
 

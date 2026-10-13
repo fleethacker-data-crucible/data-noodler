@@ -11,7 +11,8 @@
 //   POST pipeline {datasets, nodes, changed, version}   -> {jobId}
 //   GET  job?id=  /  POST job/cancel?id=  /  GET jobs
 //   POST cache/load {name, sql, views}  /  POST cache/drop {name}     (in-memory tables for the engine bench)
-//   GET  memory  /  POST memory/load {paths, wait}  /  POST memory/drop {path}   (resident project datasets)
+//   GET  memory  /  POST memory/load {paths, wait, client}  /  POST memory/drop {path}   (resident project datasets)
+//   POST memory/release {client} (a module window closed: frees what only it held; the last one purges)  /  POST memory/purge
 //   GET / POST options {batchRows}                      rows per batch (Benchmark page)
 using System;
 using System.Collections.Generic;
@@ -182,14 +183,8 @@ namespace NativeDataEngine
                         return Json.Write(jc.ToJson());
                     }
                 case "memory/purge":
-                    {
-                        // Frees engine memory: cached tables (and their spills), resident datasets, then a compacting GC.
-                        Dictionary<string, object> d = new Dictionary<string, object>();
-                        d["tables"] = e.CacheDrop(null); d["datasets"] = e.Resident.DropUnder(null);
-                        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
-                        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-                        d["managed"] = GC.GetTotalMemory(false); return Ok(d);
-                    }
+                    return Ok(e.Purge());   // cached tables (and their spills), resident datasets, then a compacting GC
+                case "memory/release": return Ok(e.Release(Json.Str(req, "client")));   // a module window closed
                 case "cache/drop": { Dictionary<string, object> d = new Dictionary<string, object>(); d["dropped"] = e.CacheDrop(Json.Str(req, "name")); return Ok(d); }
                 case "options":
                     {
@@ -201,7 +196,7 @@ namespace NativeDataEngine
                 case "memory/load":
                     {
                         Dictionary<string, object> d = new Dictionary<string, object>();
-                        d["datasets"] = e.Resident.Preload(Json.Strs(req, "paths"), Json.Bool(req, "wait", false) ? 600000 : 0);
+                        d["datasets"] = e.Resident.Preload(Json.Strs(req, "paths"), Json.Bool(req, "wait", false) ? 600000 : 0, Json.Str(req, "client"));
                         return Ok(d);
                     }
                 case "memory/drop": { Dictionary<string, object> d = new Dictionary<string, object>(); d["dropped"] = e.Resident.DropUnder(Json.Str(req, "path")); return Ok(d); }

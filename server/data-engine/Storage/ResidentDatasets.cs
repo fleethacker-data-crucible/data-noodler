@@ -31,6 +31,9 @@ namespace NativeDataEngine
         readonly Dictionary<string, string> loading = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // key -> rel path
         readonly Dictionary<string, string> skipped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // key|sig -> reason (too big)
         readonly Dictionary<string, string> failed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);    // key -> last load error
+        // Module windows (client ids) -> the dataset folders each asked for. A closing window releases its own;
+        // when none is left, the engine purges (DataEngine.Release).
+        readonly Dictionary<string, HashSet<string>> holders = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         long clock;
 
         public ResidentDatasets(DataEngine e) { this.e = e; }
@@ -86,10 +89,12 @@ namespace NativeDataEngine
 
         // Starts background loads; returns what each path is doing (resident / loading / skipped / error). waitMs > 0:
         // waits up to that long for the loads to finish first (the Dashboard waits so its first queries read RAM).
-        public List<Dictionary<string, object>> Preload(IEnumerable<string> rels, int waitMs)
+        // client (optional): the module window asking; it holds these datasets until it releases them.
+        public List<Dictionary<string, object>> Preload(IEnumerable<string> rels, int waitMs, string client)
         {
             List<string> list = new List<string>(rels);
             List<string> fulls = new List<string>();
+            if (!string.IsNullOrEmpty(client)) lock (gate) if (!holders.ContainsKey(client)) holders[client] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string rel in list)
             {
                 string full = null;
@@ -98,6 +103,7 @@ namespace NativeDataEngine
                     full = PathGuard.Project(e.Root, rel, false);
                     if (Eligible(full))
                     {
+                        if (!string.IsNullOrEmpty(client)) lock (gate) holders[client].Add(full);
                         List<string> files = Datasets.Files(full);
                         if (Find(full, Signature(files, full)) == null) StartLoad(full, files, Signature(files, full));
                     }
@@ -282,6 +288,36 @@ namespace NativeDataEngine
             return n;
         }
 
+        // A module window closed: forgets it and drops every dataset no open window holds (also ones loaded by a
+        // query alone). open = windows still holding datasets. Returns how many were dropped.
+        public int Release(string client, out int open)
+        {
+            int n = 0;
+            lock (gate)
+            {
+                if (!string.IsNullOrEmpty(client)) holders.Remove(client);
+                open = holders.Count;
+                HashSet<string> keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (HashSet<string> h in holders.Values) keep.UnionWith(h);
+                foreach (Entry x in entries.Values.ToList()) if (!keep.Contains(x.Key)) { Drop(x); n++; }
+            }
+            return n;
+        }
+        public int Windows { get { lock (gate) return holders.Count; } }
+
+        // Free RAM is under the floor: drop entries, least recently used first, until it recovers or none is left.
+        public void Trim()
+        {
+            while (e.Mem.LowRam)
+            {
+                Entry lru;
+                lock (gate) { lru = entries.Values.OrderBy(x => x.LastUsed).FirstOrDefault(); if (lru != null) Drop(lru); }
+                if (lru == null) return;
+                EngineLog.Write("engine", "In memory: dropped " + lru.Rel + " (free RAM under " + MemoryGuard.Mb(e.Mem.MinFree) + ").");
+                DataEngine.Compact();
+            }
+        }
+
         public Dictionary<string, object> Info()
         {
             Dictionary<string, object> d = new Dictionary<string, object>();
@@ -296,7 +332,7 @@ namespace NativeDataEngine
                 }
                 d["loading"] = loading.Values.ToList();
             }
-            d["datasets"] = l; d["bytes"] = Bytes; d["cap"] = Cap; d["enabled"] = Enabled;
+            d["datasets"] = l; d["bytes"] = Bytes; d["cap"] = Cap; d["enabled"] = Enabled; d["windows"] = Windows;
             return d;
         }
     }

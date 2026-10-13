@@ -16,10 +16,12 @@ namespace NativeDataEngine
     {
         public const int Partitions = 64;
         public static int Count;   // spills since the engine started (status, tests)
+        public static bool Enabled = true;   // EngineOptions.SpillToDisk; off = work that does not fit fails with QUERY_OUT_OF_MEMORY
 
         // True for the engine's own memory-budget error or a real .NET out-of-memory (also wrapped by the worker pool).
         public static bool IsOom(Exception e)
         {
+            if (!Enabled) return false;
             while (e != null)
             {
                 EngineException ee = e as EngineException;

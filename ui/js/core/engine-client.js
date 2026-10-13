@@ -14,6 +14,7 @@
 //   await Engine.memory.load(paths)  / preload(paths)    project datasets into engine memory (load waits, preload does not)
 //                                                         -> [{ path, state: resident|loading|skipped|error, rows, bytes, reason }]
 //   await Engine.memory.info() / drop(path)               what is resident; free it (path = folder prefix, none = all)
+//   Closing a window that loaded datasets releases them (memory/release); the last such window purges engine memory.
 //   Engine.src(path, table)  SQL source for a file: read_csv / read_dataset (Arrow / Parquet) / read_sqlite
 //   Engine.views(datasets)   { name: 'SELECT * FROM read_dataset(...)' } for a project's datasets
 // Datasets are folders of Arrow IPC parts (the working format; older ones Parquet); Parquet / CSV / SQLite = export only.
@@ -73,9 +74,19 @@ const Engine = (() => {
   const status = () => call('status');
   const cache = { load: (name, sql, views, workers) => call('cache/load', { name, sql, views, workers }), drop: name => call('cache/drop', { name }) };
   const paths = p => (p || []).filter(Boolean);
+  // This window is a client of the engine: datasets it loads stay in memory while it is open. Closing it releases
+  // them (the engine drops what no other window holds, and purges everything when no window holds anything).
+  const client = crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now();
+  let holds = false;
+  const hold = () => { holds = true; return client; };
+  addEventListener('pagehide', () => {
+    if (!holds) return;
+    holds = false;
+    try { fetch('/api/data-engine/memory/release', { method: 'POST', keepalive: true, headers: { 'X-DN-Token': window.DN_TOKEN || '', 'Content-Type': 'application/json' }, body: JSON.stringify({ client }) }); } catch {}
+  });
   const memory = {
-    load: async p => (await call('memory/load', { paths: paths(p), wait: true })).datasets,
-    preload: async p => (await call('memory/load', { paths: paths(p), wait: false })).datasets,
+    load: async p => (await call('memory/load', { paths: paths(p), wait: true, client: hold() })).datasets,
+    preload: async p => (await call('memory/load', { paths: paths(p), wait: false, client: hold() })).datasets,
     info: () => call('memory'),
     drop: path => call('memory/drop', { path: path || '' }),
   };
