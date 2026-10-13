@@ -1,0 +1,24 @@
+{
+  "name": "Pie Chart",
+  "inputs": [
+    { "key": "name", "label": "Name", "role": "dimension" },
+    { "key": "value", "label": "Value", "role": "measure", "agg": "sum" }
+  ],
+  "settings": [
+    { "path": "donut", "label": "Donut Hole (%)", "group": "Chart", "type": "number", "default": 0, "min": 0, "max": 50, "step": 1 },
+    { "path": "sort", "label": "Slice Order", "group": "Chart", "type": "pick", "choices": ["Data Order", "Largest First", "Smallest First"], "default": "Data Order" },
+    { "path": "strokeWidth", "label": "Stroke Width", "group": "Chart", "type": "number", "default": 1, "min": 0, "max": 10, "step": 1 },
+
+    { "path": "scheme", "label": "Color Scheme", "group": "Colors", "type": "pick", "choices": ["Spectral", "Tableau 10", "Category 10", "Set 2", "Pastel", "Dark 2", "Paired", "Viridis", "Blues", "Rainbow", "Warm", "Cool"], "default": "Spectral" },
+    { "path": "labelColor", "label": "Label Color", "group": "Colors", "type": "color", "default": "#000000" },
+    { "path": "strokeColor", "label": "Stroke Color", "group": "Colors", "type": "color", "default": "#ffffff" },
+
+    { "path": "nameFormat", "label": "Name", "group": "Formats", "type": "format", "input": "name", "kinds": ["text", "number", "date"], "default": "Auto" },
+    { "path": "valueFormat", "label": "Value", "group": "Formats", "type": "format", "input": "value", "kinds": ["number"], "default": "Auto" },
+
+    { "path": "fontSize", "label": "Font Size", "group": "Labels", "type": "number", "default": 10, "min": 1, "max": 50, "step": 1 },
+    { "path": "labels", "label": "Show Labels", "group": "Labels", "type": "boolean", "default": true },
+    { "path": "values", "label": "Show Values", "group": "Labels", "type": "boolean", "default": true, "when": { "path": "labels", "is": true } }
+  ],
+  "values": {}
+}

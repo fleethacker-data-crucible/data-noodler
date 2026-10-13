@@ -43,6 +43,15 @@
   let pkgs = new Map(), globals = [], packaged = {}, clean = [];
   const PACKAGED = 'ui/widgets';   // shipped with the app: ui/widgets/<Category>/<id>/ (the folder name = the button)
   const results = new Map();   // container id -> rows (redraw on resize without a query)
+  // Filter widgets (d3-settings.json "filter": true): container id -> { dataset, col, values, ranges, detail }. A widget fires
+  // 'dn-filter' ({ input, values, ranges: [{ min, max }], state }; detail is handed back to it on redraw); the containers it is linked to (w.links = [ids] | 'page', saved; right-click > Link) are queried
+  // again with those values. A target on another dataset is filtered only if it has a column of the same name.
+  // The picked values are this session only.
+  const filters = new Map();
+  const isFilter = w => { try { return JSON.parse(pkgs.get(w?.widget)?.settings || '{}').filter === true; } catch { return false; } };
+  const linked = (fw, x) => !!fw && x !== fw && (fw.links === 'page' || (Array.isArray(fw.links) && fw.links.includes(x.id)));
+  const hasCol = (x, col) => !!x.dataset && (dsOf(x.dataset)?.columns || []).some(c => c.name === col);
+  const whereFor = w => Widgets.where([...filters].filter(([id, f]) => linked(byId(id), w) && (f.dataset === w.dataset || hasCol(w, f.col))).map(([, f]) => f));
   const byId = id => dash.widgets.find(w => w.id === id);
   const cardOf = w => $('cards').querySelector(`.card[data-id="${w.id}"]`);
   const FILE = () => `${ctx.dir}/dashboard/dashboard.json`;
@@ -157,7 +166,7 @@
     const note = (h, err) => { pv.className = 'pv'; pv.innerHTML = `<div class="note ${err ? 'err' : ''}">${h}</div>`; };
     if (!w.widget) return note('Custom Widget<br><small>Right-click > Edit</small>');
     if (!p) return note(`Widget "${esc(w.widget)}" not found in dashboard/widgets/. Right-click > Edit, or delete it.`, true);
-    try { await Widgets.draw(pv, { ...p, key: p.id }, results.get(w.id) || []); }
+    try { await Widgets.draw(pv, { ...p, key: p.id }, results.get(w.id) || [], undefined, { filter: filters.get(w.id)?.detail || null }); }
     catch (e) { note(esc(String(e.message || e).split('\n')[0]), true); }
   }
   let queue = Promise.resolve();
@@ -166,13 +175,22 @@
       results.delete(w.id);
       const p = pkgs.get(w.widget), d = dsOf(w.dataset);
       if (p && d) {
-        try { const s = Widgets.parse(p.settings); if (Widgets.ready(s.inputs, w.inputs || {})) { await Engine.memory.load([d.path]).catch(() => {}); results.set(w.id, await Widgets.load(s.inputs, w.inputs || {}, d)); } }
+        try { const s = Widgets.parse(p.settings); if (Widgets.ready(s.inputs, w.inputs || {})) { await Engine.memory.load([d.path]).catch(() => {}); results.set(w.id, await Widgets.load(s.inputs, w.inputs || {}, d, whereFor(w))); } }
         catch (e) { ctx.log(`${p.name}: ${String(e.message || e).split('\n')[0]}`, 'warn'); }
       }
       await paint(w);
     });
     return queue;
   }
+  const refilter = w => dash.widgets.filter(x => linked(w, x)).forEach(draw);
+  $('cards').addEventListener('dn-filter', e => {
+    const w = byId(e.target.closest('.card')?.dataset.id); if (!w) return;
+    const d = e.detail || {}, col = w.inputs?.[d.input]?.col, values = Array.isArray(d.values) ? d.values : [], ranges = Array.isArray(d.ranges) ? d.ranges : [];
+    if (col && (values.length || ranges.length)) filters.set(w.id, { dataset: w.dataset, col, values, ranges, detail: d });
+    else if (col && d.state) filters.set(w.id, { dataset: w.dataset, col, values: [], ranges: [], detail: d });   // nothing picked, but keep its view
+    else filters.delete(w.id);
+    refilter(w);
+  });
   let rpFrame = 0; const rpSet = new Set();
   const repaintSoon = w => { rpSet.add(w); if (!rpFrame) rpFrame = requestAnimationFrame(() => { rpFrame = 0; const s = [...rpSet]; rpSet.clear(); s.forEach(paint); }); };
 
@@ -271,6 +289,8 @@
     const name = pkgs.get(w.widget)?.name || 'this Custom Widget';
     if (!await UI.confirm(`Delete ${name} from the dashboard? (Its widget files stay in dashboard/widgets/.)`, { danger: true, ok: 'Delete' })) return;
     dash.widgets = dash.widgets.filter(x => x !== w); results.delete(w.id);
+    if (filters.delete(w.id)) refilter(w);
+    for (const x of dash.widgets) if (Array.isArray(x.links)) x.links = x.links.filter(id => id !== w.id);
     cardOf(w)?.remove(); select(null); fitHint(); await saveNow();
     ctx.log(`Widget container deleted: ${name}`);
   });
@@ -282,6 +302,7 @@
     ev.preventDefault(); ctxId = el.dataset.id; select(ctxId);
     const m = $('ctxmenu'); Menus.closeAll(); m.classList.add('open');
     m.querySelector('[data-act="edit"]').classList.toggle('off', !!byId(ctxId)?.builtin);   // built-in: settings only
+    m.querySelector('[data-act="link"]').hidden = !isFilter(byId(ctxId));
     m.style.left = `${Math.max(0, Math.min(ev.clientX, innerWidth - m.offsetWidth - 4))}px`; m.style.top = `${Math.max(0, Math.min(ev.clientY, innerHeight - m.offsetHeight - 4))}px`;
   });
   addEventListener('contextmenu', e => { if (!e.target.closest('input, textarea, .sqled')) e.preventDefault(); });   // no browser menu
@@ -292,7 +313,91 @@
     $('ctxmenu').classList.remove('open');
     if (act === 'edit') { if (w.builtin) return UI.toast('A built-in chart: only its Settings can change.', 'warn'); edit(w); } else if (act === 'delete') delContainer(w);
     else if (act === 'data') quickData(w); else if (act === 'settings') quickSettings(w);
+    else if (act === 'link') linkMode(w);
   };
+
+  // ---- Link (right-click a filter > Link): an overlay over the dashboard. Green cross = the filter, orange = the other
+  // widgets, pink (centre) = the whole page. Drag the green cross onto one: that link is made. Each link is a line with a
+  // red trash can in its middle (click = unlink). Esc or a click on the empty overlay closes it.
+  const LINK = { r: 18, orange: '#f28c28', green: 'var(--ok)', pink: 'var(--pink)', red: 'var(--err)' };
+  let linkEnd = null;
+  function linkMode(fw) {
+    linkEnd?.();
+    const stage = $('stage'), svg = d3.select($('cards')).append('svg').attr('class', 'linkov');
+    const mid = x => ({ x: OX + (x.x + x.w / 2) * G, y: (x.y + x.h / 2) * G });
+    const col = () => fw.inputs?.value?.col || Object.values(fw.inputs || {})[0]?.col;
+    const fits = x => !col() || !x.dataset || !fw.dataset || x.dataset === fw.dataset || hasCol(x, col());
+    const cross = (g, c, size = LINK.r) => {
+      g.append('circle').attr('r', size).attr('fill', c);
+      g.append('path').attr('d', `M${-size / 2} 0H${size / 2}M0 ${-size / 2}V${size / 2}`).attr('stroke', '#fff').attr('stroke-width', 4).attr('stroke-linecap', 'round');
+    };
+    const relink = async (targets) => { await saveNow(); if (filters.has(fw.id)) targets.forEach(draw); render(); };
+    const unlink = x => {
+      const was = dash.widgets.filter(o => linked(fw, o));
+      if (x === 'page') fw.links = []; else fw.links = (Array.isArray(fw.links) ? fw.links : []).filter(id => id !== x.id);
+      relink(was.filter(o => !linked(fw, o)));
+    };
+    const link = x => {
+      if (x === 'page') { fw.links = 'page'; return relink(dash.widgets.filter(o => o !== fw)); }
+      if (!fits(x) || linked(fw, x)) return render();
+      const was = fw.links === 'page' ? dash.widgets.filter(o => o !== fw && o !== x) : [];
+      fw.links = [...(Array.isArray(fw.links) ? fw.links : []), x.id];   // a page link becomes this one widget
+      relink([x, ...was]);
+    };
+    function render() {
+      svg.selectAll('*').remove();
+      const H = Math.max($('cards').scrollHeight, stage.scrollTop + stage.clientHeight), W = Math.max($('cards').scrollWidth, stage.clientWidth);
+      svg.attr('width', W).attr('height', H);
+      svg.append('rect').attr('class', 'lk-dim').attr('width', W).attr('height', H).on('click', () => linkEnd());
+      const page = { x: stage.scrollLeft + stage.clientWidth / 2, y: stage.scrollTop + stage.clientHeight / 2 }, from = mid(fw);
+      const others = dash.widgets.filter(x => x !== fw);
+      // the links: line + trash can in the middle
+      const ends = fw.links === 'page' ? [['page', page]] : others.filter(x => linked(fw, x)).map(x => [x, mid(x)]);
+      for (const [x, p] of ends) {
+        svg.append('line').attr('class', 'lk-line').attr('x1', from.x).attr('y1', from.y).attr('x2', p.x).attr('y2', p.y);
+        const t = svg.append('g').attr('class', 'lk-trash').attr('transform', `translate(${(from.x + p.x) / 2},${(from.y + p.y) / 2})`).on('click', () => unlink(x));
+        t.append('title').text('Remove this link');
+        t.append('circle').attr('r', 13).attr('fill', LINK.red);
+        t.append('path').attr('d', 'M-5 -3h10M-3.5 -3v8h7v-8M-2 -5h4').attr('fill', 'none').attr('stroke', '#fff').attr('stroke-width', 1.6).attr('stroke-linejoin', 'round');
+      }
+      // the targets
+      for (const x of others) {
+        const p = mid(x), g = svg.append('g').attr('class', 'lk-target' + (fits(x) ? '' : ' off')).attr('transform', `translate(${p.x},${p.y})`).datum(x);
+        g.append('title').text(fits(x) ? (linked(fw, x) ? 'Linked' : 'Drop here to link') : `No column "${col()}" in ${x.dataset}`);
+        cross(g, LINK.orange);
+      }
+      const pg = svg.append('g').attr('class', 'lk-target lk-page').attr('transform', `translate(${page.x},${page.y})`).datum('page');
+      cross(pg, LINK.pink, 26);
+      pg.append('text').attr('y', 46).attr('text-anchor', 'middle').text('Link Filter to Page');
+      // the filter: drag its green cross
+      const src = svg.append('g').attr('class', 'lk-src').attr('transform', `translate(${from.x},${from.y})`);
+      src.append('title').text('Drag onto a widget, or onto the centre for the whole page');
+      cross(src, LINK.green);
+      src.on('pointerdown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const line = svg.insert('line', '.lk-target').attr('class', 'lk-line lk-drag').attr('x1', from.x).attr('y1', from.y).attr('x2', from.x).attr('y2', from.y);
+        const ghost = svg.append('g').attr('class', 'lk-ghost').attr('transform', `translate(${from.x},${from.y})`); cross(ghost, LINK.green);
+        let over = null;
+        const at = ev => { const r = $('cards').getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+        const mv = ev => {
+          const p = at(ev); line.attr('x2', p.x).attr('y2', p.y); ghost.attr('transform', `translate(${p.x},${p.y})`);
+          over = null;
+          svg.selectAll('.lk-target').each(function (d) {
+            const c = d === 'page' ? page : mid(d), hit = Math.hypot(p.x - c.x, p.y - c.y) <= (d === 'page' ? 30 : 24) && (d === 'page' || fits(d));
+            d3.select(this).classed('hot', hit); if (hit) over = d;
+          });
+        };
+        const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); if (over) link(over); else render(); };
+        addEventListener('pointermove', mv); addEventListener('pointerup', up);
+      });
+    }
+    const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); linkEnd(); } };
+    const fit = () => requestAnimationFrame(render);   // after the grid has re-centred
+    addEventListener('keydown', esc, true); stage.addEventListener('scroll', render); addEventListener('resize', fit);
+    linkEnd = () => { svg.remove(); removeEventListener('keydown', esc, true); stage.removeEventListener('scroll', render); removeEventListener('resize', fit); linkEnd = null; };
+    render();
+  }
   addEventListener('keydown', e => { if (e.key === 'Escape' && !document.querySelector('dialog[open]') && $('wed').hidden) { $('ctxmenu').classList.remove('open'); select(null); } });
 
   // ---- Data / Settings on the dashboard (right-click): both can be open; they follow the selected container ----
@@ -318,6 +423,7 @@
   }
   async function linkField(w, key, col, ds) {
     const p = pkgs.get(w?.widget), d = dsOf(ds); if (!p || !d) return;
+    if (filters.delete(w.id)) refilter(w);   // its filter was for the old field
     if (w.dataset !== ds) { w.dataset = ds; w.inputs = {}; }
     const st = Widgets.parse(p.settings), inputs = w.inputs || (w.inputs = {});
     const num = Widgets.NUMERIC.test((d.columns || []).find(c => c.name === col)?.type || ''), fits = i => num ? i.role === 'measure' : i.role !== 'measure';

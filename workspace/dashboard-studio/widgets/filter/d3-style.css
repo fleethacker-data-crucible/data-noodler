@@ -1,0 +1,52 @@
+/* Filter widget. .WIDGET = its container (scoped automatically). Frame colours follow the app theme; --accent (picked)
+   and --hist (histogram) come from the settings. Every class is f- prefixed so app styles never reach in. */
+.WIDGET {
+  --frame-text: var(--text-2, #555);
+  --frame-strong: var(--text, #111);
+  --frame-muted: var(--muted, #888);
+  --frame-line: var(--border, #ccc);
+  --frame-hover: var(--panel-2, #eee);
+  --frame-bg: var(--panel, #f4f4f2);
+  font-family: 'Exo 2', system-ui, sans-serif;
+  color: var(--frame-text);
+}
+.WIDGET .f-root { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 6px; padding: 8px; box-sizing: border-box; }
+.WIDGET .f-root * { box-sizing: border-box; }
+.WIDGET .f-empty { margin: auto; color: var(--frame-muted); font-size: 13px; }
+.WIDGET button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: left; }
+
+/* header */
+.WIDGET .f-head { display: flex; align-items: center; gap: 8px; min-height: 18px; }
+.WIDGET .f-title { font-weight: 600; color: var(--frame-strong); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.WIDGET .f-status { color: var(--frame-muted); font-size: .9em; white-space: nowrap; }
+.WIDGET .f-clear { flex: none; height: 18px; padding: 0 8px; border: 1px solid var(--frame-line); border-radius: 4px; font-size: 12px; line-height: 16px; text-align: center; }
+.WIDGET .f-clear:hover:not([disabled]) { background: var(--frame-hover); }
+.WIDGET .f-clear[disabled] { opacity: .4; cursor: default; }
+.WIDGET .f-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.WIDGET .f-search { flex: none; width: 100%; height: 22px; padding: 0 8px; border: 1px solid var(--frame-line); border-radius: 4px; background: transparent; color: inherit; font: inherit; outline: none; }
+.WIDGET .f-search:focus { border-color: var(--accent); }
+
+/* the list (only the rows in view exist; each sits at its own top) */
+.WIDGET .f-list { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+.WIDGET .f-vinner { position: relative; width: 100%; }
+.WIDGET .f-row { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: 0 4px; border-radius: 4px; }
+.WIDGET .f-row:hover { background-color: var(--frame-hover); }
+.WIDGET .f-dim { opacity: .55; }
+.WIDGET .f-hfill { background: linear-gradient(to right, color-mix(in srgb, var(--hist) 22%, transparent) var(--share), transparent var(--share)); }
+.WIDGET .f-box { flex: none; width: 11px; height: 11px; border: 1px solid var(--frame-muted); border-radius: 2px; }
+.WIDGET .f-radio { border-radius: 50%; }
+.WIDGET .f-row.f-on .f-box { background: var(--accent); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--frame-bg); }
+.WIDGET .f-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.WIDGET .f-on .f-label { color: var(--frame-strong); }
+.WIDGET .f-track { flex: none; width: 25%; height: 5px; border-radius: 3px; background: var(--frame-line); overflow: hidden; }
+.WIDGET .f-fill { display: block; height: 100%; border-radius: 3px; background: var(--hist); }
+.WIDGET .f-num { flex: none; min-width: 3em; text-align: right; color: var(--frame-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Dropdown */
+.WIDGET .f-dd-btn { flex: none; display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border: 1px solid var(--frame-line); border-radius: 4px; }
+.WIDGET .f-dd-btn:hover, .WIDGET .f-dd-btn.f-open { border-color: var(--accent); }
+.WIDGET .f-dd-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--frame-strong); }
+.WIDGET .f-dd-caret { width: 0; height: 0; border: 4px solid transparent; border-top-color: var(--frame-muted); margin-top: 4px; }
+.WIDGET .f-dd-btn.f-open .f-dd-caret { border-top-color: transparent; border-bottom-color: var(--frame-muted); margin: 0 0 4px; }
+.WIDGET .f-dd-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; padding: 4px; border: 1px solid var(--frame-line); border-radius: 4px; }
+.WIDGET .f-dd-panel[hidden] { display: none; }

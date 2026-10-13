@@ -85,12 +85,13 @@ const Widgets = (() => {
     el.classList.add('dn-widget', cls(key));
   }
   // Draw into el: the container's contents are replaced by the element the widget returns.
-  // p = { key, code, css, settings (text or parsed) }, data = rows keyed by input key, over = setting values to use.
-  async function draw(el, p, data, over) {
+  // p = { key, code, css, settings (text or parsed) }, data = rows keyed by input key, over = setting values to use,
+  // extra = more options for the widget (the dashboard passes { filter }: a filter widget's last 'dn-filter' detail).
+  async function draw(el, p, data, over, extra) {
     const s = typeof p.settings === 'string' ? parse(p.settings) : p.settings, fn = await compile(p.code);
     useStyle(el, p.key || p.id || 'edit', p.css);
     const width = Math.max(40, Math.floor(el.clientWidth)), height = Math.max(40, Math.floor(el.clientHeight));
-    const node = fn(data || [], { width, height, settings: values(s, over), inputs: s.inputs });
+    const node = fn(data || [], { ...extra, width, height, settings: values(s, over), inputs: s.inputs });
     if (node instanceof Node) el.replaceChildren(node);
     else if (node != null) throw new Error('The widget function must return an element (e.g. svg.node()).');
   }
@@ -116,16 +117,40 @@ const Widgets = (() => {
   // links = { <input key>: { col, agg } }. Dimensions are grouped by, measures aggregated (agg 'none' = raw rows).
   const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, DATE = /DATE|TIME/i;
   const ready = (inputs, links) => inputs.length > 0 && inputs.every(i => i.optional || links[i.key]?.col || (i.role === 'measure' && links[i.key]?.agg === 'count'));
-  const isRaw = (inputs, links) => !inputs.some(i => i.role === 'measure') || inputs.some(i => i.role === 'measure' && (links[i.key]?.agg || i.agg) === 'none');
-  function query(inputs, links, dataset) {
-    const col = i => links[i.key]?.col, limit = 200000;
-    if (isRaw(inputs, links)) return { dataset, select: [...new Set(inputs.map(col).filter(Boolean))], limit };
+  // A dimension input with "count": true (filter widgets) is grouped and its rows counted: rows = { <key>, count }.
+  const counted = inputs => inputs.some(i => i.role !== 'measure' && i.count);
+  const isRaw = (inputs, links) => (!inputs.some(i => i.role === 'measure') && !counted(inputs)) || inputs.some(i => i.role === 'measure' && (links[i.key]?.agg || i.agg) === 'none');
+  // where = an optional SQL condition (the dashboard's filter widgets, see where()).
+  function query(inputs, links, dataset, where) {
+    const col = i => links[i.key]?.col, limit = 200000, w = where ? { where } : {};
+    if (isRaw(inputs, links)) return { dataset, select: [...new Set(inputs.map(col).filter(Boolean))], ...w, limit };
     const dims = [...new Set(inputs.filter(i => i.role !== 'measure').map(col).filter(Boolean))];
     const aggregate = inputs.filter(i => i.role === 'measure').map(i => ({ function: links[i.key]?.agg || i.agg || 'sum', column: col(i) || undefined, as: 'v_' + i.key }));
-    return dims.length ? { dataset, groupBy: dims, aggregate, sort: dims.map(c => ({ column: c })), limit } : { dataset, aggregate };
+    if (counted(inputs)) aggregate.push({ function: 'count', as: 'n__count' });
+    return dims.length ? { dataset, groupBy: dims, aggregate, ...w, sort: dims.map(c => ({ column: c })), limit } : { dataset, aggregate, ...w };
   }
-  async function load(inputs, links, d) {
-    const r = await Engine.call('query', { query: query(inputs, links, d.name), views: Engine.views([d]) });
+  // Filters [{ col, values, ranges }] -> one SQL condition ("Region" IN ('East', 'West') AND ...); values = the rows' own
+  // values, ranges = [{ min, max }] (both included; a date at midnight = that whole day). Within a filter they are OR'd.
+  function where(filters) {
+    const q = n => `"${String(n).replace(/"/g, '""')}"`, s = v => `'${String(v).replace(/'/g, "''")}'`;
+    const midnight = d => d.getUTCHours() + d.getUTCMinutes() + d.getUTCSeconds() + d.getUTCMilliseconds() === 0;
+    const dlit = d => s(midnight(d) ? d.toISOString().slice(0, 10) : d.toISOString().replace('T', ' ').replace(/\.\d+Z$|Z$/, ''));
+    const lit = v => typeof v === 'number' ? (Number.isFinite(v) ? String(v) : 'NULL') : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE')
+      : v instanceof Date ? dlit(v) : s(v);
+    const range = (c, r) => {
+      const lo = r.min != null ? `${c} >= ${lit(r.min)}` : '', hi = r.max == null ? ''
+        : r.max instanceof Date && midnight(r.max) ? `${c} < ${dlit(new Date(+r.max + 864e5))}` : `${c} <= ${lit(r.max)}`;
+      return [lo, hi].filter(Boolean).join(' AND ') || 'TRUE';
+    };
+    return filters.filter(f => f.col && (f.values?.length || f.ranges?.length)).map(f => {
+      const c = q(f.col), all = f.values || [], vals = all.filter(v => v != null), parts = vals.length ? [`${c} IN (${vals.map(lit).join(', ')})`] : [];
+      if (vals.length < all.length) parts.push(`${c} IS NULL`);
+      for (const r of f.ranges || []) parts.push(`(${range(c, r)})`);
+      return parts.length > 1 ? `(${parts.join(' OR ')})` : parts[0];
+    }).join(' AND ');
+  }
+  async function load(inputs, links, d, cond) {
+    const r = await Engine.call('query', { query: query(inputs, links, d.name, cond), views: Engine.views([d]) });
     const raw = isRaw(inputs, links), dates = new Set((d.columns || []).filter(c => DATE.test(c.type)).map(c => c.name));
     return r.rows.map(row => {
       const o = Object.fromEntries(r.cols.map((c, k) => [typeof c === 'string' ? c : c.name, row[k]])), out = {};
@@ -135,9 +160,10 @@ const Widgets = (() => {
         if (v != null && c && dates.has(c) && (raw || i.role !== 'measure')) { const t = new Date(v); if (!isNaN(t)) v = t; }
         if (v !== undefined) out[i.key] = v;
       }
+      if (!raw && counted(inputs)) out.count = o.n__count;
       return out;
     });
   }
 
-  return { GLOBAL, SAMPLES, FILES, NUMERIC, DATE, projectDir, slug, isSample, read, list, write, copy, parse, values, compile, useStyle, draw, samples, ready, query, load };
+  return { GLOBAL, SAMPLES, FILES, NUMERIC, DATE, projectDir, slug, isSample, read, list, write, copy, parse, values, compile, useStyle, draw, samples, ready, query, where, load };
 })();
