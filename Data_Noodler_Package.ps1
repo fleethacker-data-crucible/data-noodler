@@ -1,6 +1,6 @@
 # Data_Noodler_Package.ps1 - packages the app folder (the folder this script is in) into Data_Noodler_YY_MMDD_HHMM.gz
 # next to it: one text file inside (Data_Noodler_YY_MMDD_HHMM.txt) with the folder list and every file as Base64.
-# Skips everything .gitignore ignores (and old packages and the installer). Install with Data_Noodler_Install.ps1.
+# Skips everything .gitignore ignores (and .claude, old packages and the installer). Install with Data_Noodler_Install.ps1.
 # Right-click > Run with PowerShell (or: powershell -ExecutionPolicy Bypass -File Data_Noodler_Package.ps1).
 $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot.TrimEnd('\')
@@ -73,7 +73,7 @@ try {
             $rel = $e.FullName.Substring($Root.Length + 1).Replace('\', '/')
             if ($e.PSIsContainer) {
                 if ($e.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-                if ($e.Name -eq '.git' -or (Test-Ignored $rel $true)) { continue }
+                if ($e.Name -eq '.git' -or $rel -eq '.claude' -or (Test-Ignored $rel $true)) { continue }
                 $dirs.Add($rel); $stack.Push($e.FullName)
             } else {
                 if ($rel -like "$Prefix*.gz" -or $rel -eq "$($Prefix)Install.ps1" -or (Test-Ignored $rel $false)) { continue }
