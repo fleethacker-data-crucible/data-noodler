@@ -1,0 +1,29 @@
+{
+  "name": "Filter",
+  "filter": true,
+  "inputs": [
+    { "key": "value", "label": "Field", "role": "dimension", "count": true }
+  ],
+  "settings": [
+    { "path": "colors.0", "label": "Accent Color", "group": "Colors", "type": "color", "default": "#3987e5" },
+    { "path": "colors.1", "label": "Histogram Color", "group": "Colors", "type": "color", "default": "#3987e5" },
+
+    { "path": "countFormat", "label": "Count Format", "group": "Counts", "type": "pick", "choices": ["Number", "Percent of Total", "Number + Percent", "Compact"], "default": "Number", "when": { "path": "counts", "is": true } },
+    { "path": "histogram", "label": "Histogram", "group": "Counts", "type": "boolean", "default": true },
+    { "path": "histStyle", "label": "Histogram Style", "group": "Counts", "type": "pick", "choices": ["Bar", "Fill"], "default": "Bar", "when": { "path": "histogram", "is": true } },
+    { "path": "counts", "label": "Show Counts", "group": "Counts", "type": "boolean", "default": true },
+
+    { "path": "showClear", "label": "Clear Button", "group": "Layout", "type": "boolean", "default": true },
+    { "path": "fontSize", "label": "Font Size", "group": "Layout", "type": "number", "default": 12, "min": 1, "max": 50, "step": 1 },
+    { "path": "search", "label": "Search Box", "group": "Layout", "type": "boolean", "default": true },
+    { "path": "showTitle", "label": "Show Title", "group": "Layout", "type": "boolean", "default": true },
+    { "path": "title", "label": "Title", "group": "Layout", "type": "text", "default": "Filter", "when": { "path": "showTitle", "is": true } },
+
+    { "path": "single", "label": "Single Select", "group": "Selection", "type": "boolean", "default": false },
+    { "path": "sort", "label": "Sort By", "group": "Selection", "type": "pick", "choices": ["Count", "Value A-Z", "Value Z-A"], "default": "Count" },
+
+    { "path": "type", "label": "Filter Type", "group": "Type", "type": "pick", "choices": ["Dropdown", "List"], "default": "List" },
+    { "path": "valueFormat", "label": "Value Format", "group": "Type", "type": "format", "input": "value", "kinds": ["text", "number", "date"], "default": "Auto" }
+  ],
+  "values": {}
+}

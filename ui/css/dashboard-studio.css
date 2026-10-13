@@ -211,3 +211,26 @@ body.barbottom .typebar { top: auto; bottom: 24px; }
 .typebar { transition: opacity .5s ease; }
 .typebar.faded { opacity: 0; }
 .tmenu.prefs .optrow select { justify-self: start; }
+
+/* Link (right-click a filter > Link): the overlay of crosses and link lines. */
+.ctxmenu [data-act][hidden] { display: none; }
+.linkov { position: absolute; left: 0; top: 0; z-index: 100000; font-family: inherit; }
+.linkov .lk-dim { fill: #000; fill-opacity: .45; cursor: default; }
+.linkov .lk-line { stroke: var(--ok); stroke-width: 3; stroke-linecap: round; pointer-events: none; }
+.linkov .lk-drag { stroke-dasharray: 6 5; }
+.linkov .lk-trash { cursor: pointer; }
+.linkov .lk-trash:hover circle { filter: brightness(1.2); }
+.linkov .lk-target circle, .linkov .lk-src circle, .linkov .lk-ghost circle { stroke: #fff; stroke-width: 2; filter: drop-shadow(0 2px 6px #0008); }
+.linkov .lk-target { transition: opacity .12s; }
+.linkov .lk-target.off { opacity: .3; }
+.linkov .lk-target.hot circle { stroke-width: 4; transform: scale(1.2); }
+.linkov .lk-page text { fill: #fff; font-size: 14px; font-weight: 600; paint-order: stroke; stroke: #0008; stroke-width: 3px; }
+.linkov .lk-src { cursor: grab; }
+.linkov .lk-ghost { pointer-events: none; }
+
+/* Settings search (top of every widget Settings window): matching settings only, no highlight. */
+.set-search { position: sticky; top: 0; z-index: 2; margin: -12px -14px 0; padding: 10px 14px 6px; background: var(--panel); }
+.set-search input { box-sizing: border-box; width: 100%; height: 18px; padding: 0 8px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); outline: none; }
+.set-search input:focus { border-color: var(--blue); }
+.set-root .srch-hide { display: none !important; }
+.set-root .optrow.srch-hide + .optrow { margin-top: 0; }

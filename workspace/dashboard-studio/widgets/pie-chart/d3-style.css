@@ -1,0 +1,11 @@
+/* Pie Chart. .WIDGET = its container (scoped automatically). Frame colours follow the app theme; wedge, stroke and label
+   colours come from the settings. */
+.WIDGET {
+  --frame-muted: var(--muted, #888);
+  font-family: 'Exo 2', system-ui, sans-serif;
+}
+.WIDGET .root { width: 100%; height: 100%; }
+.WIDGET svg { display: block; width: 100%; height: 100%; }
+.WIDGET .wedges path:hover { filter: brightness(1.08); }
+.WIDGET .labels { pointer-events: none; font-family: inherit; }
+.WIDGET .empty { fill: var(--frame-muted); font-size: 13px; }

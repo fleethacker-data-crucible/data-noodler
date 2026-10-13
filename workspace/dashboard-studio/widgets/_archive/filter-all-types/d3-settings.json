@@ -1,0 +1,35 @@
+{
+  "name": "Filter",
+  "filter": true,
+  "inputs": [
+    { "key": "value", "label": "Field", "role": "dimension", "count": true }
+  ],
+  "settings": [
+    { "path": "colors.0", "label": "Accent Color", "group": "Colors", "type": "color", "default": "#3987e5" },
+    { "path": "colors.1", "label": "Histogram Color", "group": "Colors", "type": "color", "default": "#3987e5" },
+
+    { "path": "countFormat", "label": "Count Format", "group": "Counts", "type": "pick", "choices": ["Number", "Percent of Total", "Number + Percent", "Compact"], "default": "Number", "when": { "path": "counts", "is": true } },
+    { "path": "histogram", "label": "Histogram", "group": "Counts", "type": "boolean", "default": true },
+    { "path": "histStyle", "label": "Histogram Style", "group": "Counts", "type": "pick", "choices": ["Bar", "Fill"], "default": "Bar", "when": { "path": "histogram", "is": true } },
+    { "path": "counts", "label": "Show Counts", "group": "Counts", "type": "boolean", "default": true },
+
+    { "path": "chipShape", "label": "Chip Shape", "group": "Layout", "type": "pick", "choices": ["Pill", "Rounded", "Square"], "default": "Pill", "when": [{ "kind": "value", "is": ["text", "number"] }, { "path": "type", "is": "Chips" }] },
+    { "path": "showClear", "label": "Clear Button", "group": "Layout", "type": "boolean", "default": true },
+    { "path": "fontSize", "label": "Font Size", "group": "Layout", "type": "number", "default": 12, "min": 1, "max": 50, "step": 1 },
+    { "path": "search", "label": "Search Box", "group": "Layout", "type": "boolean", "default": true, "when": [{ "kind": "value", "is": ["text", "number"] }, { "path": "type", "is": ["List", "Dropdown", "Chips", "Tiles"] }] },
+    { "path": "showTitle", "label": "Show Title", "group": "Layout", "type": "boolean", "default": true },
+    { "path": "tileColumns", "label": "Tile Columns", "group": "Layout", "type": "number", "default": 3, "min": 1, "max": 50, "step": 1, "when": [{ "kind": "value", "is": ["text", "number"] }, { "path": "type", "is": "Tiles" }] },
+    { "path": "title", "label": "Title", "group": "Layout", "type": "text", "default": "Filter", "when": { "path": "showTitle", "is": true } },
+
+    { "path": "single", "label": "Single Select", "group": "Selection", "type": "boolean", "default": false },
+    { "path": "sort", "label": "Sort By", "group": "Selection", "type": "pick", "choices": ["Count", "Value A-Z", "Value Z-A"], "default": "Count", "when": { "kind": "value", "is": ["text", "number"] } },
+
+    { "path": "type", "label": "Filter Type", "group": "Type", "type": "pick", "choices": ["Bubbles", "Chips", "Dropdown", "List", "Range Slider", "Search Tokens", "Tiles"], "default": "List", "when": { "kind": "value", "is": ["text", "number"] } },
+    { "path": "dateType", "label": "Filter Type", "group": "Type", "type": "pick", "choices": ["Calendar", "Heatmap", "Manual", "Periods", "Presets", "Range Slider"], "default": "Range Slider", "when": { "kind": "value", "is": "date" } },
+    { "path": "period", "label": "Period", "group": "Type", "type": "pick", "choices": ["Year", "Quarter", "Month", "Week"], "default": "Month", "when": [{ "kind": "value", "is": "date" }, { "path": "dateType", "is": "Periods" }] },
+    { "path": "relativeTo", "label": "Relative To", "group": "Type", "type": "pick", "choices": ["Today", "Latest Date"], "default": "Latest Date", "when": [{ "kind": "value", "is": "date" }, { "path": "dateType", "is": "Presets" }] },
+    { "path": "valueFormat", "label": "Value Format", "group": "Type", "type": "format", "input": "value", "kinds": ["text", "number", "date"], "default": "Auto" },
+    { "path": "weekStart", "label": "Week Starts On", "group": "Type", "type": "pick", "choices": ["Sunday", "Monday"], "default": "Sunday", "when": [{ "kind": "value", "is": "date" }, { "path": "dateType", "is": ["Calendar", "Heatmap", "Periods"] }] }
+  ],
+  "values": {}
+}

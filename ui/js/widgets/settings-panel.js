@@ -123,6 +123,7 @@ const SettingsPanel = (() => {
       set(o.path, o.type === 'boolean' ? e.target.checked : o.type === 'number' ? +e.target.value : e.target.value);
       if (options.some(x => [].concat(x.when || []).some(w => w.path === o.path))) settings(el, options, get, set, kinds);   // settings that depend on it show / hide
     };
+    const root = el.closest('.set-root'); if (root?._search) root._search();   // a redraw keeps the settings search applied
   }
   // Mouse wheel over a number box in the panel: up = one step more, down = one step less (min / max kept); over a toggle's row:
   // up = on, down = off. The page does not scroll.
@@ -196,9 +197,16 @@ const SettingsPanel = (() => {
     const esc2 = esc, val = p => p in (s.values || {}) ? s.values[p] : s.settings.find(x => x.path === p)?.default;
     const by2 = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
     const groups = [...new Set(s.settings.map(x => x.group || 'Settings'))].sort(by2);
-    const opened = new Set([...el.querySelectorAll('details.sec[open] > summary')].map(x => x.textContent));
-    el.innerHTML = groups.map((g, i) => `<details class="sec" data-g="${i}" ${opened.has(g) ? 'open' : ''}><summary>${esc2(g)}</summary><div class="${s.settings.some(x => (x.group || 'Settings') === g && x.type !== 'color') ? 'opts' : ''}"></div><div class="swatches"></div></details>`).join('')
-      || '<div class="hintbox">No settings: add them to d3-settings.json ("settings": [{ "path", "label", "group", "type", "default" }]).</div>';
+    // While a search is on every section is open: the ones open before it are in el._before.
+    const opened = el._before?.secs || new Set([...el.querySelectorAll('details.sec[open] > summary')].map(x => x.textContent));
+    const q = el.querySelector(':scope > .set-search input')?.value || '';
+    el.classList.add('set-root');
+    el.innerHTML = (groups.length ? `<div class="set-search"><input type="search" placeholder="Search settings" spellcheck="false" value="${esc2(q)}"></div>` : '')
+      + (groups.map((g, i) => `<details class="sec" data-g="${i}" ${opened.has(g) ? 'open' : ''}><summary>${esc2(g)}</summary><div class="${s.settings.some(x => (x.group || 'Settings') === g && x.type !== 'color') ? 'opts' : ''}"></div><div class="swatches"></div></details>`).join('')
+      || '<div class="hintbox">No settings: add them to d3-settings.json ("settings": [{ "path", "label", "group", "type", "default" }]).</div>')
+      + '<div class="hintbox set-none" hidden>No setting matches.</div>';
+    el._search = () => search(el);
+    el.querySelector(':scope > .set-search input')?.addEventListener('input', el._search);
     const kinds = Object.fromEntries((s.inputs || []).map(i => [i.key, valueKind(rows || [], i.key) || 'number']));
     groups.forEach((g, i) => {
       const box = el.querySelector(`[data-g="${i}"]`), list = s.settings.filter(x => (x.group || 'Settings') === g);
@@ -212,6 +220,28 @@ const SettingsPanel = (() => {
         sw.append(row);
       }
     });
+    search(el);
+  }
+  // The settings search (top of the Settings window): only the settings whose label holds the text (or all of a section /
+  // sub group whose name does), every section and sub group open. Cleared: the sections open before the search again.
+  function search(el) {
+    const q = (el.querySelector(':scope > .set-search input')?.value || '').trim().toLowerCase();
+    const secs = [...el.querySelectorAll(':scope > details.sec')], subs = [...el.querySelectorAll('details.subsec')];
+    const name = d => d.querySelector(':scope > summary').textContent;
+    if (q && !el._before) el._before = { secs: new Set(secs.filter(d => d.open).map(name)), subs: new Set(subs.filter(d => d.open).map(d => d.dataset.sub)) };
+    const has = (t, s) => String(t || '').toLowerCase().includes(s);
+    for (const r of el.querySelectorAll('.optrow')) {
+      const sec = r.closest('details.sec'), sub = r.closest('details.subsec');
+      r.classList.toggle('srch-hide', !!q && !has(r.querySelector(':scope > span')?.textContent, q) && !has(sec && name(sec), q) && !has(sub?.dataset.sub, q));
+    }
+    const shows = d => [...d.querySelectorAll('.optrow')].some(r => !r.hidden && !r.classList.contains('srch-hide'));
+    for (const d of [...subs, ...secs]) { d.classList.toggle('srch-hide', !!q && !shows(d)); if (q) d.open = true; }
+    if (!q && el._before) {
+      for (const d of secs) d.open = el._before.secs.has(name(d));
+      for (const d of subs) d.open = el._before.subs.has(d.dataset.sub);
+      el._before = null;
+    }
+    const none = el.querySelector(':scope > .set-none'); if (none) none.hidden = !q || secs.some(d => !d.classList.contains('srch-hide'));
   }
   return { valueKind, NUMERIC, DATE, kindOf, AGG_TXT, chips, slots, placeSlots, colours, settings, sections };
 })();
