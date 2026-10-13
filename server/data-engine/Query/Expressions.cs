@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -76,6 +77,24 @@ namespace NativeDataEngine
             else { Type = DataType.Double; this.l = BCast.To(l, DataType.Double); this.r = BCast.To(r, DataType.Double); }
         }
         public override bool IsConst { get { return l.IsConst && r.IsConst; } }
+        // a || b with either side held as UTF-8 bytes: the result is bytes too (a string side is encoded, nothing decoded).
+        static Column ConcatBytes(Column x, Column y, int n, bool[] nulls)
+        {
+            System.IO.MemoryStream ms = new System.IO.MemoryStream(); int[] offs = new int[n + 1]; byte[] tmp = new byte[64];
+            for (int i = 0; i < n; i++)
+            {
+                offs[i] = (int)ms.Length;
+                if (nulls != null && nulls[i]) continue;
+                foreach (Column c in new[] { x, y })
+                {
+                    if (c.IsLazyText) { ms.Write(c.Utf8, c.Offs[i], c.Offs[i + 1] - c.Offs[i]); continue; }
+                    string s = c.S[i]; int max = s.Length * 3; if (tmp.Length < max) tmp = new byte[Math.Max(max, tmp.Length * 2)];
+                    ms.Write(tmp, 0, Encoding.UTF8.GetBytes(s, 0, s.Length, tmp, 0));
+                }
+            }
+            offs[n] = (int)ms.Length;
+            return Column.Utf8Text(DataType.Varchar, n, nulls, ms.ToArray(), offs);
+        }
         public override Column Eval(Batch b)
         {
             Column x = l.Eval(b), y = r.Eval(b);
@@ -83,6 +102,7 @@ namespace NativeDataEngine
             Column o = new Column(Type, n);
             if (x.Type.Kind == Kind.Null || y.Type.Kind == Kind.Null) { for (int i = 0; i < n; i++) o.SetNull(i); return o; }
             for (int i = 0; i < n; i++) if (x.IsNull(i) || y.IsNull(i)) o.SetNull(i);
+            if (op == "||" && (x.IsLazyText || y.IsLazyText)) return ConcatBytes(x, y, n, o.Nulls);   // text as bytes: joined as bytes
             if (op == "||") { for (int i = 0; i < n; i++) if (!o.IsNull(i)) o.S[i] = x.S[i] + y.S[i]; return o; }
             if (Type.UsesI && x.I != null && y.I != null)
             {
@@ -171,6 +191,18 @@ namespace NativeDataEngine
                     d[i] = code == 0 ? q == c : code == 1 ? q != c : code == 2 ? q < c : code == 3 ? q > c : code == 4 ? q <= c : q >= c;
                 }
             }
+            else if (x.IsLazyText && v is string)
+            {
+                byte[] k = Utf8Ops.Bytes((string)v), u = x.Utf8; int[] f = x.Offs;
+                for (int i = 0; i < n; i++)
+                {
+                    if (x.IsNull(i)) continue;
+                    int a = f[i], len = f[i + 1] - a;
+                    if (code <= 1) { bool eq = Utf8Ops.Equal(u, a, len, k); d[i] = code == 0 ? eq : !eq; continue; }
+                    int r0 = Utf8Ops.Compare(u, a, len, k);
+                    d[i] = code == 2 ? r0 < 0 : code == 3 ? r0 > 0 : code == 4 ? r0 <= 0 : r0 >= 0;
+                }
+            }
             else if (x.S != null && v is string)
             {
                 string c = (string)v; string[] a = x.S;
@@ -221,6 +253,7 @@ namespace NativeDataEngine
         {
             if (x.I != null && y.I != null) return x.I[i].CompareTo(y.I[j]);
             if (x.F != null && y.F != null) return x.F[i].CompareTo(y.F[j]);
+            if (x.IsLazyText && y.IsLazyText) return Utf8Ops.Compare(x.Utf8, x.Offs[i], x.Offs[i + 1] - x.Offs[i], y.Utf8, y.Offs[j], y.Offs[j + 1] - y.Offs[j]);
             if (x.S != null && y.S != null) return string.CompareOrdinal(x.S[i], y.S[j]);
             if (x.B != null && y.B != null) return x.B[i].CompareTo(y.B[j]);
             if (x.I != null && y.F != null) return ((double)x.I[i]).CompareTo(y.F[j]);
@@ -306,6 +339,19 @@ namespace NativeDataEngine
         public override Column Eval(Batch b)
         {
             Column c = x.Eval(b); int n = b.Rows; Column o = new Column(DataType.Bool, n);
+            if (c.IsLazyText && items.TrueForAll(e => e is BLit && ((BLit)e).Value is string))
+            {
+                // Text as bytes vs text constants: compared on the bytes.
+                byte[][] ks = items.Select(e => Utf8Ops.Bytes((string)((BLit)e).Value)).ToArray(); byte[] u = c.Utf8; int[] f = c.Offs;
+                for (int i = 0; i < n; i++)
+                {
+                    if (c.IsNull(i)) { o.SetNull(i); continue; }
+                    int a = f[i], len = f[i + 1] - a; bool found = false;
+                    foreach (byte[] k in ks) if (Utf8Ops.Equal(u, a, len, k)) { found = true; break; }
+                    o.B[i] = found != not;
+                }
+                return o;
+            }
             List<Column> vs = new List<Column>();
             foreach (BExpr e in items) vs.Add(e.Eval(b));
             for (int i = 0; i < n; i++)
@@ -350,6 +396,19 @@ namespace NativeDataEngine
         {
             Column c = x.Eval(b); Column pc = fixedRx == null && fast == null ? pat.Eval(b) : null;
             Column o = new Column(DataType.Bool, b.Rows);
+            if (fast != null && c.IsLazyText)
+            {
+                // Text as bytes: matched on the bytes (ILIKE: a non-ASCII value is decoded and matched as a string).
+                byte[] u = c.Utf8; int[] f = c.Offs; LikeBytes lb = fast.Bytes;
+                for (int i = 0; i < b.Rows; i++)
+                {
+                    if (c.IsNull(i)) { o.SetNull(i); continue; }
+                    int a = f[i], len = f[i + 1] - a;
+                    bool m = ci && !Utf8Ops.Ascii(u, a, len) ? fast.Match(Encoding.UTF8.GetString(u, a, len)) : lb.Match(u, a, len);
+                    o.B[i] = m != not;
+                }
+                return o;
+            }
             string[] s = c.S;
             for (int i = 0; i < b.Rows; i++)
             {
@@ -368,7 +427,8 @@ namespace NativeDataEngine
     public sealed class LikeMatch
     {
         readonly string[] segs; readonly bool start, end, ci; readonly int minLen;
-        LikeMatch(string[] segs, bool start, bool end, bool ci) { this.segs = segs; this.start = start; this.end = end; this.ci = ci; foreach (string g in segs) minLen += g.Length; }
+        public readonly LikeBytes Bytes;   // the same pattern on UTF-8 bytes (Utf8Ops.cs)
+        LikeMatch(string[] segs, bool start, bool end, bool ci) { this.segs = segs; this.start = start; this.end = end; this.ci = ci; foreach (string g in segs) minLen += g.Length; Bytes = new LikeBytes(segs, start, end, ci); }
         public static LikeMatch Of(string p, bool ci)
         {
             if (p.IndexOf('_') >= 0) return null;

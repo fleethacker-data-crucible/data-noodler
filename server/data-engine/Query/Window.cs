@@ -121,10 +121,13 @@ namespace NativeDataEngine
                 for (int i = 0; i < n; i++) rows[g[i]][fill[g[i]]++] = i;   // rows of each partition in input order
                 parts.AddRange(rows);
             }
+            // The sort's comparer (typed arrays, text as bytes with 8-byte prefixes); one partition: the parallel sort.
+            Comparison<int> cmp = oc.Length > 0 ? new Comparison<int>(new SortOp.KeyCompare(oc, s.Order).Compare) : null;
+            if (pc.Length == 0 && oc.Length > 0 && n > 1) parts[0] = SortOp.Order(all, s.Order, n, Environment.ProcessorCount);
             Action<int> one = k =>
             {
                 int[] idx = parts[k];
-                if (oc.Length > 0 && idx.Length > 1) Array.Sort(idx, (a, b) => SortOp.Cmp(oc, s.Order, a, b));
+                if (oc.Length > 0 && idx.Length > 1 && pc.Length > 0) Array.Sort(idx, cmp);
                 Partition(s, idx, 0, idx.Length, oc, p, res);
             };
             if (parts.Count > 1 && n > 20000) System.Threading.Tasks.Parallel.For(0, parts.Count, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, one);

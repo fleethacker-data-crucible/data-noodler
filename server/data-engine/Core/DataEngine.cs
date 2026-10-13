@@ -498,12 +498,12 @@ namespace NativeDataEngine
                     if (format == "csv" || format == "tsv" || format == "txt")
                     {
                         char d = format == "tsv" ? '\t' : ',';
-                        using (StreamWriter w = new StreamWriter(tmp, false, new UTF8Encoding(false), 1 << 20))
+                        using (FileStream w = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
                         {
                             List<string> names = ParquetFileWriter.UniqueNames(p.Op.Schema);
-                            w.Write(string.Join(d.ToString(), names.Select(n => CsvCell(n, d))) + "\r\n");
-                            // Each batch is turned into text on the workers; the pieces are written in order.
-                            Encode<KeyValuePair<int, string>>(p.Op, ctx, b => new KeyValuePair<int, string>(b.Rows, CsvText(b, d)), kv => { w.Write(kv.Value); rows += kv.Key; });
+                            byte[] head = Encoding.UTF8.GetBytes(string.Join(d.ToString(), names.Select(n => CsvCell(n, d))) + "\r\n"); w.Write(head, 0, head.Length);
+                            // Each batch is turned into UTF-8 on the workers; the pieces are written in order.
+                            Encode<KeyValuePair<int, byte[]>>(p.Op, ctx, b => new KeyValuePair<int, byte[]>(b.Rows, CsvBytes(b, d)), kv => { w.Write(kv.Value, 0, kv.Value.Length); rows += kv.Key; });
                         }
                     }
                     else if (format == "parquet" || format == "pq")
@@ -529,15 +529,35 @@ namespace NativeDataEngine
                 return res;
             });
         }
-        static string CsvText(Batch b, char d)
+        // One batch as CSV bytes. Text held as bytes is copied as is (quoted when it holds the delimiter, a quote or a
+        // line break: the CsvCell rule); other values go through their text form.
+        static byte[] CsvBytes(Batch b, char d)
         {
-            StringBuilder sb = new StringBuilder(Math.Min(1 << 22, b.Rows * 8 * Math.Max(1, b.Cols.Length)));
+            MemoryStream ms = new MemoryStream(Math.Min(1 << 22, b.Rows * 8 * Math.Max(1, b.Cols.Length)));
+            byte db = (byte)d; byte[] crlf = { 13, 10 };
             for (int r = 0; r < b.Rows; r++)
             {
-                for (int c = 0; c < b.Cols.Length; c++) { if (c > 0) sb.Append(d); string v = Values.Text(b.Cols[c], r); if (v != null) sb.Append(CsvCell(v, d)); }
-                sb.Append("\r\n");
+                for (int c = 0; c < b.Cols.Length; c++)
+                {
+                    if (c > 0) ms.WriteByte(db);
+                    Column col = b.Cols[c];
+                    if (col.IsLazyText)
+                    {
+                        if (col.IsNull(r)) continue;
+                        int a = col.Offs[r], n = col.Offs[r + 1] - a; byte[] u = col.Utf8; bool q = false;
+                        for (int i = a; i < a + n && !q; i++) { byte x = u[i]; q = x == db || x == 34 || x == 10 || x == 13; }
+                        if (!q) { ms.Write(u, a, n); continue; }
+                        ms.WriteByte(34);
+                        for (int i = a; i < a + n; i++) { if (u[i] == 34) ms.WriteByte(34); ms.WriteByte(u[i]); }
+                        ms.WriteByte(34);
+                        continue;
+                    }
+                    string v = Values.Text(col, r);
+                    if (v != null) { byte[] e = Encoding.UTF8.GetBytes(CsvCell(v, d)); ms.Write(e, 0, e.Length); }
+                }
+                ms.Write(crlf, 0, 2);
             }
-            return sb.ToString();
+            return ms.ToArray();
         }
         static string CsvCell(string v, char d)
         {

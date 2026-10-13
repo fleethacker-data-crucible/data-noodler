@@ -218,30 +218,51 @@ namespace NativeDataEngine
         //  - mostly-distinct text (the sharing turned itself off) is kept as Arrow bytes, decoded per query
         //    (Column.LazyText): millions of strings held for hours would make every garbage collection slow.
         // Returns the batch's memory, each distinct shared string counted once.
+        // Columns are worked in parallel (each has its own TextIntern; batches arrive in order, one at a time).
+        // Text read from Arrow arrives as bytes: repeated values become shared strings made straight from the bytes;
+        // mostly-distinct text keeps the bytes it came with (no strings made at all).
+        // Then each column is packed (Storage/Packing.cs): smaller whole numbers, exact decimals and text codes.
         static long Share(Batch b, TextIntern[] shared)
         {
-            long bytes = 0;
-            for (int c = 0; c < b.Cols.Length; c++)
-            {
-                Column col = b.Cols[c];
-                if (col.S == null || shared[c] == null) { bytes += col.Bytes; continue; }
-                TextIntern t = shared[c];
-                if (!t.Off)
-                {
-                    string[] s = col.S; long strBytes = 0;
-                    for (int i = 0; i < s.Length && !t.Off; i++)
-                    {
-                        string v = s[i]; if (v == null) continue;
-                        int before = t.Distinct;
-                        s[i] = t.Get(v);
-                        if (t.Distinct > before) strBytes += 24 + 2L * v.Length;
-                    }
-                    if (!t.Off) { bytes += 32 + 8L * col.Length + (col.Nulls != null ? col.Length : 0) + strBytes; continue; }
-                }
-                Column lazy = Column.LazyText(col);
-                b.Cols[c] = lazy; bytes += lazy.Bytes;
-            }
+            long[] per = new long[b.Cols.Length];
+            System.Threading.Tasks.Parallel.For(0, b.Cols.Length, c => { per[c] = ShareCol(b, c, shared[c]); });
+            long bytes = 0; foreach (long x in per) bytes += x;
             return bytes;
+        }
+        static long ShareCol(Batch b, int c, TextIntern t)
+        {
+            Column col = b.Cols[c];
+            if (t == null || col.Type.Kind != Kind.String) { b.Cols[c] = col = Packing.Pack(col); return col.Bytes; }   // numbers: packed
+            if (t.Off) { if (!col.IsLazyText) b.Cols[c] = col = Column.LazyText(col); col.Unique = true; return col.Bytes; }
+            long strBytes = 0;   // distinct shared strings, counted once
+            if (col.IsLazyText)
+            {
+                byte[] u = col.Utf8; int[] f = col.Offs; bool[] nl = col.Nulls; int n = col.Length;
+                string[] o = new string[n];
+                for (int i = 0; i < n; i++)
+                {
+                    if (nl != null && nl[i]) continue;
+                    int a = f[i], len = f[i + 1] - a;
+                    if (len == 0) { o[i] = ""; continue; }
+                    int before = t.Distinct;
+                    o[i] = t.Get(u, a, len);
+                    if (t.Distinct > before) strBytes += 24 + 2L * o[i].Length;
+                    if (t.Off) { col.Unique = true; return col.Bytes; }   // mostly distinct after all: keep the bytes
+                }
+                b.Cols[c] = col = Packing.Pack(Column.Strings(col.Type, n, nl, o));   // shared strings -> codes
+                return col.Bytes + strBytes;
+            }
+            string[] s = col.S;
+            for (int i = 0; i < s.Length && !t.Off; i++)
+            {
+                string v = s[i]; if (v == null) continue;
+                int before = t.Distinct;
+                s[i] = t.Get(v);
+                if (t.Distinct > before) strBytes += 24 + 2L * v.Length;
+            }
+            if (!t.Off) { b.Cols[c] = col = Packing.Pack(col); return col.Bytes + strBytes; }
+            b.Cols[c] = col = Column.LazyText(col); col.Unique = true;
+            return col.Bytes;
         }
 
         // Room for `need` bytes of dataset `key`: drops least recently used entries (never the one asked for).

@@ -68,7 +68,7 @@ namespace NativeDataEngine
             {
                 DataType t = b.Schema[c].Type.Kind == Kind.Null ? DataType.Varchar : b.Schema[c].Type;
                 Column col = b.Cols[c];
-                if (col.Type.Kind == Kind.Null || !(col.Type.UsesI == t.UsesI && col.Type.UsesF == t.UsesF && (col.S != null) == (t.Kind == Kind.String))) col = Cast.To(col, t, true);
+                if (col.Type.Kind == Kind.Null || !(col.Type.UsesI == t.UsesI && col.Type.UsesF == t.UsesF && (col.IsLazyText || col.S != null) == (t.Kind == Kind.String))) col = Cast.To(col, t, true);
                 EncodedChunk ch = Chunk(col, t, b.Rows, codec);
                 g.Chunks.Add(ch); g.Bytes += ch.Bytes.Length;
             }
@@ -88,11 +88,41 @@ namespace NativeDataEngine
             levels.Int32(lv.N); levels.Bytes(lv.B, 0, lv.N);
 
             ByteBuf page = new ByteBuf(Math.Max(64, nonNull * 8));
-            ByteBuf output = new ByteBuf(256 + n / 4 + (col.S == null ? 9 * n : 0));   // about the final size: no regrowth copies
+            ByteBuf output = new ByteBuf(256 + n / 4 + (t.Kind != Kind.String ? 9 * n : 0));   // about the final size: no regrowth copies
             int phys = ParquetTypes.Physical(t);
 
             // Text with repeats: dictionary page + RLE_DICTIONARY indices.
-            if (t.Kind == Kind.String && nonNull > 0)
+            if (t.Kind == Kind.String && nonNull > 0 && col.IsLazyText && !col.Unique)
+            {
+                // Text as bytes: the dictionary is built on the bytes (TextKeys), no strings made.
+                TextKeys keys = new TextKeys(); int[] idx = new int[nonNull]; int k = 0; long dictBytes = 0; bool useDict = true;
+                byte[] u = col.Utf8; int[] f = col.Offs;
+                for (int i = 0; i < n && useDict; i++)
+                {
+                    if (col.IsNull(i)) continue;
+                    bool added; int id = keys.Get(u, f[i], f[i + 1] - f[i], out added);
+                    if (added) { dictBytes += 4 + f[i + 1] - f[i]; if (dictBytes > (1 << 20) || keys.Count > 100000 || keys.Count >= nonNull * 0.7) useDict = false; }
+                    idx[k++] = id;
+                }
+                if (useDict && keys.Count < nonNull * 0.7)
+                {
+                    ByteBuf dp = new ByteBuf((int)dictBytes + 16);
+                    for (int id = 0; id < keys.Count; id++) { dp.Int32(keys.Length(id)); dp.Bytes(keys.Bytes, keys.Start(id), keys.Length(id)); }
+                    WritePage(output, 2, dp, keys.Count, codec, 2, ch);
+                    ch.DictRel = 0;
+                    ByteBuf data = new ByteBuf(nonNull / 2 + 16);
+                    data.Bytes(levels.B, 0, levels.N);
+                    int w = Rle.BitWidth(keys.Count - 1);
+                    data.Byte(w);
+                    Rle.Encode(data, idx, nonNull, w);
+                    ch.DataRel = output.N;
+                    WritePage(output, 0, data, n, codec, 8, ch);
+                    ch.Encodings.AddRange(new[] { 2, 3, 8 });
+                    ch.Bytes = Trim(output);
+                    return ch;
+                }
+            }
+            else if (t.Kind == Kind.String && nonNull > 0 && !col.IsLazyText)
             {
                 Dictionary<string, int> dict = new Dictionary<string, int>(StringComparer.Ordinal); List<string> order = new List<string>();
                 Dictionary<object, int> byRef = new Dictionary<object, int>(RefEq.Instance);   // repeated values are usually one shared string
@@ -190,7 +220,8 @@ namespace NativeDataEngine
                         break;
                     }
                 default:
-                    for (int i = 0; i < n; i++) { if (col.IsNull(i)) continue; page.Utf8(col.S[i]); }
+                    if (col.IsLazyText) { byte[] u = col.Utf8; int[] f = col.Offs; for (int i = 0; i < n; i++) { if (col.IsNull(i)) continue; int a = f[i], l = f[i + 1] - a; page.Int32(l); page.Bytes(u, a, l); } }   // bytes as they are
+                    else for (int i = 0; i < n; i++) { if (col.IsNull(i)) continue; page.Utf8(col.S[i]); }
                     break;
             }
             if (hasStats)

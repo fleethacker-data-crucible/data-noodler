@@ -34,7 +34,7 @@ namespace NativeDataEngine
             if (n == nulls.Length) Grow();
             if (i != null) i[n] = c.I != null ? c.I[k] : (long)c.F[k];
             else if (f != null) f[n] = c.F != null ? c.F[k] : c.I[k];
-            else if (s != null) s[n] = c.S != null ? c.S[k] : Values.Text(c, k);
+            else if (s != null) s[n] = c.IsLazyText ? System.Text.Encoding.UTF8.GetString(c.Utf8, c.Offs[k], c.Offs[k + 1] - c.Offs[k]) : c.S != null ? c.S[k] : Values.Text(c, k);   // bytes: this value only
             else if (b != null) b[n] = c.B[k];
             n++;
         }
