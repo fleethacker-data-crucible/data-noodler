@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dashboard Studio</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<link rel="stylesheet" href="../css/dashboard-studio.css">
+</head>
+<body>
+<div class="ds" id="ds">
+  <main class="stage" id="stage">
+    <div class="types typebar" id="types"></div>
+    <div id="cards"></div>
+  </main>
+</div>
+<div class="dd-menu ctxmenu" id="ctxmenu">
+  <div data-act="edit">Edit<small>Code, data and settings in the Widget Editor</small></div>
+  <div data-act="data">Data<small>Drag fields from a CLEAN_ dataset onto this widget</small></div>
+  <div data-act="settings">Settings<small>This widget's settings, live on the dashboard</small></div>
+  <div data-act="delete" class="danger last">Delete<small>Remove this container from the dashboard</small></div>
+</div>
+
+<!-- The dashboard's Settings window (right-click > Settings): the selected widget's settings, live -->
+<aside class="right float" id="dSet" hidden>
+  <div class="dw-head sethead" id="dSetHead"><b>Settings</b><button class="dw-x" id="dSetX" title="Close">×</button></div>
+  <div class="cs-body" id="dOpts"></div>
+</aside>
+
+<!-- Widget Editor: the widget's preview on the grid, its slots, the Data / Settings windows and the code window -->
+<div class="wed" id="wed" hidden>
+  <main class="stage" id="wStage">
+    <input id="wName" class="cname" type="text" placeholder="Enter a Widget name" spellcheck="false" title="Widget name (required to Save)">
+    <div class="card" id="wCard"><div class="pv" id="wPv"></div><div class="rz nw" data-dir="nw"></div><div class="rz n" data-dir="n"></div><div class="rz ne" data-dir="ne"></div><div class="rz e" data-dir="e"></div><div class="rz se" data-dir="se"></div><div class="rz s" data-dir="s"></div><div class="rz sw" data-dir="sw"></div><div class="rz w" data-dir="w"></div><div class="sz" id="wSz"></div></div>
+    <div class="slots" id="wSlots"></div>
+    <div class="status" id="wStatus"></div>
+    <div class="note" id="wNote"></div>
+    <div class="tools">
+      <button id="wData" class="ghost" title="The datasets: drag a field onto a slot">Data</button>
+      <button id="wSetBtn" class="ghost" title="The widget's settings (from d3-settings.json)">Settings</button>
+      <button id="wCode" class="ghost" title="d3-code.js, d3-style.css and d3-settings.json in their own window">Code</button>
+      <button id="wSave" title="Save the widget to the project and / or the global library">Save</button>
+      <button id="wClose" class="ghost" title="Back to the dashboard (unsaved changes are lost)">Close</button>
+    </div>
+  </main>
+  <aside class="right float" id="wSet" hidden>
+    <div class="dw-head sethead" id="wSetHead"><b>Settings</b><button class="dw-x" id="wSetX" title="Close">×</button></div>
+    <div class="cs-body" id="wOpts"></div>
+  </aside>
+</div>
+
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/menus.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/module-page.js"></script>
+<script src="../js/vendor/d3.v7.min.js"></script>
+<script src="../js/widgets/widgets.js"></script>
+<script src="../js/widgets/color-picker.js"></script>
+<script src="../js/widgets/settings-panel.js"></script>
+<script src="../js/widgets/data-window.js"></script>
+<script src="../js/widgets/starter.js"></script>
+<script src="../js/dashboard/widget-editor.js"></script>
+<script src="../js/dashboard/studio.js"></script>
+</body>
+</html>

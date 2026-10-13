@@ -6,7 +6,7 @@
 const ModulePage = {
   async init(module, title) {
     const folder = UI.params().project;
-    document.title = module === 'd3-studio' ? 'D3 Studio' : `${title} · Data Noodler`;
+    document.title = `${title} · Data Noodler`;
     const set = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
     set('title', title);
     if (!folder) { set('sub', 'No project selected. Open this module from the Project Manager.'); throw new Error('No project given (?project=<folder>).'); }

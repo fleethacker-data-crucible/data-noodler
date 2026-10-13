@@ -47,7 +47,33 @@ const Projects = (() => {
     }
     return out;
   }
-  const get = async folder => migrate(await DNFS.readJSON(cfgPath(folder)));
+  // Stored paths name the project folder ("workspace/projects/<folder>/data/..."). After a rename every JSON file in the
+  // project (config, pipeline, dashboard, dataset manifests, publish records ...) is re-pointed from the old folder to the
+  // new one, so Import, Transform, Dashboard Studio and Publish keep finding their files. Data parts are never touched.
+  async function repath(folder, from) {
+    const a = `${ROOT}/${from}/`, b = `${ROOT}/${folder}/`, esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(^|[^A-Za-z0-9_.-])${esc(a)}`, 'g');
+    const walk = async dir => {
+      for (const e of await DNFS.list(dir).catch(() => [])) {
+        const p = `${dir}/${e.name}`;
+        if (e.dir) { if (!/^(raw|archives|\.)/.test(e.name)) await walk(p); continue; }
+        if (!/\.json$/i.test(e.name)) continue;
+        const t = await DNFS.readText(p).catch(() => null);
+        if (t == null || !t.includes(a)) continue;
+        await DNFS.writeText(p, t.replace(re, `$1${b}`));
+      }
+    };
+    await walk(`${ROOT}/${folder}`);
+  }
+  // A project renamed before paths were re-pointed: its datasets still name a folder that no longer exists. Fixed on load.
+  async function get(folder) {
+    let cfg = migrate(await DNFS.readJSON(cfgPath(folder)));
+    const stale = [...new Set((cfg.datasets || []).map(d => String(d.path || '').match(/^workspace\/projects\/([^/]+)\//)?.[1]).filter(f => f && f !== folder))];
+    let fixed = false;
+    for (const old of stale) if (!await DNFS.exists(`${ROOT}/${old}`)) { await repath(folder, old); fixed = true; }
+    if (fixed) cfg = migrate(await DNFS.readJSON(cfgPath(folder)));
+    return cfg;
+  }
   async function save(cfg) { cfg.modified = new Date().toISOString(); await DNFS.writeJSON(cfgPath(cfg.folder), cfg); return cfg; }
 
   async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified', tags = [] }) {
@@ -80,6 +106,7 @@ const Projects = (() => {
     if (to !== folder) {
       if (await DNFS.exists(`${ROOT}/${to}`)) throw new Error(`A project folder "${to}" already exists.`);
       await DNFS.move(`${ROOT}/${folder}`, `${ROOT}/${to}`);
+      await repath(to, folder);
     }
     const cfg = await get(to);
     cfg.name = name.trim(); cfg.folder = to;

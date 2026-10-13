@@ -20,12 +20,11 @@
   .drop.over { border-color: var(--blue); color: var(--text); }
   aside { display: flex; flex-direction: column; gap: 24px; }
   /* Schema: fills the panel, never scrolls sideways. Keep/types fit their content; names share the rest. */
-  table.schema { width: 100%; }
+  table.schema { width: max-content; }   /* every column fits its longest value, left aligned (like the Preview table) */
   table.schema td { padding: 4px 8px; }
-  table.schema .fit { width: 1%; white-space: nowrap; }
-  table.schema td.src { width: 50%; overflow-wrap: anywhere; }
-  table.schema td.nn { width: 50%; }
-  table.schema input[type=text] { width: 100%; min-width: 120px; font-family: inherit; }
+  table.schema th, table.schema td { white-space: nowrap; text-align: left; }
+  table.schema td:has(select, input[type=text]) { max-width: none; overflow: visible; }   /* boxes are never cut off by the 300px column cap */
+      table.schema input[type=text] { font-family: inherit; }
   #preview .pgrid { height: 480px; }
   #dsName { width: 440px; }
   /* Long file / dataset names: one line with ..., the size stays on the right (full name on hover). */
@@ -339,11 +338,24 @@ function renderSchema() {
     cur.cols.map((c, i) => [c, i]).sort((a, b) => a[0].name.localeCompare(b[0].name, undefined, { sensitivity: 'base', numeric: true })).map(([c, i]) => `<tr><td class="fit"><input type="checkbox" data-i="${i}" data-k="keep" ${c.keep ? 'checked' : ''}></td><td class="mono src">${esc(c.name)}</td><td class="muted fit">${esc(c.type)}</td>
       <td class="fit"><select data-i="${i}" data-k="newType">${[...new Set([c.type, ...TYPES])].map(t => `<option value="${esc(t)}" ${t === c.newType ? 'selected' : ''}>${esc(typeLabel(t))}</option>`).join('')}</select></td>
       <td class="nn"><input type="text" data-i="${i}" data-k="newName" value="${esc(c.newName)}" title="${esc(c.newName)}"></td></tr>`).join('') + '</tbody>';
-  // Every Change Type box as wide as the widest one.
+  // Every Change Type box fits its longest choice (text width + padding + arrow), all the same width.
   const sels = [...$('schema').querySelectorAll('select[data-k="newType"]')];
-  sels.forEach(el => el.style.width = '');
-  const w = Math.max(0, ...sels.map(el => el.offsetWidth));
-  if (w) sels.forEach(el => el.style.width = w + 'px');
+  if (sels.length) {
+    const cs = getComputedStyle(sels[0]), g = document.createElement('canvas').getContext('2d');
+    g.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const text = Math.max(...sels.flatMap(el => [...el.options].map(o => g.measureText(o.text).width)));
+    const w = Math.ceil(text + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth) + 28);
+    sels.forEach(el => Object.assign(el.style, { width: w + 'px', minWidth: w + 'px', maxWidth: 'none' }));
+  }
+  // New Field Name boxes: as wide as the longest name (they grow while typing).
+  const ins = [...$('schema').querySelectorAll('input[data-k="newName"]')];
+  if (ins.length) {
+    const cs = getComputedStyle(ins[0]), g = document.createElement('canvas').getContext('2d');
+    g.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const fit = () => { const w = Math.ceil(Math.max(80, ...ins.map(el => g.measureText(el.value).width)) + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth) + 4);
+      ins.forEach(el => Object.assign(el.style, { width: w + 'px', minWidth: w + 'px', maxWidth: 'none' })); };
+    fit(); ins.forEach(el => el.addEventListener('input', fit));
+  }
   showValidate(); filterSchema();
 }
 // Check Type Changes only shows when a kept column's type differs from the detected one.
@@ -480,6 +492,14 @@ async function runImport(direct) {
         table: cur.table || null, kind: cur.reader.kind, select, direct: !!direct, size: st.size, modified: st.modified,
         columns: cur.cols.map(c => ({ name: c.name, type: c.type, keep: direct ? true : c.keep, newName: direct ? c.name : c.newName, newType: direct ? c.type : c.newType })) },
     });
+    // Update with a new name renames the dataset: the old one (record and data folder) goes, nothing new is added.
+    // A new dataset only comes from clicking a raw source file.
+    const old = cur.ds && cur.ds !== name ? (await ctx.reload()).datasets.find(d => d.name === cur.ds) : null;
+    if (old) {
+      await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(d => d.name !== old.name) });
+      if (old.path && old.path !== w.path) await DNFS.remove(old.path, { recursive: true }).catch(() => {});
+      ctx.log(`Renamed dataset ${old.name} → ${name}`, 'ok');
+    }
     await Projects.touchModule(ctx.folder, 'import');
     ctx.log(`Imported ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
     UI.toast(`Imported ${name}`, 'ok');

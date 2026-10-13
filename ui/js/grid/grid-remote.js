@@ -65,7 +65,7 @@ const GridRemote = (() => {
     const types = new Map((o.columns || []).map(c => [c.name, c.type])), from = qid(o.dataset), select = o.cols.map(qid).join(', ');
     // Times of the last request (wall clock incl. HTTP, and the engine's own ms; page + count run side by side).
     const stat = { wall: 0, engine: 0 };
-    const run = async sql => { const r = await Engine.call('query', { sql, views: o.views() }); stat.engine = Math.max(stat.engine, +r.ms || 0); return ApexWidget.objects(r); };
+    const run = async sql => { const r = await Engine.call('query', { sql, views: o.views() }); stat.engine = Math.max(stat.engine, +r.ms || 0); return r.rows.map(row => Object.fromEntries(r.cols.map((c, k) => [typeof c === 'string' ? c : c.name, row[k]]))); };
     const timed = async fn => { const t0 = performance.now(); stat.engine = 0; const v = await fn(); stat.wall = performance.now() - t0; return v; };
     const page = (where, order, offset, n) => run(`SELECT ${select} FROM ${from}${where ? ` WHERE ${where}` : ''}${order} LIMIT ${n} OFFSET ${offset}`);
     const count = async where => +Object.values((await run(`SELECT count(*) AS n FROM ${from}${where ? ` WHERE ${where}` : ''}`))[0] || {})[0] || 0;

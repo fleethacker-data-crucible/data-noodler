@@ -22,17 +22,11 @@ const Publisher = (() => {
   const MANIFEST = ctx => `${ctx.dir}/publish/published.json`;
   const fileStamp = () => new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').replace(/(\d{8})(\d{6})/, '$1-$2');
 
-  // Chart libraries (~1.2 MB) load only when something is published, not with the page.
+  // D3 and the widget code load only when something is published, not with the page.
   let renderers;
   const addScript = src => new Promise((res, rej) => document.head.append(Object.assign(document.createElement('script'), { src, async: false, onload: res, onerror: () => rej(new Error(`Could not load ${src}`)) })));
-  const loadRenderers = () => renderers ||= (async () => {
-    if (typeof ApexRender === 'undefined') await addScript('/ui/js/charts/apex-render.js');
-    await Promise.all([typeof ApexCharts === 'undefined' && '/ui/js/vendor/apexcharts.min.js', typeof ApexTree === 'undefined' && '/ui/js/vendor/apextree.min.js',
-      typeof d3 === 'undefined' && '/ui/js/vendor/d3.min.js', typeof D3Render === 'undefined' && '/ui/js/charts/d3-render.js',
-      typeof ApexWidget === 'undefined' && '/ui/js/charts/apex-widget.js', typeof DataGrid === 'undefined' && '/ui/js/grid/data-grid-pkg.js', typeof Pptx === 'undefined' && '/ui/js/core/pptx.js', typeof Pdf === 'undefined' && '/ui/js/core/pdf.js']
-      .filter(Boolean).map(addScript));
-  })().catch(e => { renderers = null; throw e; });
-
+  const loadRenderers = () => renderers ||= Promise.all([typeof d3 === 'undefined' && '/ui/js/vendor/d3.v7.min.js', typeof Widgets === 'undefined' && '/ui/js/widgets/widgets.js',
+    typeof Pptx === 'undefined' && '/ui/js/core/pptx.js', typeof Pdf === 'undefined' && '/ui/js/core/pdf.js'].filter(Boolean).map(addScript)).catch(e => { renderers = null; throw e; });
   // Picture at W x H (scaled by s): the published page's cards drawn through an SVG foreignObject.
   // inner is the board's cards, or { chart } for one widget's chart body alone (no card, no title).
   async function rasterize(css, inner, W, H, s = 1) {
@@ -66,34 +60,37 @@ const Publisher = (() => {
     const dash = await DNFS.readJSONOr(`${ctx.dir}/dashboard/dashboard.json`, null);
     if (!dash) throw new Error('No dashboard yet. Build one in the Dashboard module first.');
     if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
-    // Each widget is drawn here at its dashboard size and embedded as static markup: the page needs no JavaScript.
-    const pkgs = new Map((await ChartRegistry.list(true)).map(m => [m.id, m]));
-    const COLS = dash.cols || 48, ROWS = dash.rows || 27, CELL = 30, cards = [], charts = [];
+    // Each widget is drawn here at its dashboard size (its own D3 code, the project's copy in dashboard/widgets/) and
+    // embedded as static markup with its d3-style.css: the page needs no JavaScript.
+    const pkgs = new Map((await Widgets.list(Widgets.projectDir(ctx))).map(p => [p.id, p])), src = await Projects.sourceDatasets(ctx.folder, cfg);
+    const y0 = Math.min(...dash.widgets.map(w => w.y)), COLS = 48, ROWS = Math.max(27, ...dash.widgets.map(w => w.y - y0 + w.h)), CELL = 30, cards = [], charts = [], styles = new Map();
     const host = Object.assign(document.createElement('div'), { style: 'position:fixed;left:-99999px;top:0' }); document.body.append(host);
     try {
       for (const w of dash.widgets) {
-        const m = pkgs.get(w.pkg), d = (cfg.datasets || []).find(x => x.name === w.dataset);
-        let body;
-        if (!m) body = `<div class="note err">Widget package ${esc(w.pkg)} not found</div>`;
-        else if (!ApexWidget.ready(m, w)) continue;   // not set up yet: left out
-        else if (!d) body = `<div class="note err">Dataset ${esc(w.dataset)} not found</div>`;
+        const p = pkgs.get(w.widget), d = src.find(x => x.name === w.dataset);
+        let body, title = p?.name || '';
+        if (!w.widget) continue;   // an empty Custom Widget container: left out
+        if (!p) body = `<div class="note err">Widget ${esc(w.widget)} not found</div>`;
+        else if (!d) body = `<div class="note err">Dataset ${esc(w.dataset || '(none)')} not found</div>`;
         else {
-          const r = await Engine.call('query', { query: ApexWidget.query(m, w), views: Engine.views([d]) });
           const el = Object.assign(document.createElement('div'), { style: `width:${w.w * CELL - 16}px;height:${w.h * CELL - 44}px` }); host.append(el);
           try {
-            await ApexWidget.render(el, m, m.specJson, w, ApexWidget.objects(r), { columns: d.columns || [] }); body = el.innerHTML;
-            charts.push({ title: w.title || m.name || 'Chart', body, w: w.w * CELL - 16, h: w.h * CELL - 44 });
+            const s = Widgets.parse(p.settings), rows = Widgets.ready(s.inputs, w.inputs || {}) ? await Widgets.load(s.inputs, w.inputs || {}, d) : [];
+            await Widgets.draw(el, { ...p, key: p.id }, rows);
+            styles.set(p.id, document.getElementById(`dn-widget-${p.id.replace(/[^A-Za-z0-9_-]/g, '_')}-style`)?.textContent || '');
+            body = `<div class="${esc(el.className)}" style="width:100%;height:100%">${el.innerHTML}</div>`;
+            charts.push({ title: title || 'Widget', body, w: w.w * CELL - 16, h: w.h * CELL - 44 });
           }
           catch (e) { body = `<div class="note err">${esc(String(e.message || e).split('\n')[0])}</div>`; }
         }
-        cards.push(`<div class="card" style="left:${w.x / COLS * 100}%;top:${w.y / ROWS * 100}%;width:${w.w / COLS * 100}%;height:${w.h / ROWS * 100}%"><h3>${esc(w.title || m?.name || '')}</h3><div class="body">${body}</div></div>`);
+        cards.push(`<div class="card" style="left:${w.x / COLS * 100}%;top:${(w.y - y0) / ROWS * 100}%;width:${w.w / COLS * 100}%;height:${w.h / ROWS * 100}%"><h3>${esc(title)}</h3><div class="body">${body}</div></div>`);
       }
     } finally { host.remove(); }
-    if (!cards.length) throw new Error('No widget is set up yet (dataset + data inputs).');
-    const css = await (await fetch('/ui/css/theme.css')).text();
+    if (!cards.length) throw new Error('No widget is set up yet (Edit Widget, attach a CLEAN_ dataset, Save).');
+    const css = (await (await fetch('/ui/css/theme.css')).text()) + '\n' + [...styles.values()].join('\n');
     const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(cfg.name)} · Dashboard</title>
 <style>${css.replace(/@font-face[^}]+}/g, '')}
-.board{position:relative;width:min(100%,calc((100vh - 120px) * 16 / 9));aspect-ratio:16/9;margin:0 auto}
+.board{position:relative;width:min(100%,calc((100vh - 120px) * ${COLS} / ${ROWS}));aspect-ratio:${COLS}/${ROWS};margin:0 auto}
 .card{position:absolute;box-sizing:border-box;padding:4px;display:flex}
 .card>*{min-width:0}
 .card{flex-direction:column}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Widget Code</title>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); }
+  .wrap { display: flex; flex-direction: column; height: 100%; padding: 10px 12px 12px; box-sizing: border-box; gap: 8px; }
+  .bar { display: flex; align-items: center; gap: 8px; }
+  .bar b { font-size: 14px; margin-right: 8px; }
+  .tab { border: 1px solid var(--border); background: var(--panel); color: var(--text-2); border-radius: 4px; padding: 4px 12px; cursor: pointer; font: 13px var(--mono); }
+  .tab.on { border-color: var(--blue); color: var(--text); }
+  .tab:hover { border-color: var(--muted); }
+  .ed { flex: 1; min-height: 0; }
+  .ed[hidden] { display: none; }
+  .ed .sqled { height: 100%; width: 100%; box-sizing: border-box; }
+  .note { margin: auto; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar"><b id="title">Widget code</b>
+    <button class="tab on" data-tab="code">d3-code.js</button>
+    <button class="tab" data-tab="css">d3-style.css</button>
+    <button class="tab" data-tab="settings">d3-settings.json</button></div>
+  <div class="ed" id="ed-code"></div>
+  <div class="ed" id="ed-css" hidden></div>
+  <div class="ed" id="ed-settings" hidden></div>
+</div>
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/pipeline/sql-editor.js"></script>
+<script>
+// The Widget Editor's code window (its Code button): the widget's three files in tabs. Every change redraws the widget in
+// Dashboard Studio at once. Everything goes through window.opener.WidgetCode (ui/js/dashboard/widget-editor.js).
+(() => {
+  const api = window.opener?.WidgetCode, $ = id => document.getElementById(id);
+  if (!api?.open) { document.querySelector('.wrap').innerHTML = '<div class="note">Open this window with the Code button in the Widget Editor.</div>'; return; }
+  const LANG = { code: 'js', css: 'js', settings: 'json' }, eds = {};
+  for (const t of Object.keys(LANG)) eds[t] = SqlEditor.mount($('ed-' + t), { lang: LANG[t], onChange: () => api.set(t, eds[t].value) });
+  const sync = () => {
+    if (!api.open) return close();
+    for (const t of Object.keys(eds)) if (eds[t].value !== api.files[t]) eds[t].value = api.files[t];
+    $('title').textContent = api.title; document.title = `${api.title} · Widget Code`;
+  };
+  sync();
+  const off = api.subscribe(sync);
+  document.querySelector('.bar').addEventListener('click', e => {
+    const b = e.target.closest('.tab'); if (!b) return;
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b));
+    for (const t of Object.keys(eds)) $('ed-' + t).hidden = t !== b.dataset.tab;
+  });
+  // The studio closed or reloaded: nothing to edit any more.
+  const watch = setInterval(() => { if (!window.opener || window.opener.closed || window.opener.WidgetCode !== api || !api.open) { clearInterval(watch); close(); } }, 1000);
+  addEventListener('beforeunload', () => off());
+})();
+</script>
+</body>
+</html>

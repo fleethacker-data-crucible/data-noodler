@@ -818,9 +818,9 @@ try {
     }
 } catch { Add-Log 'server' "Shortcut icon not updated: $($_.Exception.Message)" }
 
-# --- one-time move: projects/ and chart-builder/ -> workspace/, and stored "projects/..." paths -> "workspace/projects/..." ---
+# --- one-time move: projects/ -> workspace/, and stored "projects/..." paths -> "workspace/projects/..." ---
 try {
-    foreach ($name in 'projects', 'chart-builder') {
+    foreach ($name in 'projects') {
         $old = Join-Path $root $name; $new = Join-Path $root "workspace\$name"
         if (-not (Test-Path -LiteralPath $old)) { continue }
         if (-not (Test-Path -LiteralPath $new)) {
@@ -857,16 +857,10 @@ try {
     }
 } catch { Add-Log 'server' "Rename staged -> imported failed: $($_.Exception.Message)" }
 
-# --- one-time rename: workspace/chart-builder/live -> published (published charts, read by the Dashboard Builder) ---
-try {
-    $cbLive = Join-Path $root 'workspace\chart-builder\live'; $cbPub = Join-Path $root 'workspace\chart-builder\published'
-    if (Test-Path $cbLive) {
-        if (-not (Test-Path $cbPub)) { New-Item -ItemType Directory -Path $cbPub | Out-Null }
-        Get-ChildItem $cbLive -Force | ForEach-Object { if (-not (Test-Path (Join-Path $cbPub $_.Name))) { Move-Item -LiteralPath $_.FullName -Destination $cbPub } }
-        if (-not (Get-ChildItem $cbLive -Force)) { Remove-Item -LiteralPath $cbLive }
-        Add-Log 'server' 'Moved workspace\chart-builder\live to published'
-    }
-} catch { Add-Log 'server' "Rename chart-builder live -> published failed: $($_.Exception.Message)" }
+# --- Dashboard Studio folders: the global widget library and the SAMPLE_ datasets (preview only) ---
+foreach ($d in 'workspace\dashboard-studio\widgets', 'workspace\sample-data') {
+    try { $p = Join-Path $root $d; if (-not (Test-Path $p)) { New-Item -ItemType Directory -Force $p | Out-Null } } catch { Add-Log 'server' "Could not create ${d}: $($_.Exception.Message)" }
+}
 
 # --- native data engine: C# sources in engine\, compiled by Add-Type (cached DLL), runs in this process ---
 . (Join-Path $here 'engine-loader.ps1')
@@ -1142,6 +1136,15 @@ function Open-App($exe, $url, $profileName, [int]$Width = 0, [int]$Height = 0) {
         $new = [regex]::Replace($json, '"app_window_placement":\{(?:[^{}]|\{[^{}]*\})*\}', '"app_window_placement":{}')
         if ($new -ne $json) { [IO.File]::WriteAllText($pref, $new) }
     }
+    # Edge's mini menu (Copy / Search pop-up on selected text): off in this profile, so in every window it opens.
+    if (-not (Test-Path $pref)) { New-Item -ItemType Directory -Force (Split-Path $pref) | Out-Null; [IO.File]::WriteAllText($pref, '{}') }
+    $json = [IO.File]::ReadAllText($pref)
+    if ($json -match '"show_mini_menu":true') { $new = $json -replace '"show_mini_menu":true', '"show_mini_menu":false' }
+    elseif ($json -match '"edge_quick_search":\{') { $new = $json -replace '"edge_quick_search":\{', '"edge_quick_search":{"show_mini_menu":false,' }
+    elseif ($json -notmatch '"show_mini_menu"') { $new = $json -replace '^\s*\{', '{"edge_quick_search":{"show_mini_menu":false},' }
+    else { $new = $json }
+    $new = $new -replace ',\}', '}'
+    if ($new -ne $json) { [IO.File]::WriteAllText($pref, $new) }
     Start-Process $exe @("--app=$url", "--user-data-dir=`"$dir`"",
         "--window-size=$w,$h", "--window-position=$x,$y", '--no-first-run', '--no-default-browser-check',
         '--disable-component-update', '--disable-background-networking', '--disable-sync', '--disable-extensions',

@@ -27,9 +27,9 @@ Data_Noodler_*.gz
 # Installed version marker (Data_Noodler_Install.ps1)
 version.txt
 
-# Chart Builder: where its window was (per user)
-workspace/chart-builder/builder-state.json
-workspace/chart-builder/dev/_new/
+# Dashboard Studio: SAMPLE_ datasets are data (never committed)
+workspace/sample-data/*
+!workspace/sample-data/.gitkeep
 
 # Claude test scripts (local only)
 .claude/tests/

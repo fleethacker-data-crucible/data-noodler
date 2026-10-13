@@ -2,6 +2,17 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-12: Dashboard Studio (widgets, official D3 only)
+
+- One studio replaces Chart Builder, D3 Studio and the Dashboard Builder: widget bar (category placeholders, Custom
+  Widget, project + global widgets), containers on the grid, right-click Edit Widget opens the Widget Editor (live
+  preview, Data / Settings windows, code window with d3-code.js / d3-style.css / d3-settings.json tabs).
+- Widget package = d3-code.js (ES module returning an element) + d3-style.css (.WIDGET = its container) + d3-settings.json.
+  Save: project (`dashboard/widgets/`) and / or global library (`workspace/dashboard-studio/widgets/`).
+- Data: the project's CLEAN_ datasets; SAMPLE_ datasets (`workspace/sample-data/`) preview only (Save greyed).
+- Removed: all Apex code and libraries, the old chart packages and pages, the Data Grid dashboard pop-outs.
+  D3 is `ui/js/vendor/d3.v7.min.js` (7.9.0). Publish draws the new widgets.
+
 ## 2026-10-11: Faster Parquet writer (same bytes)
 
 - Numbers go straight into the page buffer (bulk copy when there are no NULLs) instead of one buffer call per byte;

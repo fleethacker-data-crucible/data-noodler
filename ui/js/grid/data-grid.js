@@ -1,4 +1,4 @@
-// Data Grid renderer (ui/js/grid/data-grid-pkg.js "renderer"): our own table, no ApexGrid. One real <table> inside one native
+// Data Grid (core app code, not a widget): our own table. One real <table> inside one native
 // scroller (like the app's schema tables), so vertical and sideways scrolling are the browser's own and the styling
 // covers every column. Only the rows on screen (+ a margin) are in the page; they are redrawn in blocks of 10 rows.
 // Its look: ui/js/grid/data-grid.css only. Global: DNGrid.

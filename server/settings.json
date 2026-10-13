@@ -3,7 +3,7 @@
     "engineWorkers":  64,
     "engineMemory":  0.5,
     "port":  25000,
-    "browser":  "edge",
+    "browser":  "chrome",
     "portMode":  "manual",
     "theme":  "dark"
 }

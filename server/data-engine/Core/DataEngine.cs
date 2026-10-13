@@ -345,6 +345,55 @@ namespace NativeDataEngine
             return Jobs.Start("write", destRel, j => Write(j, sql, views, destRel, meta, codec, workers));
         }
 
+        // ---------- write every table a script creates (Transform) ----------
+        // The script runs once; each CREATE TABLE (not TEMP) still there at the end is written as its own dataset
+        // <dirRel>/<prefix><NAME> (the prefix is not doubled when the name already has it). Returns
+        // { datasets: [{ table, name, manifest }] } in creation order.
+        public Dictionary<string, object> WriteTables(Job j, string sql, Dictionary<string, string> views, string dirRel, string prefix, Dictionary<string, object> meta, int codec, int workers)
+        {
+            prefix = (prefix ?? "").ToUpperInvariant();
+            return WithWiden(() =>
+            {
+                Catalog cat;
+                j.Stage = "Running script";
+                Prepare(sql, views, out cat, j.Cts.Token);
+                try
+                {
+                    ScriptSession s = cat.Session;
+                    List<string> outs = s == null ? new List<string>() : s.Outputs.Where(n => s.Tables.ContainsKey(n)).ToList();
+                    if (outs.Count == 0) throw new EngineException("SQL_NO_TABLE", "The query creates no table: write CREATE TABLE <name> AS SELECT ... (CREATE TEMP TABLE for helper tables that are not saved).");
+                    bool arrow = !string.Equals(Options.DatasetFormat, "parquet", StringComparison.OrdinalIgnoreCase);
+                    List<object> done = new List<object>();
+                    for (int i = 0; i < outs.Count; i++)
+                    {
+                        string table = outs[i], up = table.ToUpperInvariant(), name = up.StartsWith(prefix) ? up : prefix + up;
+                        string dest = PathGuard.Project(Root, dirRel.TrimEnd('/') + "/" + name, false);
+                        j.Stage = "Writing " + name + " (" + (i + 1) + " of " + outs.Count + ")";
+                        Planned p = PlanQ(Parser.ParseQuery("SELECT * FROM " + Q(table)), cat);
+                        ExecCtx ctx = Ctx(j, workers, j.Cts.Token);
+                        try
+                        {
+                            using (DatasetWriter w = new DatasetWriter(Root, dest, p.Op.Schema, arrow, codec, Options.PartBytes, Options.PartRows))
+                            {
+                                if (arrow) Encode<EncodedBatch>(p.Op, ctx, ArrowFileWriter.Encode, w.Append);
+                                else Encode<EncodedRowGroup>(p.Op, ctx, rg => ParquetFileWriter.Encode(rg, codec), w.Append);
+                                Dictionary<string, object> m = w.Commit(meta);
+                                Resident.Forget(dest);
+                                Dictionary<string, object> d = new Dictionary<string, object>();
+                                d["table"] = table; d["name"] = name; d["manifest"] = m;
+                                done.Add(d);
+                            }
+                        }
+                        finally { ctx.End(); }
+                    }
+                    Dictionary<string, object> res = new Dictionary<string, object>();
+                    res["datasets"] = done;
+                    return res;
+                }
+                finally { cat.Dispose(); }
+            });
+        }
+
         // Rows -> batches of BatchRowCount, encoded on the workers (bounded), appended in order.
         void Encode<T>(Op root, ExecCtx ctx, Func<Batch, T> encode, Action<T> append)
         {

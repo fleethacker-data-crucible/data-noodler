@@ -4,7 +4,7 @@ Quick map for future edits. Updated 2026-10-10 (Arrow engine). Runtime story: `A
 
 ## Where we are
 
-- **Data Noodler** is a browser-based flat-file analytics app: projects, Import, Transform, Dashboard, D3 Studio, Publish,
+- **Data Noodler** is a browser-based flat-file analytics app: projects, Import, Transform, Dashboard Studio, Publish,
   Update, Archives.
 - All data work runs in the **native C# engine** (`server/data-engine/`, ~11k lines, C# 5) inside the local PowerShell server
   (`server/server.ps1`), compiled at start by `Add-Type` into a cached DLL. No DuckDB, no WebAssembly, no third-party DLLs,
@@ -74,7 +74,7 @@ CSS/JS) and `server/server.ps1` (split into dot-sourced parts if it grows, like 
 
 | Path | Purpose |
 |---|---|
-| `ui/js/core/engine-client.js` | `Engine`: `query`, `describe`, `count`, `preview`, `check`, `open`, `write`, `exportTo`, `pipeline`, `job`, `cancel`, `status`, `cache`, `memory` (`load` / `preload` / `info` / `drop`), `src`, `dataset`, `views`. |
+| `ui/js/core/engine-client.js` | `Engine`: `query`, `describe`, `count`, `preview`, `check`, `open`, `write`, `writeTables`, `exportTo`, `pipeline`, `job`, `cancel`, `status`, `cache`, `memory` (`load` / `preload` / `info` / `drop`), `src`, `dataset`, `views`. |
 | `ui/js/dn-fs.js` | `DNFS`: client for the project file API. |
 | `ui/js/core/module-page.js` | `ModulePage.init`: page header, `?project=`, project log; starts loading the project's datasets into engine memory. |
 | `ui/js/core/projects.js` | `Projects`: project folders and `project-config.json` (datasets, modules, phase), `sourceDatasets`. |
@@ -86,34 +86,33 @@ CSS/JS) and `server/server.ps1` (split into dot-sourced parts if it grows, like 
 | `ui/js/import/external-source.js` | `ExternalSource`: probe / copy files outside the project. |
 | `ui/js/pipeline/sql-editor.js` | `SqlEditor`: SQL / JSON / JS code editor (find / replace, comments, completion, error marks). CSS in theme.css. |
 | `ui/js/pipeline/steps.js` | `PipelineSteps`: older form steps → SQL (pipelines saved before v2 are converted on load). |
-| `ui/js/pipeline/runner.js` | `PipelineRunner`: `load` (pipeline.json v2), `run` = `Engine.write` of the active query → `data/source/<CLEAN_name>/`. |
+| `ui/js/pipeline/runner.js` | `PipelineRunner`: `load` (pipeline.json v4; older versions converted), `selected`, `tables` (CREATE TABLE names in a query), `problems`, `run` = `Engine.writeTables` of every ticked query → `data/source/CLEAN_<table>/`. |
 | `ui/js/publish/publisher.js` | `Publisher`: dashboard publishing (Web App, PDF, PowerPoint, images) and dataset exports; shared by Publish and Update. |
 | `ui/js/update/project-update.js` | `ProjectUpdate.run(folder)`: Import (changed sources), Transform, Dashboard caches, Publish, Archive. |
 | `ui/js/bench/bench-tests.js`, `ui/js/bench/benchmark.js` | Benchmark page: test data (`temp/bench/data/<rows>/`), the tests (`BenchTests.run`), and the page (check-box pickers, live cards, results table, saved results, Markdown report, Create / Wipe Test Data). |
 | `ui/css/theme.css`, `assets/fonts/` | Universal theme (see `THEME_GUIDE.md`). |
 
-### Charts, Data Grid, D3 Studio
+### Widgets (Dashboard Studio), Data Grid
 
 | Path | Purpose |
 |---|---|
-| `workspace/chart-builder/dev/<id>/`, `workspace/chart-builder/published/<id>/` | Chart packages: `chart.json` (+ `spec.json`, `d3-code.js`, `sample.json`, `style.css`, `thumb.svg`). dev = Save, published = Publish (the Dashboard Builder reads only published). Edit only `dev/<id>/d3-code.js`. |
-| `ui/js/charts/apex-widget.js` | `ApexWidget` (inputs, query, row shaping, theme, style per chart) and `ChartRegistry` (live charts + the built-in Data Grid). |
-| `ui/js/charts/d3-render.js` | `D3Render`: compile / draw a chart's code in its `<div>` (`d3, data, el, W, H, colors, opts, theme, inputs` + accessors), fit, rounded bars, redraw animation. |
-| `ui/js/charts/apex-render.js`, `apex-options.js` | ApexCharts / ApexTree drawing for dashboards made before D3 charts (kept so they still draw); option catalog. |
-| `ui/js/charts/chart-panel.js` (+ `ui/css/chart-studio.css`), `color-picker.js` | `ChartPanel`: the settings panel shared by Chart Builder and the Dashboard Builder (field chips, X / Y slots, Colors, Settings), built from the chart's inputs / options; colour swatch. |
-| `ui/js/grid/data-grid.js` (+ `data-grid.css`, `data-grid-pkg.js`, `grid-remote.js`) | `DNGrid`: Dashboard Data Grid (sort / filter / search, export, pop-out); engine paging (`GridRemote`). |
+| `workspace/dashboard-studio/widgets/<id>/`, `<project>/dashboard/widgets/<id>/` | Widget packages: `d3-code.js` (ES module, `export default (data, { width, height, settings, inputs }) => element`), `d3-style.css` (`.WIDGET` = its container), `d3-settings.json` (`name`, `inputs`, `settings`, `values`). Global library / the project's own copy (the dashboard uses only the project copy). |
+| `workspace/sample-data/SAMPLE_*` | Sample datasets (Arrow files or dataset folders, made by the user, git-ignored): Widget Editor preview only. |
+| `ui/js/widgets/widgets.js` | `Widgets`: package read / list / write / copy, `parse` / `values` (d3-settings.json), `compile` (module from text), `draw` (scoped style + `replaceChildren`), `samples`, `ready` / `query` / `load` (declarative engine query → rows keyed by input key). |
+| `ui/js/widgets/starter.js` | `WidgetStarter.files()`: the three files of a new Custom Widget (a small column chart). |
+| `ui/js/widgets/settings-panel.js`, `color-picker.js`, `data-window.js` | `SettingsPanel` (slots, settings rows from d3-settings.json), `ColorPicker`, `DataWindow` (CLEAN_ + SAMPLE_ datasets, drag a field onto a slot). |
+| `ui/js/dashboard/studio.js` | Dashboard Studio page: widget bar (placeholders, Custom Widget, project + global widgets), containers on the 24px grid (move / resize / z), right-click Edit Widget / Delete, `dashboard.json` v4. |
+| `ui/js/dashboard/widget-editor.js` (+ `ui/html/widget-code.html`) | `WidgetEditor`: live preview, slots, Data / Settings windows, code window (tabs, via `window.WidgetCode`), Save (Project / Global / both; greyed while a SAMPLE_ dataset is attached). |
+| `ui/css/dashboard-studio.css` | Dashboard Studio + Widget Editor look. |
+| `ui/js/grid/data-grid.js` (+ `data-grid.css`, `grid-remote.js`) | `DNGrid`: the Data Grid (core app code; not on dashboards for now). |
 | `ui/js/grid/data-table.js` (+ `ui/html/table-pop.html`) | `DataTable`: Import / Transform preview tables (schema-table look; Search, Pop-out, Export). |
-| `ui/js/d3studio/studio.js`, `d3-api.js`, `d3-assist.js`, `observable.js` | D3 Studio: editor, inputs, data from a CLEAN_ dataset via the engine, live code file, Save / Publish; D3 API list, suggestions / checks, Observable import. |
-| `ui/html/chart-builder.html`, `ui/js/chartbuilder/builder.js`, `templates.js` | Chart Builder: the simple chart maker (chart types, drag fields onto slots, colours, settings, optional code drawer). Saves the same chart packages as D3 Studio, plus chart.json `builder`. |
-| `ui/js/vendor/apexcharts.min.js`, `apextree.min.js`, `d3.min.js` (v7.9.0) | Vendored libraries (offline; no CDN at runtime). |
-
+| `ui/js/vendor/d3.v7.min.js` (v7.9.0) | The only rendering library (offline; no CDN at runtime). |
 ### Pages (`ui/html/`)
 
 | Path | Purpose |
 |---|---|
 | `project_manager.html` | App entry point (hard-coded `$entryPage` in server.ps1); red Server Control button → `/api/panel`. |
-| `import.html`, `transform.html`, `dashboard.html` (Dashboard Builder: places published charts; Chart Builder's look), `d3-studio.html`, `publish.html` | Modules. |
-| `dashboard-grid.html`, `grid-pop.html` | Dashboard Builder pop-outs: Data Grid drill-down, any grid's Pop-out. |
+| `import.html`, `transform.html`, `dashboard-studio.html` (Dashboard Studio), `publish.html` | Modules. |
 | `syntax-library.html` | SQL syntax / function reference (Transform's Syntax Library button). |
 | `benchmark.html` | Benchmark (Project Manager > Utilities): engine speed by rows, rows per batch and workers. |
 | `app.html` | Redirect only (old shell links → the module page). |

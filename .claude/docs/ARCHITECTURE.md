@@ -149,6 +149,7 @@ EngineApi (HTTP, own thread) ─► DataEngine ─► Parser (SQL) ─► Planne
 | `POST preview` | `{ sql, views, limit }` → query result + `count` (script statements run once; rows and count in parallel) |
 | `POST open` | `{ src, table }` → `{ kind, tables, columns, rows, size, modified }` |
 | `POST write` | `{ sql, views, dest, meta, codec }` → job → dataset manifest |
+| `POST write-tables` | `{ sql, views, dir, prefix, meta, codec }` → job → `{ datasets: [{ table, name, manifest }] }` (every CREATE TABLE, not TEMP, of the script) |
 | `POST export` | `{ sql, views, to, format: csv\|parquet\|sqlite, table }` → job → `{ path, rows, bytes }` |
 | `POST pipeline` | `{ datasets: {name: path}, nodes: [{ id, name, sql, output, dest }], changed, version }` → job |
 | `GET job?id=` / `POST job/cancel?id=` / `GET jobs` | job state, stage, progress, rows, result or error `{ code, message }` |
@@ -194,7 +195,7 @@ data/raw/ or X:\… / \\server\share\…   (read in place)
    │  Import: Engine.write({ sql: SELECT <columns> FROM read_csv/read_sqlite/read_dataset(...) })
    └─ Import           column choices applied → data/imported/<name>/  (always; input for Pipeline)
 data/imported ──Transform (active SQL query / script)──→ data/source/CLEAN_<name>/
-data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLite)
+data/source ──Dashboard Studio / Publish (export: Parquet / CSV / SQLite)
 ```
 
 ## 7. App modules (`ui/html/*.html`)
@@ -206,14 +207,8 @@ data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLit
   every page: logo initials, Data Noodler, module · project, Web Server (PowerShell) status (`/api/status`, 5 s), Data Engine (C#) status (test query); `ONLINE`/`OFFLINE` only.
 - **Import:** `Engine.open` (kind, tables, columns) → preview/count/type checks via `Engine.query` → `Engine.write` (job with
   progress) → checks columns/order/row count from the manifest → dataset record `{ path: folder, parts, version, … }`.
-- **Transform** (`ui/html/transform.html`, module id `pipeline`): a list of named SQL queries (each one SELECT or a script) in
-  `SqlEditor`; one is **active**. Preview Output / Preview Source = `Engine.preview` (top 100 + count). Build Output Dataset =
-  `PipelineRunner.run`: `Engine.write` of the active query → `data/source/<CLEAN_name>/` (Arrow parts, atomic). Saved in
-  `pipeline/pipeline.json` `{ version: 2, queries: [{ id, name, sql }], active, output }`; run history in `pipeline/runs.json`.
-  (`Engine.pipeline` / `RunPipeline`, the old step DAG, is no longer used by the app.)
-- **Dashboard:** each widget = a chart package + declarative query (`ApexWidget.query`); before its first query a dataset is
-  loaded into engine memory (`Engine.memory.load`, waits); result cache key = query + dataset version, so a new dataset
-  version makes cached results stale.
+- **Transform** (`ui/html/transform.html`, module id `pipeline`): a list of named SQL queries (scripts) in `SqlEditor`, each with a tick. Every `CREATE TABLE name AS query` in a query (not `CREATE TEMP TABLE`: helpers) is saved as `data/source/CLEAN_<NAME>/` (prefix added, never doubled; a table may reuse an input dataset's name). New queries start as `CREATE TABLE XXX AS SELECT * FROM XXX` (XXX marked red; select it, Shift+click a dataset). Input datasets expand into their fields grouped by type. **Run Selected** (and Update) = `PipelineRunner.run`: per ticked query, in order, `Engine.writeTables` (`POST write-tables`, `DataEngine.WriteTables`: the script runs once, each output table is written as its own Arrow dataset). Saved in `pipeline/pipeline.json` `{ version: 4, queries: [{ id, name, sql, run }] }` (older versions converted on load); run history in `pipeline/runs.json`.
+- **Dashboard Studio:** widget containers on a 24px grid; each linked widget runs one declarative query (`Widgets.load`) after loading its dataset into engine memory (`Engine.memory.load`). See 7b.
 - **Publish:** self-contained HTML (results embedded); dataset export to CSV / Parquet (single file) / SQLite via `Engine.exportTo`.
 - **Update:** compares source size/modified, re-imports changed sources, then re-runs **only** the pipeline outputs downstream of them.
 - **Archives:** folder copies (datasets are folders).
@@ -224,15 +219,13 @@ data/source ──Dashboard / D3 Studio / Publish (export: Parquet / CSV / SQLit
 **Light/dark mode:** one global setting, `settings.json` `theme`, chosen in the server panel; pages follow via `ui/js/core/theme.js`.
 Project layout: `workspace/projects/<folder>/` with `data/raw`, `data/imported`, `data/source`, `pipeline/`, `dashboard/`, `publish/`, `archives/`.
 
-## 7b. Chart packages (no widgets)
+## 7b. Widgets (Dashboard Studio)
 
-- No widgets for now (no `widget-studio/`, no `widgets/` folder). Charts are built in D3 Studio: `workspace/chart-builder/dev/<id>/` (Save) and `workspace/chart-builder/published/<id>/` (Publish copies dev to published). The Dashboard Builder reads ONLY `workspace/chart-builder/published` (Dashboard > Charts; registry id `chart-<id>`).
-- One package = `chart.json` manifest (+ `spec.json` = `{ $kind: 'd3', data: inputs, query: { sort, top } }`, `d3-code.js`, `sample.json`, `thumb.svg`, `style.css`). `ChartRegistry.list` = the live charts (`m.chart`) + the built-in Data Grid; `ChartRegistry.scan(<folder>)` lists any folder (D3 Studio uses it for dev).
-- The Data Grid is core app code, not a package folder: `ui/js/grid/data-grid-pkg.js` (`DataGrid.pkg()`: manifest + spec + style), renderer `ui/js/grid/data-grid.js` (`DNGrid`), style `ui/js/grid/data-grid.css` (`.GRID`), `grid-remote.js` (engine paging). Import / Transform previews use `ui/js/grid/data-table.js` (`DataTable`, schema-table look; pop-out `ui/html/table-pop.html`). Grids already on a dashboard keep drawing; new ones are not added from the Dashboard.
-- `style.css` (manifest `"style"`) is the chart's ONLY style, the same wherever it is drawn. `ApexWidget.useStyle(m, box)` puts it in the page with `.CHART` (or `.GRID`) -> `.dn-w-<id>` and tags the box; `--w-*` variables reach the code as `theme` (`ApexWidget.theme(box)`).
-- The manifest drives the chart settings panel (`ChartPanel`, `ui/js/charts/chart-panel.js`, look in `ui/css/chart-studio.css`), the same in Chart Builder and the Dashboard Builder (Right-click > Chart Settings): options added to a chart later appear at their defaults on every dashboard: `inputs` (each linked to `TABLE.FIELD`; dimension = group by, measure = aggregate) and `options` (`opts.<path>`; `show` hides one).
-- Dashboard item `{ type: "widget" (stored name, kept for old files), pkg, dataset, inputs: { key: { col, agg } }, opts: { path: value }, sort, top }`. The engine runs `ApexWidget.query`; rows are re-keyed by input key and handed to `D3Render` (`ui/js/charts/d3-render.js`, vendored d3 v7.9.0: `d3, data, el, W, H, colors, opts, theme, inputs` + capital accessors). Not linked yet: drawn with no data (axes / grid).
-- **Axes + plug and play** (`ApexWidget.axisOf` / `labelOf` / `autoBind`): every input is named by its axis (X = bottom, left to right; Y = vertical value; Series = colour; manifest `horizontal` flips X/Y names; D3 Studio sets `input.axis` and detects `const y = d3.scaleBand`). Picking a dataset (or adding a widget when the project has one dataset) connects the inputs at once: same name, else X = text (date if the input looks like one), Y = first non-id number, Series only by name, Fields = all columns.
-- Dashboard **Add widget** = popup listing packages by `category` (collapsible, open state in localStorage), 8 tiles per row (100 x 80 `thumb` or placeholder + name). Toolbar: Add widget, Options (Size Window, Refresh All), D3 Studio (`Windows.open('d3studio')`).
-- Publish draws each widget (Apex) to SVG in the browser and embeds the static SVGs at their grid positions: the published page has no JavaScript.
-
+- One studio: **Dashboard Studio** (`ui/html/dashboard-studio.html`, module id `dashboard`). Top bar: category placeholders (greyed), **Custom Widget** (adds an empty container), this project's widgets, then the global library (picking one copies it into the project). Right-click a container: Edit Widget, Delete.
+- **Package** = `d3-code.js` + `d3-style.css` + `d3-settings.json` (`ui/js/widgets/widgets.js` has the details). The code is an ES module imported from its text (Blob URL): `export default function (data, { width, height, settings, inputs })` returns an element; `Widgets.draw` puts it in the container with `replaceChildren`. Only the official D3 7.9.0 (`ui/js/vendor/d3.v7.min.js`, global `d3`); no Apex.
+- **Style:** `.WIDGET` in `d3-style.css` = the container; `Widgets.useStyle` rewrites it to `.dn-widget-<id>` and tags the container. Frame colours use the app theme variables (light / dark); data colours come from settings.
+- **Settings:** `d3-settings.json` `settings` = the Settings window rows (types color, number, boolean, pick, select, format, text; `group` = section, `sub` = sub group); `values` = what was set. The code gets defaults + values as nested objects (`colors.0` → `settings.colors[0]`).
+- **Storage:** global `workspace/dashboard-studio/widgets/<id>/`, project `<project>/dashboard/widgets/<id>/` (the dashboard reads only the project copy). Widget Editor Save asks Project / Global / both.
+- **Data:** inputs (`d3-settings.json` `inputs`: dimension = group by, measure = aggregate, agg `none` = raw rows) are linked to columns by dragging fields from the Data window onto slots. Rows come from one declarative engine query (`Widgets.query`, `Query/QuerySpec.cs`), keyed by input key, dates as Date objects. The editor lists the project's `CLEAN_` datasets and `SAMPLE_*` (`workspace/sample-data/`, Arrow files or dataset folders); SAMPLE_ is preview only (Save greyed).
+- **Dashboard:** `<project>/dashboard/dashboard.json` = `{ version: 4, widgets: [{ id, widget, x, y, w, h, z, dataset, inputs: { <key>: { col, agg } } }] }` (grid cells; `widget` null = empty Custom Widget). Older (v3) dashboards start empty.
+- **Publish** draws each widget off screen with its own code and embeds the static markup plus its scoped `d3-style.css`: the published page has no JavaScript.

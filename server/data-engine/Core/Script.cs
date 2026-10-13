@@ -30,7 +30,7 @@ namespace NativeDataEngine
     }
     public sealed class CreateTableS : Stmt
     {
-        public string Name; public bool IfNotExists, OrReplace; public List<ColDef> Cols = new List<ColDef>();
+        public string Name; public bool IfNotExists, OrReplace, Temp; public List<ColDef> Cols = new List<ColDef>();
         public List<string> Pk = new List<string>(); public List<List<string>> Uniques = new List<List<string>>(); public List<string> Checks = new List<string>();
         public string AsQuery;
         public override string Kind { get { return "CREATE TABLE"; } }
@@ -230,10 +230,10 @@ namespace NativeDataEngine
             p++;
             bool orReplace = false;
             if (Accept("OR")) { if (!Accept("REPLACE")) Expect("ALTER"); orReplace = true; }
-            if (!Accept("TEMPORARY")) Accept("TEMP");
+            bool temp = Accept("TEMPORARY") || Accept("TEMP");
             bool unique = Accept("UNIQUE"), clustered = Accept("CLUSTERED");
             if (!clustered) Accept("NONCLUSTERED");
-            if (Accept("TABLE")) return CreateTableP(orReplace);
+            if (Accept("TABLE")) { CreateTableS ct = CreateTableP(orReplace); ct.Temp = temp; return ct; }
             if (Accept("VIEW"))
             {
                 CreateViewS v = new CreateViewS(); v.OrReplace = orReplace; v.IfNotExists = IfNotExists(); v.Name = TableName();
@@ -556,6 +556,7 @@ namespace NativeDataEngine
             internal readonly List<MemoryLease> Leases = new List<MemoryLease>();
             internal readonly HashSet<string> Dropped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // datasets dropped by the script
             internal string Sql, LastTable;
+            internal readonly List<string> Outputs = new List<string>();   // CREATE TABLE (not TEMP) names, in order: saved by WriteTables
             internal Snapshot Tx; internal int TxDepth;
             internal EngineException CatchErr;
             internal Catalog Cat;
@@ -903,7 +904,10 @@ namespace NativeDataEngine
         // ---------- statements ----------
         void CreateTable(ScriptSession s, CreateTableS c, CancellationToken ct)
         {
-            if (Exists(s, c.Name))
+            // A table named like a dataset shadows it for the rest of the script (its AS query still reads the dataset):
+            // Transform writes CREATE TABLE CUSTOMERS AS SELECT ... FROM CUSTOMERS and saves CLEAN_CUSTOMERS.
+            // A table defined by columns still may not take a dataset's name.
+            if (s.Tables.ContainsKey(c.Name) || s.Views.ContainsKey(c.Name) || (c.AsQuery == null && Exists(s, c.Name)))
             {
                 if (c.IfNotExists) return;
                 if (!c.OrReplace) throw new EngineException("TABLE_EXISTS", "Table \"" + c.Name + "\" already exists.");
@@ -933,6 +937,8 @@ namespace NativeDataEngine
                 if (t.AutoCol != null && t.Pk.Count == 0) t.Pk = new List<string> { t.AutoCol };
             }
             s.Tables[c.Name] = t; s.Dropped.Remove(c.Name); s.LastTable = c.Name;
+            s.Outputs.RemoveAll(n => string.Equals(n, c.Name, StringComparison.OrdinalIgnoreCase));
+            if (!c.Temp) s.Outputs.Add(c.Name);
         }
         void CreateView(ScriptSession s, CreateViewS v)
         {

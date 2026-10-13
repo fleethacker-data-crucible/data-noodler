@@ -95,7 +95,6 @@
       <span class="dd-wrap"><button id="utils" class="ghost" title="Global tools (hold Shift for descriptions)">Utilities ▾</button>
         <div class="dd-menu right" id="utilmenu">
           <div data-act="benchmark">Benchmark<small>Engine speed tests: imports, exports, reads / writes in every format and heavy queries, by data size, rows per batch and number of workers. Results stay on the page; Save Report writes a Markdown report.</small></div>
-          <div data-act="chartbuilder">Chart Builder<small>Make a chart the simple way: pick a chart type, drag fields onto it, set colours. The code is there when you want it. Saves the same charts as D3 Studio.</small></div>
         </div></span>
     </div>
     <div class="table-wrap">
@@ -168,7 +167,7 @@ const shortNames = l => (l || []).map(n => esc(shortName(n))).join('; ') || '-';
 function detail(p) {
   return `<tr class="detail"><td colspan="${COLS}">
     <div class="desc">${p.description ? esc(p.description) : '<span class="muted">No description.</span>'}</div>
-    <div class="meta"><span>Developers: ${shortNames(p.developers)}</span><span>Updaters: ${shortNames(p.updaters)}</span><span>Tags: ${(p.tags || []).map(esc).join(', ') || '-'}</span><span>Last Updated: ${lastUpdated(p)}</span><span>Datasets: ${(p.datasets || []).map(d => `${esc(d.name)} (${UI.rows(d.rows)} rows)`).join(', ') || '-'}</span></div>
+    <div class="meta"><span>Developers: ${shortNames(p.developers)}</span><span>Updaters: ${shortNames(p.updaters)}</span><span>Tags: ${(p.tags || []).map(esc).join(', ') || '-'}</span><span>Last Updated: ${lastUpdated(p)}</span><span>Datasets: ${(p.datasets || []).length}</span></div>
     <div class="wf" id="wf">${workflow(p)}</div>
     <div class="actions"><button class="ghost" data-act="edit">Edit details</button><button class="ghost" data-act="archives"${p.broken ? ' disabled' : ''} title="Project snapshots (zipped): take, restore, delete">Archives</button><button class="danger" data-act="delete">Delete</button></div>
     <div class="log" id="plog"></div>
@@ -250,14 +249,14 @@ function stepInfo(p, id, f) {
       + list('Imported datasets', imported.map(d => `${esc(d.name)} <small>${UI.rows(d.rows)} rows · ${d.imported ? UI.date(d.imported) : '-'}</small>`)) + err(updErr);
   } else if (id === 'transform') {
     title = 'Transform'; run = m.pipeline;
-    const q = f.pipe?.queries || [], last = f.runs[f.runs.length - 1];
-    body = list('Queries', q.map(x => `${esc(x.name || '(unnamed)')}${x.id === f.pipe.active ? ' <small>(active, builds ' + esc(f.pipe.output || '-') + ')</small>' : ''}`))
+    const q = f.pipe ? PipelineRunner.migrate(f.pipe).queries : [], last = f.runs[f.runs.length - 1];
+    body = list('Queries', q.map(x => `${esc(x.name || '(unnamed)')}${x.run ? ' <small>(runs on Update, saves ' + esc(PipelineRunner.tables(x.sql).map(t => t.name).join(', ') || '-') + ')</small>' : ''}`))
       + list('Clean Datasets', clean.map(d => `${esc(d.name)} <small>${UI.rows(d.rows)} rows · last built ${d.imported ? UI.date(d.imported) : '-'}</small>`))
       + err(updErr || (last && !last.ok ? last.error : ''));
   } else if (id === 'dashboard') {
     title = 'Dashboard'; run = m.dashboard;
     const w = f.dash?.widgets || [];
-    body = list('Dashboard widgets', w.map(x => `${esc(x.title || x.pkg || 'Widget')}${x.dataset ? ` <small>(${esc(x.dataset)})</small>` : ''}`))
+    body = list('Dashboard widgets', w.map(x => `${esc(x.widget || 'Custom Widget')}${x.dataset ? ` <small>(${esc(x.dataset)})</small>` : ''}`))
       + list('Published dashboards', Object.entries(f.man).sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, 12).map(([n, v]) => `${esc(n)} <small>${v.at ? UI.date(v.at) : ''}${v.by ? ' by ' + esc(v.by) : ''}</small>`))
       + list('Dataset exports', f.exports.slice(0, 12).map(n => esc(n))) + err(updErr);
   } else if (id === 'publish') {
@@ -401,7 +400,7 @@ const srv = op => fetch(`/api/${op}`, { method: 'POST', keepalive: true, headers
 srv('hello'); addEventListener('pagehide', () => srv('bye'));
 // Utilities: global tools (no project).
 Menus.sort($('utilmenu'));
-Menus.bind($('utils'), $('utilmenu'), act => { if (act === 'chartbuilder' || act === 'benchmark') Windows.open(act); });
+Menus.bind($('utils'), $('utilmenu'), act => { if (act === 'benchmark') Windows.open(act); });
 $('srvctl').onclick = () => fetch('/api/panel', { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});
 $('new').onclick = UI.guard(async () => {
   await UserPicker.load();

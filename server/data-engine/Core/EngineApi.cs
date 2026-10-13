@@ -135,6 +135,15 @@ namespace NativeDataEngine
                         Job j = e.StartWrite(sql, v, dest, meta, codec, workers);
                         return Json.Write(j.ToJson());
                     }
+                case "write-tables":
+                    {
+                        string sql = Need(req, "sql"), dir = Need(req, "dir"), prefix = Json.Str(req, "prefix") ?? "";
+                        Dictionary<string, string> v = Views(req);
+                        Dictionary<string, object> meta = Json.Obj(req, "meta");
+                        int codec = Codec.Parse(Json.Str(req, "codec")), workers = (int)Json.Long(req, "workers", 0);
+                        Job j = e.Jobs.Start("write-tables", dir, jb => e.WriteTables(jb, sql, v, dir, prefix, meta, codec, workers));
+                        return Json.Write(j.ToJson());
+                    }
                 case "export":
                     {
                         string sql = Need(req, "sql"), to = Need(req, "to"), fmt = Json.Str(req, "format"), table = Json.Str(req, "table");

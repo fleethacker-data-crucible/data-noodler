@@ -3,7 +3,7 @@
 // pipeline/runner.js, publish/publisher.js (Publisher loads the chart libraries itself).
 //   Import     each imported dataset whose source file changed (or has no size / date recorded) is read again with the
 //              same column choices as its first import (dataset.source.select); unchanged sources are left as they are
-//   Transform  the active transform query rebuilds its output dataset (when the project has one)
+//   Transform  every ticked transform query rebuilds its output dataset (when the project has one)
 //   Dashboard  widget caches are cleared, so the dashboard shows the new data the next time it opens
 //   Publish    the dashboard formats ticked in Publish (cfg.publish.targets) and the last dataset export (cfg.publish.data)
 //   Archive    a zipped snapshot of the project (settings, datasets, transform, dashboard) in archives/ (Projects.snapshot)
@@ -84,7 +84,7 @@ const ProjectUpdate = (() => {
       async transform() {
         if (!(await Projects.sourceDatasets(folder, ctx.cfg)).length) return 'skip:No CLEAN_ datasets';
         const pipe = await PipelineRunner.load(ctx);
-        if (!PipelineRunner.active(pipe)) return 'skip:No active transform query';
+        if (!PipelineRunner.selected(pipe).length) return 'skip:No ticked transform query';
         const rec = await PipelineRunner.run(ctx, pipe, (m, l) => ctx.log(m, l));
         if (!rec.ok) throw new Error(rec.error);
         return rec.outputs.map(o => `${o.name}: ${UI.num(o.rows)} rows`).join(', ');

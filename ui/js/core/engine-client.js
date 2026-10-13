@@ -8,6 +8,7 @@
 //                                                           script (statements ending in a SELECT), rows and count in parallel
 //   await Engine.open(src, table)                        -> { kind, tables, columns, rows, size, modified }  (project path or X:\... / \\server\...)
 //   await Engine.write({ sql, views, dest, meta }, onProgress)    -> dataset manifest { path, files, rowCount, bytes, columns, version, ... }
+//   await Engine.writeTables({ sql, views, dir, prefix, meta }, onProgress) -> { datasets: [{ table, name, manifest }] }: every CREATE TABLE (not TEMP) of the script
 //   await Engine.exportTo({ sql, views, to, format, table }, onProgress) -> { path, rows, bytes, format }
 //   await Engine.pipeline(spec, onProgress)              -> { outputs, skipped, order, ms }
 //   await Engine.memory.load(paths)  / preload(paths)    project datasets into engine memory (load waits, preload does not)
@@ -65,6 +66,7 @@ const Engine = (() => {
     }
   }
   const write = (o, onProgress) => job('write', o, onProgress);
+  const writeTables = (o, onProgress) => job('write-tables', o, onProgress);
   const exportTo = (o, onProgress) => job('export', o, onProgress);
   const pipeline = (spec, onProgress) => job('pipeline', spec, onProgress);
   const cancel = id => call('job/cancel?id=' + encodeURIComponent(id), {});
@@ -81,5 +83,5 @@ const Engine = (() => {
   // Columns of a written dataset manifest, in the { name, type } form dataset records use.
   const columnsOf = m => (m.columns || []).map(c => ({ name: c.name, type: c.type }));
 
-  return { kind, q, lit, src, dataset, views, query, describe, count, preview, check, open, job, write, exportTo, pipeline, cancel, status, cache, memory, columnsOf, call };
+  return { kind, q, lit, src, dataset, views, query, describe, count, preview, check, open, job, write, writeTables, exportTo, pipeline, cancel, status, cache, memory, columnsOf, call };
 })();

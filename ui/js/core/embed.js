@@ -5,8 +5,8 @@
 // Global: GlobalHeader.setInfo(title, project)   (ModulePage calls it once the project is loaded)
 (() => {
   const id = location.pathname.split('/').pop().replace(/\.html$/, '');
-  const MODS = { project_manager: ['Project Management Module', 'PR'], import: ['Import', 'IM'], pipeline: ['Transform', 'PL'], dashboard: ['Dashboard', 'DA'],
-    publish: ['Publish', 'PU'], update: ['Update', 'UP'], 'd3-studio': ['D3 Studio', 'D3'], 'chart-builder': ['Chart Builder', 'CB'] };
+  const MODS = { project_manager: ['Project Management Module', 'PR'], import: ['Import', 'IM'], pipeline: ['Transform', 'PL'], 'dashboard-studio': ['Dashboard Studio', 'DS'],
+    publish: ['Publish', 'PU'], update: ['Update', 'UP'] };
   const [label, initials] = MODS[id] || [document.title || id, id.slice(0, 2).toUpperCase()];
   document.documentElement.classList.add('embedded');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -17,8 +17,6 @@
         document.title = 'Import'; return;
       }
       const el = document.getElementById('gh-sub'); if (el) el.textContent = project ? `${title} · ${project}` : title;
-      if (id === 'd3-studio') { document.title = 'D3 Studio'; return; }
-      if (id === 'chart-builder') { document.title = 'Chart Builder'; return; }
       document.title = project ? `${title} · ${project}` : id === 'project_manager' ? 'Project Manager' : `${title} · Data Noodler`;
     },
   };
