@@ -27,9 +27,8 @@ Data_Noodler_*.gz
 # Installed version marker (Data_Noodler_Install.ps1)
 version.txt
 
-# Dashboard Studio: SAMPLE_ datasets are data (never committed)
-workspace/sample-data/*
-!workspace/sample-data/.gitkeep
+# Dashboard Studio: SAMPLE_ datasets ARE committed (overrides the data-file rules above)
+!workspace/sample-data/**
 
 # Claude test scripts (local only)
 .claude/tests/

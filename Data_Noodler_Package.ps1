@@ -1,7 +1,6 @@
 # Data_Noodler_Package.ps1 - packages the app folder (the folder this script is in) into Data_Noodler_YY_MMDD_HHMM.gz
 # next to it: one text file inside (Data_Noodler_YY_MMDD_HHMM.txt) with the folder list and every file as Base64.
-# Skips everything .gitignore ignores (and old packages and the installer), except the SAMPLE_ datasets
-# in workspace/sample-data, which are always packaged. Install with Data_Noodler_Install.ps1.
+# Skips everything .gitignore ignores (and old packages and the installer). Install with Data_Noodler_Install.ps1.
 # Right-click > Run with PowerShell (or: powershell -ExecutionPolicy Bypass -File Data_Noodler_Package.ps1).
 $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot.TrimEnd('\')
@@ -41,8 +40,6 @@ function Add-Rule([string]$line) {
 $gi = Join-Path $Root '.gitignore'
 if (Test-Path -LiteralPath $gi) { foreach ($l in [IO.File]::ReadAllLines($gi)) { Add-Rule $l } }
 function Test-Ignored([string]$rel, [bool]$isDir) {
-    # the SAMPLE_ datasets (.arrow / .csv + dataset.json) are always packaged, even though git skips them
-    if ($rel -eq 'workspace/sample-data' -or $rel.StartsWith('workspace/sample-data/', [StringComparison]::OrdinalIgnoreCase)) { return $false }
     $ign = $false
     foreach ($r in $Rules) { if ($r.DirOnly -and -not $isDir) { continue }; if ($r.Rx.IsMatch($rel)) { $ign = -not $r.Neg } }
     return $ign
