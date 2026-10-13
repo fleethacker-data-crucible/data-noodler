@@ -53,7 +53,8 @@ namespace NativeDataEngine
                     if (c.IsNull(i) || c.Type.Kind == Kind.Null) h = 7;
                     else if (c.I != null) h = (ulong)c.I[i];
                     else if (c.F != null) { double d = c.F[i]; h = (ulong)BitConverter.DoubleToInt64Bits(d == 0 ? 0.0 : d); }
-                    else if (c.S != null) h = (ulong)(uint)StringComparer.Ordinal.GetHashCode(c.S[i]);
+                    else if (c.IsLazyText) h = (ulong)(uint)Utf8Ops.CharHash(c.Utf8, c.Offs[i], c.Offs[i + 1] - c.Offs[i]);   // same hash as the string's
+                    else if (c.S != null) h = (ulong)(uint)Utf8Ops.CharHash(c.S[i]);
                     else h = c.B != null && c.B[i] ? 3UL : 5UL;
                     x = (x ^ h) * 1099511628211UL;
                     x ^= x >> 29;
@@ -91,7 +92,7 @@ namespace NativeDataEngine
             catch { foreach (SpillFile f in files) f.Dispose(); throw; }
         }
 
-        public static bool IsPlaceholder(Column c) { return c.Type.Kind != Kind.Null && c.I == null && c.F == null && c.B == null && c.S == null; }
+        public static bool IsPlaceholder(Column c) { return c.Type.Kind != Kind.Null && c.I == null && c.F == null && c.B == null && !c.IsLazyText && !c.IsPacked && c.S == null; }
     }
 
     // A query's spill folder; deleted at the end of the query (or by Dispose).
@@ -131,7 +132,7 @@ namespace NativeDataEngine
 
         void WriteCol(Column c, int n)
         {
-            byte kind = c.I != null ? (byte)1 : c.F != null ? (byte)2 : c.B != null ? (byte)4 : c.S != null ? (byte)3 : (byte)0;
+            byte kind = c.I != null ? (byte)1 : c.F != null ? (byte)2 : c.B != null ? (byte)4 : c.IsLazyText ? (byte)5 : c.S != null ? (byte)3 : (byte)0;
             w.Write(kind);
             w.Write(c.Type.Name);
             w.Write(c.Nulls != null);
@@ -141,6 +142,13 @@ namespace NativeDataEngine
                 case 1: { byte[] a = new byte[8L * n]; Buffer.BlockCopy(c.I, 0, a, 0, a.Length); w.Write(a); break; }
                 case 2: { byte[] a = new byte[8L * n]; Buffer.BlockCopy(c.F, 0, a, 0, a.Length); w.Write(a); break; }
                 case 4: { byte[] a = new byte[n]; for (int i = 0; i < n; i++) a[i] = c.B[i] ? (byte)1 : (byte)0; w.Write(a); break; }
+                case 5:   // text as bytes: offsets + the bytes, as they are
+                    {
+                        int a0 = c.Offs[0];
+                        byte[] o = new byte[4L * (n + 1)]; for (int i = 0; i <= n; i++) { int v = c.Offs[i] - a0; o[4 * i] = (byte)v; o[4 * i + 1] = (byte)(v >> 8); o[4 * i + 2] = (byte)(v >> 16); o[4 * i + 3] = (byte)(v >> 24); }
+                        w.Write(o); w.Write(c.Unique); w.Write(c.Utf8, a0, c.Offs[n] - a0);
+                        break;
+                    }
                 case 3:
                     {
                         string[] s = c.S;
@@ -178,6 +186,12 @@ namespace NativeDataEngine
                 case 1: { byte[] a = br.ReadBytes(8 * n); c.I = new long[n]; Buffer.BlockCopy(a, 0, c.I, 0, a.Length); break; }
                 case 2: { byte[] a = br.ReadBytes(8 * n); c.F = new double[n]; Buffer.BlockCopy(a, 0, c.F, 0, a.Length); break; }
                 case 4: { byte[] a = br.ReadBytes(n); c.B = new bool[n]; for (int i = 0; i < n; i++) c.B[i] = a[i] != 0; break; }
+                case 5:
+                    {
+                        int[] o = new int[n + 1]; Buffer.BlockCopy(br.ReadBytes(4 * (n + 1)), 0, o, 0, 4 * (n + 1));
+                        bool unique = br.ReadBoolean(); byte[] u = br.ReadBytes(o[n]);
+                        Column t = Column.Utf8Text(c.Type, n, c.Nulls, u, o); t.Unique = unique; return t;
+                    }
                 case 3: { string[] s = new string[n]; for (int i = 0; i < n; i++) if (br.ReadBoolean()) s[i] = br.ReadString(); c.S = s; break; }
             }
             if (c.Type.Kind == Kind.Null && c.Nulls == null) { c.Nulls = new bool[n]; for (int i = 0; i < n; i++) c.Nulls[i] = true; }

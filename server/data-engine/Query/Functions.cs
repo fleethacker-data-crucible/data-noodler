@@ -213,7 +213,12 @@ namespace NativeDataEngine
                     {
                         Need(fn, a, 1, 1); List<BExpr> xa = As(a, DataType.Varchar);
                         bool bytes = fn == "strlen";
-                        return F(fn, DataType.BigInt, xa, (c, n) => Map(c, n, DataType.BigInt, (i, o) => { o.I[i] = bytes ? Encoding.UTF8.GetByteCount(c[0].S[i]) : c[0].S[i].Length; return true; }));
+                        return F(fn, DataType.BigInt, xa, (c, n) => Map(c, n, DataType.BigInt, (i, o) =>
+                        {
+                            Column x = c[0];
+                            if (x.IsLazyText) { int s0 = x.Offs[i], len = x.Offs[i + 1] - s0; o.I[i] = bytes ? len : Utf8Ops.Utf16Length(x.Utf8, s0, len); return true; }   // counted on the bytes
+                            o.I[i] = bytes ? Encoding.UTF8.GetByteCount(x.S[i]) : x.S[i].Length; return true;
+                        }));
                     }
                 case "substr": case "substring":
                     {

@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 namespace NativeDataEngine
 {
@@ -30,7 +31,7 @@ namespace NativeDataEngine
     public sealed class KeyIndex
     {
         readonly DataType[] types; readonly ColumnBuilder[] keys;
-        Dictionary<long, int> lmap; Dictionary<string, int> smap; Dictionary<RowKey, int> gmap; int nullGroup = -1;
+        Dictionary<long, int> lmap; TextKeys smap; List<int> sgroup; Dictionary<RowKey, int> gmap; int nullGroup = -1;   // smap: text keys as bytes (TextKeys.cs)
         int count;
         public int Count { get { return count; } }
         public KeyIndex(DataType[] types)
@@ -38,23 +39,23 @@ namespace NativeDataEngine
             this.types = types; keys = new ColumnBuilder[types.Length];
             for (int k = 0; k < types.Length; k++) keys[k] = new ColumnBuilder(types[k], 16);
             if (types.Length == 1 && types[0].UsesI) lmap = new Dictionary<long, int>();
-            else if (types.Length == 1 && types[0].Kind == Kind.String) smap = new Dictionary<string, int>(StringComparer.Ordinal);
+            else if (types.Length == 1 && types[0].Kind == Kind.String) { smap = new TextKeys(); sgroup = new List<int>(); }
             else if (types.Length >= 2 && types.Length <= 6)
             {
                 // Several key columns: each value gets a small per-column code; the codes pack into one long.
                 bits = 62 / types.Length; maxCode = (1L << bits) - 1;
                 cmap = new Dictionary<long, int>();
-                colL = new Dictionary<long, int>[types.Length]; colS = new Dictionary<string, int>[types.Length]; colD = new Dictionary<double, int>[types.Length];
+                colL = new Dictionary<long, int>[types.Length]; colS = new TextKeys[types.Length]; colD = new Dictionary<double, int>[types.Length];
                 for (int k = 0; k < types.Length; k++)
                 {
                     if (types[k].UsesI || types[k].Kind == Kind.Bool) colL[k] = new Dictionary<long, int>();
                     else if (types[k].UsesF) colD[k] = new Dictionary<double, int>();
-                    else colS[k] = new Dictionary<string, int>(StringComparer.Ordinal);
+                    else colS[k] = new TextKeys();
                 }
             }
             else if (types.Length > 0) gmap = new Dictionary<RowKey, int>();
         }
-        Dictionary<long, int> cmap; Dictionary<long, int>[] colL; Dictionary<string, int>[] colS; Dictionary<double, int>[] colD; int bits; long maxCode;
+        Dictionary<long, int> cmap; Dictionary<long, int>[] colL; TextKeys[] colS; Dictionary<double, int>[] colD; int bits; long maxCode;
         // Code of one key value (0 = NULL), or -1 when the column has more distinct values than its bits allow.
         long Code(int k, Column c, int i)
         {
@@ -72,8 +73,7 @@ namespace NativeDataEngine
             }
             else
             {
-                string v = c.S != null ? c.S[i] : Values.Text(c, i);
-                if (!colS[k].TryGetValue(v, out code)) { code = colS[k].Count + 1; colS[k][v] = code; }
+                code = (c.IsLazyText || c.Type.Kind == Kind.String ? colS[k].Get(c, i) : colS[k].Get(Values.Text(c, i))) + 1;
             }
             return code > maxCode ? -1 : code;
         }
@@ -95,6 +95,7 @@ namespace NativeDataEngine
             if (c.IsNull(i) || c.Type.Kind == Kind.Null) return null;
             if (c.I != null) return c.I[i];
             if (c.F != null) { double d = c.F[i]; return d == 0 ? 0.0 : d; }   // -0 == 0
+            if (c.IsLazyText) return Encoding.UTF8.GetString(c.Utf8, c.Offs[i], c.Offs[i + 1] - c.Offs[i]);   // one value, not the column
             if (c.S != null) return c.S[i];
             return c.B[i];
         }
@@ -124,10 +125,10 @@ namespace NativeDataEngine
                 Column c = cols[0];
                 for (int i = 0; i < n; i++)
                 {
-                    if (c.IsNull(i) || c.S == null) { if (nullGroup < 0) nullGroup = New(cols, i); g[i] = nullGroup; continue; }
-                    int id; string v = c.S[i];
-                    if (!smap.TryGetValue(v, out id)) { id = New(cols, i); smap[v] = id; }
-                    g[i] = id;
+                    if (c.IsNull(i) || c.Type.Kind != Kind.String) { if (nullGroup < 0) nullGroup = New(cols, i); g[i] = nullGroup; continue; }
+                    bool added; int t = smap.Get(c, i, out added);
+                    if (added) sgroup.Add(New(cols, i));
+                    g[i] = sgroup[t];
                 }
                 return g;
             }
@@ -330,8 +331,29 @@ namespace NativeDataEngine
         {
             int max = 0; for (int i = 0; i < n; i++) if (g[i] > max) max = g[i]; Fit(max + 1);
             if (a.Type.Kind == Kind.Null) return;
+            if (a.IsLazyText && t.Kind == Kind.String) { Bytes(g, n, a, mask); return; }
             if (!(a.Type.UsesI == t.UsesI && a.Type.UsesF == t.UsesF)) a = Cast.To(a, t, true);
             for (int i = 0; i < n; i++) if (!Skip(a, mask, i)) Offer(g[i], a, i);
+        }
+        // Text as bytes: each group's best row of this batch is found on the bytes, and only those rows are decoded.
+        void Bytes(int[] g, int n, Column a, bool[] mask)
+        {
+            byte[] u = a.Utf8; int[] f = a.Offs;
+            System.Collections.Generic.Dictionary<int, int> win = new System.Collections.Generic.Dictionary<int, int>();
+            for (int i = 0; i < n; i++)
+            {
+                if (a.IsNull(i) || (mask != null && !mask[i])) continue;
+                int w;
+                if (!win.TryGetValue(g[i], out w)) { win[g[i]] = i; continue; }
+                int c = Utf8Ops.Compare(u, f[i], f[i + 1] - f[i], u, f[w], f[w + 1] - f[w]);
+                if (min ? c < 0 : c > 0) win[g[i]] = i;
+            }
+            Column one = new Column(t, win.Count); int k = 0;
+            foreach (System.Collections.Generic.KeyValuePair<int, int> p in win)
+            {
+                int i = p.Value; one.S[k] = Encoding.UTF8.GetString(u, f[i], f[i + 1] - f[i]);
+                Offer(p.Key, one, k); k++;
+            }
         }
         public override void Merge(AggState o, int[] map, int og)
         {
@@ -503,7 +525,7 @@ namespace NativeDataEngine
     sealed class DistinctState : AggState
     {
         readonly AggSpec s; HashSet<object>[] sets = new HashSet<object>[16];
-        HashSet<long>[] lsets = new HashSet<long>[16]; HashSet<string>[] ssets = new HashSet<string>[16];
+        HashSet<long>[] lsets = new HashSet<long>[16]; TextKeys[] ssets = new TextKeys[16];   // text: kept as bytes (TextKeys.cs)
         public DistinctState(AggSpec s) { this.s = s; }
         public override void Update(int[] g, int n, Column a, Column a2, bool[] mask)
         {
@@ -514,9 +536,9 @@ namespace NativeDataEngine
                 for (int i = 0; i < n; i++) { if (Skip(a, mask, i)) continue; HashSet<long> h = lsets[g[i]] ?? (lsets[g[i]] = new HashSet<long>()); h.Add(a.I[i]); }
                 return;
             }
-            if (a.S != null)
+            if (a.Type.Kind == Kind.String && (a.IsLazyText || a.S != null))
             {
-                for (int i = 0; i < n; i++) { if (Skip(a, mask, i)) continue; HashSet<string> h = ssets[g[i]] ?? (ssets[g[i]] = new HashSet<string>(StringComparer.Ordinal)); h.Add(a.S[i]); }
+                for (int i = 0; i < n; i++) { if (Skip(a, mask, i)) continue; TextKeys h = ssets[g[i]] ?? (ssets[g[i]] = new TextKeys()); h.Get(a, i); }
                 return;
             }
             for (int i = 0; i < n; i++)
@@ -530,7 +552,7 @@ namespace NativeDataEngine
         void Unify(int gI)
         {
             if (gI < lsets.Length && lsets[gI] != null) { HashSet<object> h = sets[gI] ?? (sets[gI] = new HashSet<object>()); foreach (long v in lsets[gI]) h.Add(v); lsets[gI] = null; }
-            if (gI < ssets.Length && ssets[gI] != null) { HashSet<object> h = sets[gI] ?? (sets[gI] = new HashSet<object>()); foreach (string v in ssets[gI]) h.Add(v); ssets[gI] = null; }
+            if (gI < ssets.Length && ssets[gI] != null) { HashSet<object> h = sets[gI] ?? (sets[gI] = new HashSet<object>()); TextKeys t = ssets[gI]; for (int k = 0; k < t.Count; k++) h.Add(t.Key(k)); ssets[gI] = null; }
         }
         public override void Merge(AggState o, int[] map, int og)
         {
@@ -539,7 +561,7 @@ namespace NativeDataEngine
             {
                 int m = map[k]; Fit(ref sets, m + 1); Fit(ref lsets, m + 1); Fit(ref ssets, m + 1);
                 if (k < x.lsets.Length && x.lsets[k] != null) { if (lsets[m] == null) lsets[m] = x.lsets[k]; else lsets[m].UnionWith(x.lsets[k]); }
-                if (k < x.ssets.Length && x.ssets[k] != null) { if (ssets[m] == null) ssets[m] = x.ssets[k]; else ssets[m].UnionWith(x.ssets[k]); }
+                if (k < x.ssets.Length && x.ssets[k] != null) { if (ssets[m] == null) ssets[m] = x.ssets[k]; else { TextKeys t = x.ssets[k]; for (int q = 0; q < t.Count; q++) ssets[m].Get(t.Bytes, t.Start(q), t.Length(q)); } }
             }
             for (int k = 0; k < og && k < x.sets.Length; k++)
             {

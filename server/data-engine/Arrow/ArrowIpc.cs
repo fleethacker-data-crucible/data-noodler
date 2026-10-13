@@ -532,17 +532,21 @@ namespace NativeDataEngine
                     }
                 default:   // Utf8 / LargeUtf8 / Binary / LargeBinary
                     {
+                        // Kept as the file's UTF-8 bytes (one copy, offsets from 0): no string per value is made here.
+                        // Strings are made only when a query reads the text (Column.S), shared for repeated values.
                         bool large = a.Id == ArrowTypes.LargeUtf8 || a.Id == ArrowTypes.LargeBinary;
-                        int d = (int)(off[2] - lo); string[] o = c.S;
-                        TextIntern shared = new TextIntern();   // repeated values: one string each (like Parquet dictionaries)
-                        for (int i = 0; i < n; i++)
-                        {
-                            if (c.IsNull(i)) continue;
-                            long s0 = large ? BitConverter.ToInt64(raw, p + 8 * i) : BitConverter.ToInt32(raw, p + 4 * i);
-                            long s1 = large ? BitConverter.ToInt64(raw, p + 8 * i + 8) : BitConverter.ToInt32(raw, p + 4 * i + 4);
-                            o[i] = s1 == s0 ? "" : shared.Get(raw, d + (int)s0, (int)(s1 - s0));
-                        }
-                        break;
+                        int[] offs = new int[n + 1];
+                        if (n == 0 || len[1] == 0) return Column.Utf8Text(a.Type, n, c.Nulls, new byte[0], offs);   // no offsets written: all null
+                        int d = (int)(off[2] - lo);
+                        long first = large ? BitConverter.ToInt64(raw, p) : BitConverter.ToInt32(raw, p);
+                        long last = large ? BitConverter.ToInt64(raw, p + 8 * n) : BitConverter.ToInt32(raw, p + 4 * n);
+                        if (last - first > int.MaxValue) throw new EngineException("ARROW_UNSUPPORTED", "A record batch holds over 2 GB of text.");
+                        if (large) for (int i = 0; i <= n; i++) offs[i] = (int)(BitConverter.ToInt64(raw, p + 8 * i) - first);
+                        else if (first == 0) Buffer.BlockCopy(raw, p, offs, 0, 4 * (n + 1));
+                        else for (int i = 0; i <= n; i++) offs[i] = BitConverter.ToInt32(raw, p + 4 * i) - (int)first;
+                        byte[] text = new byte[last - first];
+                        if (text.Length > 0) Buffer.BlockCopy(raw, d + (int)first, text, 0, text.Length);
+                        return Column.Utf8Text(a.Type, n, c.Nulls, text, offs);
                     }
             }
             return c;

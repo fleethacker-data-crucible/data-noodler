@@ -11,7 +11,7 @@ namespace NativeDataEngine
     {
         readonly Op right; readonly List<BExpr> rkeys; readonly object gate = new object();
         volatile bool built; Batch rb; MemoryLease lease;
-        Dictionary<long, int> lmap; Dictionary<string, int> smap; Dictionary<RowKey, int> gmap; int[] next;
+        Dictionary<long, int> lmap; TextKeys smap; List<int> shead; Dictionary<RowKey, int> gmap; int[] next;   // smap: text key as bytes, shead: its first row
         public bool[] Matched;
         public HashJoin(Op right, List<BExpr> rkeys) { this.right = right; this.rkeys = rkeys; }
         public Op RightOp { get { return right; } }
@@ -37,7 +37,7 @@ namespace NativeDataEngine
                     Column[] kc = new Column[rkeys.Count];
                     for (int k = 0; k < kc.Length; k++) kc[k] = rkeys[k].Eval(rb);
                     if (kc.Length == 1 && kc[0].I != null) lmap = new Dictionary<long, int>();
-                    else if (kc.Length == 1 && kc[0].S != null) smap = new Dictionary<string, int>(StringComparer.Ordinal);
+                    else if (kc.Length == 1 && kc[0].Type.Kind == Kind.String) { smap = new TextKeys(); shead = new List<int>(); }
                     else gmap = new Dictionary<RowKey, int>();
                     for (int i = n - 1; i >= 0; i--)   // reverse, so each chain lists rows in ascending order
                     {
@@ -46,7 +46,7 @@ namespace NativeDataEngine
                         if (anyNull) { next[i] = -2; continue; }
                         int head;
                         if (lmap != null) { if (!lmap.TryGetValue(kc[0].I[i], out head)) head = -1; next[i] = head; lmap[kc[0].I[i]] = i; }
-                        else if (smap != null) { if (!smap.TryGetValue(kc[0].S[i], out head)) head = -1; next[i] = head; smap[kc[0].S[i]] = i; }
+                        else if (smap != null) { bool added; int t = smap.Get(kc[0], i, out added); if (added) { shead.Add(i); head = -1; } else { head = shead[t]; shead[t] = i; } next[i] = head; }
                         else { RowKey rk = Key(kc, i); if (!gmap.TryGetValue(rk, out head)) head = -1; next[i] = head; gmap[rk] = i; }
                     }
                 }
@@ -62,7 +62,7 @@ namespace NativeDataEngine
             foreach (Column c in kc) if (c.IsNull(i) || c.Type.Kind == Kind.Null) return -1;
             int h;
             if (lmap != null) return kc[0].I != null && lmap.TryGetValue(kc[0].I[i], out h) ? h : -1;
-            if (smap != null) return kc[0].S != null && smap.TryGetValue(kc[0].S[i], out h) ? h : -1;
+            if (smap != null) { if (kc[0].Type.Kind != Kind.String) return -1; int t = smap.Find(kc[0], i); return t < 0 ? -1 : shead[t]; }
             return gmap.TryGetValue(Key(kc, i), out h) ? h : -1;
         }
         public int Next(int j) { return rkeys.Count == 0 ? (j + 1 < rb.Rows ? j + 1 : -1) : next[j]; }

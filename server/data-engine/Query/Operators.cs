@@ -2,6 +2,7 @@
 // per-unit work (read + filter + project + join probe + partial aggregate) on the worker pool, in unit order.
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -52,6 +53,7 @@ namespace NativeDataEngine
     // In-memory batches (VALUES, cached / session tables, resident datasets).
     // Resident datasets (resident = true): columns the query never reads are left out (placeholders, like a file scan),
     // and text kept as Arrow bytes is handed over as a per-query copy so decoding never touches the shared batch.
+    // Packed columns (Storage/Packing.cs) are unpacked into a plain per-query copy the same way.
     public sealed class MemSource : Source
     {
         readonly List<Batch> batches; readonly bool resident;
@@ -69,7 +71,7 @@ namespace NativeDataEngine
             {
                 Column x = b.Cols[c];
                 if (needed != null && !needed.Contains(c)) { Column ph = new Column(DataType.Null, 0); ph.Type = x.Type; ph.Length = b.Rows; ph.Nulls = null; cs[c] = ph; }
-                else cs[c] = x.IsLazyText ? x.ShallowCopy() : x;
+                else cs[c] = x.IsPacked ? Packing.Unpack(x) : x.IsLazyText ? x.ShallowCopy() : x;
             }
             yield return new Batch(b.Schema, cs, b.Rows);
         }
@@ -410,7 +412,7 @@ namespace NativeDataEngine
         public static int[] Order(Batch all, List<SortKey> keys, long limit, int parallel)
         {
             Column[] kc = new Column[keys.Count];
-            for (int k = 0; k < kc.Length; k++) { kc[k] = keys[k].E.Eval(all); string[] warm = kc[k].S; }   // text decoded once, before threads share it
+            for (int k = 0; k < kc.Length; k++) { kc[k] = keys[k].E.Eval(all); if (!kc[k].IsLazyText) { string[] warm = kc[k].S; } }   // strings decoded once before threads share them; bytes are compared as bytes
             int n = all.Rows;
             int[] idx = new int[n];
             for (int i = 0; i < n; i++) idx[i] = i;
@@ -464,18 +466,19 @@ namespace NativeDataEngine
             }
         }
         // The sort keys' arrays, read directly (no per-call type checks): same order as Cmp.
-        sealed class KeyCompare
+        internal sealed class KeyCompare
         {
-            readonly long[][] li; readonly double[][] fl; readonly string[][] st; readonly bool[][] bo, nu; readonly bool[] allNull, desc, nf;
+            readonly long[][] li; readonly double[][] fl; readonly string[][] st; readonly byte[][] ub; readonly int[][] uo; readonly ulong[][] up; readonly bool[][] us; readonly bool[][] bo, nu; readonly bool[] allNull, desc, nf;
             readonly Column[] kc; readonly List<SortKey> keys;
             public KeyCompare(Column[] kc, List<SortKey> keys)
             {
                 this.kc = kc; this.keys = keys; int n = kc.Length;
-                li = new long[n][]; fl = new double[n][]; st = new string[n][]; bo = new bool[n][]; nu = new bool[n][]; allNull = new bool[n]; desc = new bool[n]; nf = new bool[n];
+                li = new long[n][]; fl = new double[n][]; st = new string[n][]; ub = new byte[n][]; uo = new int[n][]; up = new ulong[n][]; us = new bool[n][]; bo = new bool[n][]; nu = new bool[n][]; allNull = new bool[n]; desc = new bool[n]; nf = new bool[n];
                 for (int k = 0; k < n; k++)
                 {
                     Column c = kc[k]; allNull[k] = c.Type.Kind == Kind.Null; nu[k] = c.Nulls; desc[k] = keys[k].Desc; nf[k] = keys[k].NullsFirst;
-                    li[k] = c.I; fl[k] = c.F; st[k] = c.S; bo[k] = c.B;
+                    li[k] = c.I; fl[k] = c.F; bo[k] = c.B;
+                    if (c.IsLazyText) { ub[k] = c.Utf8; uo[k] = c.Offs; Utf8Ops.Prefixes(c, out up[k], out us[k]); } else st[k] = c.S;
                 }
             }
             public int Compare(int a, int b)
@@ -488,6 +491,12 @@ namespace NativeDataEngine
                     int r;
                     if (li[k] != null) r = li[k][a].CompareTo(li[k][b]);
                     else if (fl[k] != null) r = fl[k][a].CompareTo(fl[k][b]);
+                    else if (ub[k] != null)
+                    {
+                        ulong pa = up[k][a], pb = up[k][b]; bool[] sl = us[k];
+                        if (pa != pb && !sl[a] && !sl[b]) r = pa < pb ? -1 : 1;   // the first 8 bytes decide
+                        else { int[] o = uo[k]; r = Utf8Ops.Compare(ub[k], o[a], o[a + 1] - o[a], ub[k], o[b], o[b + 1] - o[b]); }
+                    }
                     else if (st[k] != null) r = string.CompareOrdinal(st[k][a], st[k][b]);
                     else if (bo[k] != null) r = bo[k][a].CompareTo(bo[k][b]);
                     else r = BCmp.Compare(kc[k], a, kc[k], b);
@@ -705,7 +714,7 @@ namespace NativeDataEngine
         {
             using (MemoryLease lease = new MemoryLease(ctx.Mem, "Recursive query"))
             {
-                HashSet<string> seen = distinct ? new HashSet<string>(StringComparer.Ordinal) : null;
+                KeyIndex seen = distinct ? new KeyIndex(Schema.Fields.Select(f => f.Type).ToArray()) : null;
                 List<Batch> cur = Keep(anchor.Run(ctx), seen, lease);
                 for (int round = 0; ; round++)
                 {
@@ -719,10 +728,10 @@ namespace NativeDataEngine
                 }
             }
         }
-        List<Batch> Keep(IEnumerable<Batch> src, HashSet<string> seen, MemoryLease lease)
+        // seen: rows met so far (UNION without ALL): a row is kept when its key gets a new group id.
+        List<Batch> Keep(IEnumerable<Batch> src, KeyIndex seen, MemoryLease lease)
         {
             List<Batch> r = new List<Batch>();
-            System.Text.StringBuilder sb = new System.Text.StringBuilder();
             foreach (Batch b0 in src)
             {
                 Column[] cs = new Column[Schema.Count];
@@ -730,13 +739,9 @@ namespace NativeDataEngine
                 Batch b = new Batch(Schema, cs, b0.Rows);
                 if (seen != null)
                 {
-                    int[] idx = new int[b.Rows]; int n = 0;
-                    for (int i = 0; i < b.Rows; i++)
-                    {
-                        sb.Length = 0;
-                        foreach (Column c in cs) { string v = Values.Text(c, i); sb.Append(v == null ? "\u0002" : v).Append('\u0001'); }
-                        if (seen.Add(sb.ToString())) idx[n++] = i;
-                    }
+                    int[] idx = new int[b.Rows]; int n = 0, before = seen.Count;
+                    int[] g = seen.Assign(cs, b.Rows);
+                    for (int i = 0; i < b.Rows; i++) if (g[i] == before + n) idx[n++] = i;   // ids are given in first-seen order
                     if (n < b.Rows) b = b.Take(idx, n);
                 }
                 if (b.Rows > 0) { lease.Add(b.Bytes); r.Add(b); }

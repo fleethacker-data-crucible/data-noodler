@@ -137,18 +137,41 @@ namespace NativeDataEngine
         public bool[] B;
         public bool[] Nulls;
         public bool IsLazyText { get { return s == null && Utf8 != null; } }
+        public bool Unique;   // text known to be mostly distinct (resident datasets): decoding skips value sharing
+        // Packed form (resident datasets only, Storage/Packing.cs): I, F and S are null; MemSource unpacks a copy per query.
+        public Array Packed; public long PackBase, PackStep; public double PackDiv; public string[] Dict;
+        public bool IsPacked { get { return Packed != null; } }
 
         string[] DecodeUtf8()
         {
-            // Only mostly-distinct text is kept as bytes, so no sharing here: one string per value.
+            // Repeated values share one string (TextIntern turns itself off for mostly-distinct text).
             string[] o = new string[Length]; byte[] u = Utf8; int[] f = Offs; bool[] nl = Nulls;
+            TextIntern shared = Unique ? null : new TextIntern();
             for (int i = 0; i < Length; i++)
             {
                 if (nl != null && nl[i]) continue;
                 int a = f[i], n = f[i + 1] - a;
-                o[i] = n == 0 ? "" : Encoding.UTF8.GetString(u, a, n);
+                o[i] = n == 0 ? "" : shared != null ? shared.Get(u, a, n) : Encoding.UTF8.GetString(u, a, n);
             }
             return o;
+        }
+        // Text held as UTF-8 bytes (row i = text[offs[i] .. offs[i + 1])), decoded on first use.
+        public static Column Utf8Text(DataType t, int n, bool[] nulls, byte[] text, int[] offs)
+        {
+            Column r = new Column(); r.Type = t; r.Length = n; r.Nulls = nulls; r.Utf8 = text; r.Offs = offs;
+            return r;
+        }
+        // A packed column (Storage/Packing.cs).
+        public static Column PackedOf(DataType t, int n, bool[] nulls, Array packed, long bas, long step, double div, string[] dict)
+        {
+            Column r = new Column(); r.Type = t; r.Length = n; r.Nulls = nulls; r.Packed = packed; r.PackBase = bas; r.PackStep = step; r.PackDiv = div; r.Dict = dict;
+            return r;
+        }
+        // Text as strings (resident datasets: shared strings made from the bytes).
+        public static Column Strings(DataType t, int n, bool[] nulls, string[] s)
+        {
+            Column r = new Column(); r.Type = t; r.Length = n; r.Nulls = nulls; r.s = s;
+            return r;
         }
         // Text column -> Arrow buffers, strings dropped (see above).
         public static Column LazyText(Column c)
@@ -170,7 +193,7 @@ namespace NativeDataEngine
         // A fresh Column over the same values (lazy text decodes into the copy, not into this one).
         public Column ShallowCopy()
         {
-            Column r = new Column(); r.Type = Type; r.Length = Length; r.I = I; r.F = F; r.s = s; r.Utf8 = Utf8; r.Offs = Offs; r.B = B; r.Nulls = Nulls;
+            Column r = new Column(); r.Type = Type; r.Length = Length; r.I = I; r.F = F; r.s = s; r.Utf8 = Utf8; r.Offs = Offs; r.B = B; r.Nulls = Nulls; r.Unique = Unique;
             return r;
         }
 
@@ -205,6 +228,7 @@ namespace NativeDataEngine
                 if (I != null || F != null) b += 8L * Length;
                 else if (B != null) b += Length;
                 else if (IsLazyText) b += Utf8.LongLength + 4L * Offs.Length;
+                else if (Packed != null) b += Buffer.ByteLength(Packed) + (Dict != null ? 8L * Dict.Length : 0);   // shared strings counted by their owner
                 else if (s != null) { b += 8L * Length; for (int i = 0; i < Length; i++) if (s[i] != null) b += 24 + 2 * s[i].Length; }
                 return b;
             }
@@ -246,9 +270,15 @@ namespace NativeDataEngine
         public Column Slice(int start, int count)
         {
             Column c = new Column(); c.Type = Type; c.Length = count;
+            if (IsLazyText)
+            {
+                int a0 = Offs[start], n = Offs[start + count] - a0; byte[] u = new byte[n]; int[] o = new int[count + 1];
+                Buffer.BlockCopy(Utf8, a0, u, 0, n); for (int k = 0; k <= count; k++) o[k] = Offs[start + k] - a0;
+                c.Utf8 = u; c.Offs = o; c.Unique = Unique;
+            }
             if (I != null) { c.I = new long[count]; Array.Copy(I, start, c.I, 0, count); }
             if (F != null) { c.F = new double[count]; Array.Copy(F, start, c.F, 0, count); }
-            if (S != null) { c.S = new string[count]; Array.Copy(S, start, c.S, 0, count); }
+            if (!IsLazyText && S != null) { c.S = new string[count]; Array.Copy(S, start, c.S, 0, count); }
             if (B != null) { c.B = new bool[count]; Array.Copy(B, start, c.B, 0, count); }
             if (Nulls != null) { c.Nulls = new bool[count]; Array.Copy(Nulls, start, c.Nulls, 0, count); }
             return c;
@@ -258,9 +288,17 @@ namespace NativeDataEngine
         public Column Take(int[] idx, int count)
         {
             Column c = new Column(); c.Type = Type; c.Length = count;
+            if (IsLazyText)
+            {
+                // Text as bytes stays bytes: the picked rows are copied (no strings made).
+                long total = 0; for (int k = 0; k < count; k++) total += Offs[idx[k] + 1] - Offs[idx[k]];
+                byte[] u = new byte[total]; int[] o = new int[count + 1]; int at = 0;
+                for (int k = 0; k < count; k++) { int j = idx[k], n = Offs[j + 1] - Offs[j]; o[k] = at; Buffer.BlockCopy(Utf8, Offs[j], u, at, n); at += n; }
+                o[count] = at; c.Utf8 = u; c.Offs = o; c.Unique = Unique;
+            }
             if (I != null) { long[] a = new long[count]; for (int k = 0; k < count; k++) a[k] = I[idx[k]]; c.I = a; }
             if (F != null) { double[] a = new double[count]; for (int k = 0; k < count; k++) a[k] = F[idx[k]]; c.F = a; }
-            if (S != null) { string[] a = new string[count]; for (int k = 0; k < count; k++) a[k] = S[idx[k]]; c.S = a; }
+            if (!IsLazyText && S != null) { string[] a = new string[count]; for (int k = 0; k < count; k++) a[k] = S[idx[k]]; c.S = a; }
             if (B != null) { bool[] a = new bool[count]; for (int k = 0; k < count; k++) a[k] = B[idx[k]]; c.B = a; }
             if (Nulls != null)
             {
@@ -273,6 +311,21 @@ namespace NativeDataEngine
         // Like Take, but idx < 0 gives a null (outer joins).
         public Column TakeOrNull(int[] idx, int count)
         {
+            if (IsLazyText)
+            {
+                // Text as bytes stays bytes; idx < 0 = NULL row.
+                long total = 0; for (int k = 0; k < count; k++) { int j = idx[k]; if (j >= 0) total += Offs[j + 1] - Offs[j]; }
+                byte[] u = new byte[total]; int[] o = new int[count + 1]; bool[] nl = null; int at = 0;
+                for (int k = 0; k < count; k++)
+                {
+                    int j = idx[k]; o[k] = at;
+                    if (j < 0 || IsNull(j)) { if (nl == null) nl = new bool[count]; nl[k] = true; continue; }
+                    int n = Offs[j + 1] - Offs[j]; Buffer.BlockCopy(Utf8, Offs[j], u, at, n); at += n;
+                }
+                o[count] = at;
+                Column r = Utf8Text(Type, count, nl, u, o); r.Unique = Unique;
+                return r;
+            }
             Column c = new Column(Type.Kind == Kind.Null ? DataType.Null : Type, count);
             for (int k = 0; k < count; k++)
             {
@@ -286,6 +339,7 @@ namespace NativeDataEngine
         public static Column Concat(DataType t, List<Column> parts)
         {
             int n = 0; foreach (Column p in parts) n += p.Length;
+            if (t.Kind == Kind.String && parts.Count > 0 && parts.TrueForAll(p => p.IsLazyText)) return Batch.ConcatBytes(t, parts, n);
             Column c = new Column(t, n);
             int at = 0;
             foreach (Column p0 in parts)
@@ -327,6 +381,23 @@ namespace NativeDataEngine
             Column[] cs = new Column[s.Count];
             for (int i = 0; i < cs.Length; i++) cs[i] = new Column(s[i].Type, 0);
             return new Batch(s, cs, 0);
+        }
+        // Text as bytes stays bytes: the parts' bytes and offsets are joined (no strings made).
+        internal static Column ConcatBytes(DataType t, List<Column> parts, int n)
+        {
+            long total = 0; foreach (Column p in parts) total += p.Offs[p.Length] - p.Offs[0];
+            byte[] u = new byte[total]; int[] o = new int[n + 1]; bool[] nulls = null; int at = 0, row = 0; bool unique = true;
+            foreach (Column p in parts)
+            {
+                int a0 = p.Offs[0], len = p.Offs[p.Length] - a0;
+                Buffer.BlockCopy(p.Utf8, a0, u, at, len);
+                for (int i = 0; i < p.Length; i++) o[row + i] = p.Offs[i] - a0 + at;
+                if (p.Nulls != null) { if (nulls == null) nulls = new bool[n]; Array.Copy(p.Nulls, 0, nulls, row, p.Length); }
+                unique &= p.Unique; at += len; row += p.Length;
+            }
+            o[n] = at;
+            Column c = Column.Utf8Text(t, n, nulls, u, o); c.Unique = unique;
+            return c;
         }
         public static Batch Concat(Schema s, List<Batch> bs)
         {
