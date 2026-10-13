@@ -1,8 +1,8 @@
 # Data_Noodler_Install.ps1 - installs Data Noodler from the Data_Noodler_YY_MMDD_HHMM.gz package next to it.
-# Put this script and the .gz anywhere (e.g. the Desktop), then right-click > Run with PowerShell (or:
-#   powershell -ExecutionPolicy Bypass -File Data_Noodler_Install.ps1).
+# Put this script, Data_Noodler_Install.bat and the .gz anywhere (e.g. the Desktop), then double-click the .bat (it runs
+#   powershell -ExecutionPolicy Bypass -File Data_Noodler_Install.ps1, so the script-security block does not stop it).
 # Installs into <user home>\Data_Noodler (every folder and file byte for byte, each checked against its SHA-256),
-# puts a "Data Noodler" shortcut on the Desktop, then removes this script and the .gz.
+# puts a "Data Noodler" shortcut on the Desktop, then removes this script, the .bat and the .gz.
 $ErrorActionPreference = 'Stop'
 $Here = $PSScriptRoot
 $Root = Join-Path $env:USERPROFILE 'Data_Noodler'

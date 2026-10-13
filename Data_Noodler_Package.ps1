@@ -76,7 +76,7 @@ try {
                 if ($e.Name -eq '.git' -or (Test-Ignored $rel $true)) { continue }
                 $dirs.Add($rel); $stack.Push($e.FullName)
             } else {
-                if ($rel -like "$Prefix*.gz" -or $rel -eq "$($Prefix)Install.ps1" -or (Test-Ignored $rel $false)) { continue }
+                if ($rel -like "$Prefix*.gz" -or $rel -like "$($Prefix)Install.*" -or (Test-Ignored $rel $false)) { continue }
                 $files.Add($rel)
             }
         }

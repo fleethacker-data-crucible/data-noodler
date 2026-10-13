@@ -1,2 +1,3 @@
 __app.manifest binary
 *.gz binary
+*.bat text eol=crlf
