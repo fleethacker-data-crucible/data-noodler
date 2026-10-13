@@ -30,8 +30,9 @@ version.txt
 # Dashboard Studio: SAMPLE_ datasets ARE committed (overrides the data-file rules above)
 !workspace/sample-data/**
 
-# Claude test scripts (local only)
-.claude/tests/
+# Claude Code files (local only)
+/.claude/
+/CLAUDE.md
 
 # VS Code workspace (local only)
 *.code-workspace
