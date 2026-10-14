@@ -1,0 +1,107 @@
+{
+  "name": "Data Table",
+  "chart": "table",
+  "filter": true,
+  "inputs": [
+    {
+      "key": "c",
+      "label": "Column",
+      "role": "dimension",
+      "repeat": "Column"
+    }
+  ],
+  "settings": [
+    {
+      "path": "dn.fmtDate",
+      "label": "Dates",
+      "group": "Formats",
+      "type": "format",
+      "input": "c",
+      "kinds": [
+        "date"
+      ],
+      "default": "None"
+    },
+    {
+      "path": "dn.fmtNum",
+      "label": "Numbers",
+      "group": "Formats",
+      "type": "format",
+      "input": "c",
+      "kinds": [
+        "number"
+      ],
+      "default": "Auto"
+    },
+    {
+      "path": "dn.filter",
+      "label": "Click to Filter",
+      "group": "Interaction",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.colFilter",
+      "label": "Column Filters",
+      "group": "Table",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.export",
+      "label": "Export Button",
+      "group": "Table",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.fontSize",
+      "label": "Font Size",
+      "group": "Table",
+      "type": "number",
+      "default": 13,
+      "min": 8,
+      "max": 24,
+      "step": 1
+    },
+    {
+      "path": "dn.resize",
+      "label": "Resize Columns",
+      "group": "Table",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.rowHeight",
+      "label": "Row Height (px)",
+      "group": "Table",
+      "type": "number",
+      "default": 34,
+      "min": 18,
+      "max": 60,
+      "step": 1
+    },
+    {
+      "path": "dn.search",
+      "label": "Search Box",
+      "group": "Table",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.sort",
+      "label": "Sort (click headers)",
+      "group": "Table",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.stripes",
+      "label": "Striped Rows",
+      "group": "Table",
+      "type": "boolean",
+      "default": false
+    }
+  ],
+  "values": {}
+}

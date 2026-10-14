@@ -25,7 +25,7 @@ const Publisher = (() => {
   // D3 and the widget code load only when something is published, not with the page.
   let renderers;
   const addScript = src => new Promise((res, rej) => document.head.append(Object.assign(document.createElement('script'), { src, async: false, onload: res, onerror: () => rej(new Error(`Could not load ${src}`)) })));
-  const loadRenderers = () => renderers ||= Promise.all([typeof d3 === 'undefined' && '/ui/js/vendor/d3.v7.min.js', typeof Widgets === 'undefined' && '/ui/js/widgets/widgets.js',
+  const loadRenderers = () => renderers ||= Promise.all([typeof d3 === 'undefined' && '/ui/js/vendor/d3.v7.min.js', typeof bb === 'undefined' && '/ui/js/vendor/billboard/billboard.min.js', typeof BBChart === 'undefined' && '/ui/js/widgets/bb-chart.js', typeof DNGrid === 'undefined' && '/ui/js/grid/data-grid.js', typeof DNTable === 'undefined' && '/ui/js/widgets/dn-table.js', typeof Widgets === 'undefined' && '/ui/js/widgets/widgets.js',
     typeof Pptx === 'undefined' && '/ui/js/core/pptx.js', typeof Pdf === 'undefined' && '/ui/js/core/pdf.js'].filter(Boolean).map(addScript)).catch(e => { renderers = null; throw e; });
   // Picture at W x H (scaled by s): the published page's cards drawn through an SVG foreignObject.
   // inner is the board's cards, or { chart } for one widget's chart body alone (no card, no title).
@@ -60,8 +60,9 @@ const Publisher = (() => {
     const dash = await DNFS.readJSONOr(`${ctx.dir}/dashboard/dashboard.json`, null);
     if (!dash) throw new Error('No dashboard yet. Build one in the Dashboard module first.');
     if (!dash.widgets?.length) throw new Error('The dashboard has no widgets.');
-    // Each widget is drawn here at its dashboard size (its own D3 code, the project's copy in dashboard/widgets/) and
-    // embedded as static markup with its d3-style.css: the page needs no JavaScript.
+    // Each widget is drawn here at its dashboard size (its own code, the project's copy in dashboard/widgets/; charts are
+    // billboard.js, drawn without animation and scaled by their viewBox) and embedded as static markup with its style.css
+    // and the billboard theme CSS: the page needs no JavaScript.
     const pkgs = new Map((await Widgets.list(Widgets.projectDir(ctx))).map(p => [p.id, p])), src = await Projects.sourceDatasets(ctx.folder, cfg);
     const y0 = Math.min(...dash.widgets.map(w => w.y)), COLS = 48, ROWS = Math.max(27, ...dash.widgets.map(w => w.y - y0 + w.h)), CELL = 30, cards = [], charts = [], styles = new Map();
     const host = Object.assign(document.createElement('div'), { style: 'position:fixed;left:-99999px;top:0' }); document.body.append(host);
@@ -76,7 +77,7 @@ const Publisher = (() => {
           const el = Object.assign(document.createElement('div'), { style: `width:${w.w * CELL - 16}px;height:${w.h * CELL - 44}px` }); host.append(el);
           try {
             const s = Widgets.parse(p.settings), rows = Widgets.ready(s.inputs, w.inputs || {}) ? await Widgets.load(s.inputs, w.inputs || {}, d) : [];
-            await Widgets.draw(el, { ...p, key: p.id }, rows);
+            await Widgets.draw(el, { ...p, key: p.id }, rows, undefined, { static: true, links: w.inputs || {} });
             styles.set(p.id, document.getElementById(`dn-widget-${p.id.replace(/[^A-Za-z0-9_-]/g, '_')}-style`)?.textContent || '');
             body = `<div class="${esc(el.className)}" style="width:100%;height:100%">${el.innerHTML}</div>`;
             charts.push({ title: title || 'Widget', body, w: w.w * CELL - 16, h: w.h * CELL - 44 });
@@ -87,7 +88,7 @@ const Publisher = (() => {
       }
     } finally { host.remove(); }
     if (!cards.length) throw new Error('No widget is set up yet (Edit Widget, attach a CLEAN_ dataset, Save).');
-    const css = (await (await fetch('/ui/css/theme.css')).text()) + '\n' + [...styles.values()].join('\n');
+    const css = (await (await fetch('/ui/css/theme.css')).text()) + '\n' + [...styles.values()].join('\n') + '\n' + (typeof BBChart !== 'undefined' ? BBChart.css() : '') + '\n' + (typeof DNTable !== 'undefined' ? DNTable.css() : '');
     const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${esc(cfg.name)} · Dashboard</title>
 <style>${css.replace(/@font-face[^}]+}/g, '')}
 .board{position:relative;width:min(100%,calc((100vh - 120px) * ${COLS} / ${ROWS}));aspect-ratio:${COLS}/${ROWS};margin:0 auto}

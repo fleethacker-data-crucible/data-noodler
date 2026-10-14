@@ -8,14 +8,23 @@
 (() => {
   const { $, esc } = UI;
   const COLS = 48, G = 24, SIZE = [16, 10], MIN = [4, 3], TOP = 5;   // TOP: rows kept free under the bar
+  // The category buttons: billboard.js chart families (ui/widgets/<Category>/<id>/) + Table (the app's Data Grid).
   const PLACEHOLDERS = [
-    ['Column', '<rect x="3" y="11" width="4" height="10"/><rect x="10" y="5" width="4" height="16"/><rect x="17" y="8" width="4" height="13"/>'],
-    ['Bar', '<rect x="3" y="3" width="12" height="4"/><rect x="3" y="10" width="18" height="4"/><rect x="3" y="17" width="9" height="4"/>'],
     ['Line', '<polyline points="3,18 8,11 13,14 21,5" fill="none" stroke="currentColor" stroke-width="2"/>'],
     ['Area', '<path d="M3 20 L3 14 L8 9 L13 12 L21 5 L21 20 Z"/>'],
+    ['Bar', '<rect x="3" y="11" width="4" height="10"/><rect x="10" y="5" width="4" height="16"/><rect x="17" y="8" width="4" height="13"/>'],
     ['Scatter', '<circle cx="6" cy="16" r="2"/><circle cx="10" cy="9" r="2"/><circle cx="15" cy="13" r="2"/><circle cx="19" cy="6" r="2"/>'],
+    ['Bubble', '<circle cx="8" cy="14" r="4" opacity=".7"/><circle cx="16" cy="8" r="3" opacity=".7"/><circle cx="17" cy="17" r="2" opacity=".7"/>'],
     ['Pie', '<path d="M12 3 A9 9 0 1 1 3 12 L12 12 Z"/><path d="M12 3 L12 12 L3 12 A9 9 0 0 1 12 3" opacity=".5"/>'],
     ['Donut', '<path d="M12 3 A9 9 0 1 1 3 12 L7 12 A5 5 0 1 0 12 7 Z"/><path d="M12 3 L12 7 A5 5 0 0 0 7 12 L3 12 A9 9 0 0 1 12 3" opacity=".5"/>'],
+    ['Gauge', '<path d="M3 17 A9 9 0 0 1 21 17 L17 17 A5 5 0 0 0 7 17 Z" opacity=".5"/><path d="M3 17 A9 9 0 0 1 14 8.3 L13 12.2 A5 5 0 0 0 7 17 Z"/>'],
+    ['Radar', '<polygon points="12,3 20,9 17,19 7,19 4,9" fill="none" stroke="currentColor" stroke-width="1.5"/><polygon points="12,7 16,10 15,16 9,15 7,10" opacity=".7"/>'],
+    ['Polar', '<path d="M12 12 L12 3 A9 9 0 0 1 20 9 Z"/><path d="M12 12 L19 14 A7 7 0 0 1 11 19 Z" opacity=".7"/><path d="M12 12 L8 16 A5 5 0 0 1 8 8 Z" opacity=".5"/>'],
+    ['Funnel', '<path d="M3 4 H21 L18 9 H6 Z"/><path d="M7 11 H17 L15 15 H9 Z" opacity=".75"/><path d="M10 17 H14 L13 20 H11 Z" opacity=".5"/>'],
+    ['Treemap', '<rect x="3" y="3" width="10" height="11"/><rect x="14" y="3" width="7" height="6" opacity=".7"/><rect x="14" y="10" width="7" height="11" opacity=".5"/><rect x="3" y="15" width="10" height="6" opacity=".6"/>'],
+    ['Candlestick', '<line x1="7" y1="3" x2="7" y2="21" stroke="currentColor" stroke-width="1.5"/><rect x="5" y="7" width="4" height="9"/><line x1="16" y1="5" x2="16" y2="19" stroke="currentColor" stroke-width="1.5"/><rect x="14" y="9" width="4" height="6" opacity=".5"/>'],
+    ['Combination', '<rect x="3" y="12" width="4" height="9" opacity=".6"/><rect x="10" y="8" width="4" height="13" opacity=".6"/><rect x="17" y="14" width="4" height="7" opacity=".6"/><polyline points="3,10 10,5 17,9 21,4" fill="none" stroke="currentColor" stroke-width="2"/>'],
+    ['Table', '<rect x="3" y="4" width="18" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 9 H21 M3 14 H21 M9 4 V20 M15 4 V20" stroke="currentColor" stroke-width="1.2"/>'],
   ];
   const ICON_CUSTOM = '<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2"/>';
   const ICON_GEAR = '<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
@@ -43,7 +52,7 @@
   let pkgs = new Map(), globals = [], packaged = {}, clean = [];
   const PACKAGED = 'ui/widgets';   // shipped with the app: ui/widgets/<Category>/<id>/ (the folder name = the button)
   const results = new Map();   // container id -> rows (redraw on resize without a query)
-  // Filter widgets (d3-settings.json "filter": true): container id -> { dataset, col, values, ranges, detail }. A widget fires
+  // Filter widgets (settings.json "filter": true; every chart is one too: a click filters): container id -> { dataset, col, values, ranges, detail }. A widget fires
   // 'dn-filter' ({ input, values, ranges: [{ min, max }], state }; detail is handed back to it on redraw); the containers it is linked to (w.links = [ids] | 'page', saved; right-click > Link) are queried
   // again with those values. A target on another dataset is filtered only if it has a column of the same name.
   // The picked values are this session only.
@@ -87,11 +96,14 @@
       ? [{ act: 'custom', icon: ICON_CUSTOM, name: 'New', tip: 'Add an empty widget container (right-click it > Edit)', cls: 'custom' },
         ...[...pkgs.values()].map(p => ({ proj: p.id, icon: ICON_WIDGET, name: p.name, tip: `${p.name} (this project): add it` })),
         ...globals.filter(g => !pkgs.has(g.id)).map(g => ({ src: g.dir, id: g.id, icon: ICON_WIDGET, name: g.name, tip: `${g.name} (global library): copy it into this project and add it`, cls: 'glob' }))]
-      : packaged[cat].map(p => pkgs.has(p.id) ? { proj: p.id, icon: ICON_WIDGET, name: p.name, tip: `${p.name}: add it` }
-        : { src: p.dir, id: p.id, icon: ICON_WIDGET, name: p.name, tip: `${p.name}: copy it into this project and add it` });
+      : packaged[cat].map(p => { const icon = PLACEHOLDERS.find(([c]) => c === cat)?.[1] || ICON_WIDGET, cls = 'bb';
+        return pkgs.has(p.id) ? { proj: p.id, icon, name: p.name, tip: `${p.name}: add it`, cls }
+          : { src: p.dir, id: p.id, icon, name: p.name, tip: `${p.name}: copy it into this project and add it`, cls }; });
     menu = document.createElement('div'); menu.className = 'tmenu';
     menu._items = items;
-    menu.innerHTML = `<input class="tm-q" type="search" placeholder="Search" spellcheck="false"><div class="tm-grid">${items.map((it, k) => tile(`data-k="${k}" data-n="${esc(it.name.toLowerCase())}"`, it.icon, it.name, it.tip, it.cls || '')).join('')}</div><div class="tm-none" hidden>No match</div>`;
+    const tiles = list => list.map(it => tile(`data-k="${items.indexOf(it)}" data-n="${esc(it.name.toLowerCase())}"`, it.icon, it.name, it.tip, it.cls || '')).join('');
+    const body = `<div class="tm-grid">${tiles(items)}</div>`;
+    menu.innerHTML = `<input class="tm-q" type="search" placeholder="Search" spellcheck="false">${body}<div class="tm-none" hidden>No match</div>`;
     document.body.append(menu);
     const r = btn.getBoundingClientRect();
     menu.style.top = (prefs.barPos === 'Bottom' ? r.top - 6 - menu.offsetHeight : r.bottom + 6) + 'px'; menu.style.left = Math.max(8, Math.min(r.left + r.width / 2 - menu.offsetWidth / 2, innerWidth - menu.offsetWidth - 8)) + 'px';   // centred on its button
@@ -166,7 +178,7 @@
     const note = (h, err) => { pv.className = 'pv'; pv.innerHTML = `<div class="note ${err ? 'err' : ''}">${h}</div>`; };
     if (!w.widget) return note('Custom Widget<br><small>Right-click > Edit</small>');
     if (!p) return note(`Widget "${esc(w.widget)}" not found in dashboard/widgets/. Right-click > Edit, or delete it.`, true);
-    try { await Widgets.draw(pv, { ...p, key: p.id }, results.get(w.id) || [], undefined, { filter: filters.get(w.id)?.detail || null }); }
+    try { await Widgets.draw(pv, { ...p, key: p.id }, results.get(w.id) || [], undefined, { filter: filters.get(w.id)?.detail || null, links: w.inputs || {} }); }
     catch (e) { note(esc(String(e.message || e).split('\n')[0]), true); }
   }
   let queue = Promise.resolve();
@@ -405,21 +417,16 @@
   const qW = () => byId(qId);
   const setOpen = () => !$('dSet').hidden;
   function quickData(w) {
-    qId = w.id; $('dSet').hidden || quickSettings(w);
+    qId = w.id; quickSettings(w);   // the Data section (slots) is in the Settings window
     DataWindow.open({ datasets: clean.map(d => ({ key: d.name, name: d.name.replace(/^CLEAN_/i, ''), note: 'clean', columns: d.columns || [] })), current: w.dataset || null,
       onClose: () => qSlots() });
     qSlots();
   }
-  // The widget's slots (X, Y ...) around the container while the Data window is open: drop a field on one, change how a
-  // measure is combined, or x to remove it. Empty slots show while a field is dragged.
+  // The widget's slots (X, Y, Line 1 ...) are in the Settings window's Data section: drop a field on one, change how a
+  // measure is combined, x to remove it. This redraws that section.
   function qSlots() {
-    let el = $('dSlots');
-    if (!el) { el = Object.assign(document.createElement('div'), { id: 'dSlots', className: 'slots' }); $('cards').append(el); wireSlots(el); }
-    const w = qW(), p = pkgs.get(w?.widget);
-    if (!w || !p || !DataWindow.isOpen() || !$('wed').hidden) { el.innerHTML = ''; return; }
-    let st; try { st = Widgets.parse(p.settings); } catch { el.innerHTML = ''; return; }
-    el.innerHTML = SettingsPanel.slots(st.inputs, w.inputs || {});
-    SettingsPanel.placeSlots(el, st.inputs, { left: OX + w.x * G, top: w.y * G, w: w.w * G, h: w.h * G });
+    const w = qW();
+    if (setOpen() && w && $('wed').hidden) quickSettings(w);
   }
   async function linkField(w, key, col, ds) {
     const p = pkgs.get(w?.widget), d = dsOf(ds); if (!p || !d) return;
@@ -427,13 +434,15 @@
     if (w.dataset !== ds) { w.dataset = ds; w.inputs = {}; }
     const st = Widgets.parse(p.settings), inputs = w.inputs || (w.inputs = {});
     const num = Widgets.NUMERIC.test((d.columns || []).find(c => c.name === col)?.type || ''), fits = i => num ? i.role === 'measure' : i.role !== 'measure';
-    const i = key ? st.inputs.find(x => x.key === key) : st.inputs.find(x => !inputs[x.key] && fits(x)) || st.inputs.find(x => !inputs[x.key]) || st.inputs.find(fits);
+    const all = Widgets.expand(st.inputs, inputs, true);
+    const i = key ? all.find(x => x.key === key) : all.find(x => !inputs[x.key]?.col && fits(x)) || all.find(x => !inputs[x.key]?.col) || all.find(fits);
     if (!i) return;
     inputs[i.key] = { col, ...(i.role === 'measure' ? { agg: i.agg === 'none' ? 'none' : num ? i.agg || 'sum' : 'count' } : {}) };
     qId = w.id; select(w.id); DataWindow.update({ current: ds }); qSlots();
     await saveNow(); await draw(w);
     if (setOpen()) quickSettings(w);
   }
+  let dOptsWired = false;
   function wireSlots(el) {
     el.addEventListener('dragover', e => { const sl = e.target.closest('.slot'); if (!sl || !e.dataTransfer.types.includes('text/x-field')) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; sl.classList.add('over'); });
     el.addEventListener('dragleave', e => e.target.closest('.slot')?.classList.remove('over'));
@@ -443,23 +452,43 @@
       await linkField(qW(), sl.dataset.key, col, e.dataTransfer.getData('text/x-dataset'));
     }));
     el.addEventListener('change', UI.guard(async e => { const k = e.target.dataset.agg, w = qW(); if (!k || !w?.inputs?.[k]) return; w.inputs[k].agg = e.target.value; qSlots(); await saveNow(); await draw(w); }));
-    el.addEventListener('click', UI.guard(async e => { const k = e.target.dataset.clear, w = qW(); if (!k || !w?.inputs) return; delete w.inputs[k]; qSlots(); await saveNow(); await draw(w); }));
+    el.addEventListener('click', UI.guard(async e => {
+      const w = qW(), b = e.target.closest('[data-clear], [data-add], [data-del]'); if (!w || !b) return;
+      const ins = w.inputs || (w.inputs = {}), k = b.dataset.clear;
+      if (k) { const p = pkgs.get(w.widget), i = p && Widgets.expand(Widgets.parse(p.settings).inputs, ins, true).find(x => x.key === k);
+        if (i?.base) ins[k] = {}; else delete ins[k]; }   // a cleared copy (Line 1 ...) stays, empty; Delete removes it
+      else if (b.dataset.add) { const base = b.dataset.add, n = Widgets.copies({ key: base }, ins).map(x => +x.slice(base.length + 1)); ins[`${base}_${Math.max(0, ...n) + 1}`] = {}; }
+      else { const base = b.dataset.del, last = Widgets.copies({ key: base }, ins).pop(); if (last) delete ins[last]; }
+      qSlots(); await saveNow(); await draw(w);
+    }));
   }
-  // Settings: the values go into the project's d3-settings.json of that widget (every container using it redraws).
+  // Settings: the values go into the project's settings.json of that widget (every container using it redraws).
   let qWrite = null;
   function quickSettings(w) {
+    if (!dOptsWired) { dOptsWired = true; wireSlots($('dOpts')); }
     qId = w.id; const p = pkgs.get(w.widget);
     $('dSet').hidden = false; dsetPlace();
     if (!p) { $('dOpts').innerHTML = '<div class="hintbox">Custom Widget: no settings yet (right-click > Edit).</div>'; return; }
-    let s; try { s = Widgets.parse(p.settings); } catch (e) { $('dOpts').innerHTML = `<div class="hintbox">d3-settings.json: ${esc(e.message)}</div>`; return; }
+    let s; try { s = Widgets.parse(p.settings); } catch (e) { $('dOpts').innerHTML = `<div class="hintbox">${Widgets.FILES.settings}: ${esc(e.message)}</div>`; return; }
     s.values = s.values || {};
     SettingsPanel.sections($('dOpts'), s, results.get(w.id) || [], (path, v) => {
       s.values = { ...s.values, [path]: v };
       let obj = {}; try { obj = JSON.parse(p.settings); } catch {}
       p.settings = JSON.stringify({ ...obj, values: s.values }, null, 2) + '\n';
       dash.widgets.filter(x => x.widget === p.id).forEach(repaintSoon);   // live, once per frame
-      clearTimeout(qWrite); qWrite = setTimeout(() => DNFS.writeText(`${p.dir}/d3-settings.json`, p.settings).catch(e => UI.toast(`Could not save the settings: ${e.message}`, 'err')), 300);
+      clearTimeout(qWrite); qWrite = setTimeout(() => DNFS.writeText(`${p.dir}/${Widgets.FILES.settings}`, p.settings).catch(e => UI.toast(`Could not save the settings: ${e.message}`, 'err')), 300);
     });
+    // Data (never folds): the widget's slots; a repeatable input (Line ...) gets Add, and Delete once it has copies.
+    if ((s.inputs || []).length) {
+      const links = w.inputs || {}, box = document.createElement('div');
+      box.className = 'sec-data';
+      box.innerHTML = '<div class="sec-title">Data</div>' + s.inputs.map(i => {
+        const list = Widgets.expand([i], links, true);
+        return `<div class="slot-list">${SettingsPanel.slots(list, links)}</div>` + (i.repeat ? `<div class="data-btns"><button type="button" data-add="${esc(i.key)}">Add</button>${list.length > 1 ? `<button type="button" data-del="${esc(i.key)}">Delete</button>` : ''}</div>` : '');
+      }).join('');
+      const search = $('dOpts').querySelector(':scope > .set-search');
+      search ? search.after(box) : $('dOpts').prepend(box);
+    }
   }
   const DSET_KEY = 'dn-dashsettings';
   let dsetPos = null; try { dsetPos = JSON.parse(sessionStorage.getItem(DSET_KEY) || 'null'); } catch {}

@@ -1,0 +1,1218 @@
+{
+  "name": "Donut",
+  "chart": "donut",
+  "filter": true,
+  "inputs": [
+    {
+      "key": "name",
+      "label": "Name",
+      "role": "dimension"
+    },
+    {
+      "key": "value",
+      "label": "Value",
+      "role": "measure",
+      "agg": "sum"
+    }
+  ],
+  "settings": [
+    {
+      "path": "bb.transition.duration",
+      "label": "Duration (ms)",
+      "group": "Animation",
+      "type": "number",
+      "default": 250,
+      "min": 0,
+      "max": 2000,
+      "step": 50
+    },
+    {
+      "path": "dn.noAnimation",
+      "label": "Turn Off Animation",
+      "group": "Animation",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "dn.cornerRatio",
+      "label": "Corner Radius (%)",
+      "group": "Arc",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.arc.needle.bottom.len",
+      "label": "Bottom Length",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.bottom.rx",
+      "label": "Bottom rx",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.bottom.ry",
+      "label": "Bottom ry",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.bottom.width",
+      "label": "Bottom Width",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 15,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.show",
+      "label": "Needle",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.arc.needle.color",
+      "label": "Needle Color",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "color",
+      "default": "",
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.length",
+      "label": "Needle Length (%)",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 100,
+      "min": 1,
+      "max": 100,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.value",
+      "label": "Needle Value",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "text",
+      "default": "",
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.top.rx",
+      "label": "Top rx",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.top.ry",
+      "label": "Top ry",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.needle.top.width",
+      "label": "Top Width",
+      "group": "Arc",
+      "sub": "Needle",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.arc.rangeText.fixed",
+      "label": "Range Text Fixed",
+      "group": "Arc",
+      "sub": "Range Text",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.arc.rangeText.unit",
+      "label": "Range Text Unit",
+      "group": "Arc",
+      "sub": "Range Text",
+      "type": "pick",
+      "choices": [
+        "absolute",
+        "%"
+      ],
+      "default": "absolute"
+    },
+    {
+      "path": "dn.rangeTextValues",
+      "label": "Range Text Values (comma list)",
+      "group": "Arc",
+      "sub": "Range Text",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "bb.color.onover",
+      "label": "Hover Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.palette",
+      "label": "Palette",
+      "group": "Colors",
+      "type": "pick",
+      "choices": [
+        "Theme",
+        "Data Noodler",
+        "Billboard",
+        "Category 10",
+        "Tableau 10",
+        "Dark 2",
+        "Pastel",
+        "Set 2",
+        "Paired",
+        "Blues",
+        "Greens",
+        "Warm",
+        "Cool",
+        "Viridis",
+        "Traffic"
+      ],
+      "default": "Theme"
+    },
+    {
+      "path": "dn.theme",
+      "label": "Theme",
+      "group": "Colors",
+      "type": "pick",
+      "choices": [
+        "Data Noodler",
+        "Billboard",
+        "Dark",
+        "Datalab",
+        "Graph",
+        "Insight",
+        "Modern"
+      ],
+      "default": "Data Noodler"
+    },
+    {
+      "path": "dn.colors.0",
+      "label": "Color 01",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.1",
+      "label": "Color 02",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.2",
+      "label": "Color 03",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.3",
+      "label": "Color 04",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.4",
+      "label": "Color 05",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.5",
+      "label": "Color 06",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.6",
+      "label": "Color 07",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.7",
+      "label": "Color 08",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.8",
+      "label": "Color 09",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.colors.9",
+      "label": "Color 10",
+      "group": "Colors",
+      "sub": "Custom Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.color.threshold.max",
+      "label": "Threshold Max",
+      "group": "Colors",
+      "sub": "Thresholds",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "dn.thresholdUnit",
+      "label": "Threshold Unit",
+      "group": "Colors",
+      "sub": "Thresholds",
+      "type": "pick",
+      "choices": [
+        "Value",
+        "Percentage"
+      ],
+      "default": "Value"
+    },
+    {
+      "path": "dn.thresholds",
+      "label": "Threshold Values (e.g. 30, 60, 90)",
+      "group": "Colors",
+      "sub": "Thresholds",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "dn.order",
+      "label": "Order",
+      "group": "Data",
+      "type": "pick",
+      "choices": [
+        "desc",
+        "asc",
+        "None"
+      ],
+      "default": "desc"
+    },
+    {
+      "path": "dn.otherLabel",
+      "label": "Other Label",
+      "group": "Data",
+      "type": "text",
+      "default": "Other"
+    },
+    {
+      "path": "dn.topN",
+      "label": "Top N (0 = all)",
+      "group": "Data",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.data.labels.backgroundColors",
+      "label": "Background Color",
+      "group": "Data Labels",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.labelColor",
+      "label": "Text Color",
+      "group": "Data Labels",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "dn.on.data_labels_border",
+      "label": "Border",
+      "group": "Data Labels",
+      "sub": "Border",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.data.labels.border.stroke",
+      "label": "Border Color",
+      "group": "Data Labels",
+      "sub": "Border",
+      "type": "color",
+      "default": "#000000",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.fill",
+      "label": "Border Fill",
+      "group": "Data Labels",
+      "sub": "Border",
+      "type": "color",
+      "default": "",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.padding",
+      "label": "Border Padding",
+      "group": "Data Labels",
+      "sub": "Border",
+      "type": "text",
+      "default": "3 5",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.radius",
+      "label": "Border Radius",
+      "group": "Data Labels",
+      "sub": "Border",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 50,
+      "step": 1,
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.strokeWidth",
+      "label": "Border Width",
+      "group": "Data Labels",
+      "sub": "Border",
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.position.x",
+      "label": "Offset X",
+      "group": "Data Labels",
+      "sub": "Position",
+      "type": "number",
+      "default": 0,
+      "min": -50,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.data.labels.position.y",
+      "label": "Offset Y",
+      "group": "Data Labels",
+      "sub": "Position",
+      "type": "number",
+      "default": 0,
+      "min": -50,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.data.labels.rotate",
+      "label": "Rotate (deg)",
+      "group": "Data Labels",
+      "sub": "Position",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 360,
+      "step": 5
+    },
+    {
+      "path": "bb.donut.title",
+      "label": "Center Title",
+      "group": "Donut",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "bb.donut.padAngle",
+      "label": "Pad Angle",
+      "group": "Donut",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 0.2,
+      "step": 0.005
+    },
+    {
+      "path": "bb.donut.width",
+      "label": "Ring Width (px)",
+      "group": "Donut",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "bb.donut.startingAngle",
+      "label": "Starting Angle (rad)",
+      "group": "Donut",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 6.3,
+      "step": 0.05
+    },
+    {
+      "path": "bb.donut.expand.duration",
+      "label": "Expand Duration (ms)",
+      "group": "Donut",
+      "sub": "Expand",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 1000,
+      "step": 10,
+      "when": {
+        "path": "dn.on.donut_expand",
+        "is": true
+      }
+    },
+    {
+      "path": "dn.on.donut_expand",
+      "label": "Expand on Hover",
+      "group": "Donut",
+      "sub": "Expand",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.donut.expand.rate",
+      "label": "Expand Rate",
+      "group": "Donut",
+      "sub": "Expand",
+      "type": "number",
+      "default": 0.98,
+      "min": 0.5,
+      "max": 1.5,
+      "step": 0.01,
+      "when": {
+        "path": "dn.on.donut_expand",
+        "is": true
+      }
+    },
+    {
+      "path": "dn.fmtLabels",
+      "label": "Label Values",
+      "group": "Formats",
+      "type": "format",
+      "input": "value",
+      "kinds": [
+        "number"
+      ],
+      "default": "Auto"
+    },
+    {
+      "path": "dn.fmtLegend",
+      "label": "Legend Names",
+      "group": "Formats",
+      "type": "format",
+      "input": "name",
+      "kinds": [
+        "text"
+      ],
+      "default": "Auto"
+    },
+    {
+      "path": "dn.fmtTooltip",
+      "label": "Tooltip Values",
+      "group": "Formats",
+      "type": "format",
+      "input": "value",
+      "kinds": [
+        "number"
+      ],
+      "default": "Auto"
+    },
+    {
+      "path": "bb.interaction.brighten",
+      "label": "Brighten on Hover",
+      "group": "Interaction",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.interaction.onout",
+      "label": "Clear on Mouse Out",
+      "group": "Interaction",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.filter",
+      "label": "Click to Filter",
+      "group": "Interaction",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.interaction.enabled",
+      "label": "Interaction",
+      "group": "Interaction",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.interaction.inputType.mouse",
+      "label": "Mouse Input",
+      "group": "Interaction",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.interaction.inputType.touch",
+      "label": "Touch Input",
+      "group": "Interaction",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.data.selection.draggable",
+      "label": "Drag to Select",
+      "group": "Interaction",
+      "sub": "Selection",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.data.selection.grouped",
+      "label": "Select Grouped",
+      "group": "Interaction",
+      "sub": "Selection",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.data.selection.multiple",
+      "label": "Select Multiple",
+      "group": "Interaction",
+      "sub": "Selection",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.data.selection.enabled",
+      "label": "Selection",
+      "group": "Interaction",
+      "sub": "Selection",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.donut.label.threshold",
+      "label": "Hide Below (ratio)",
+      "group": "Labels",
+      "type": "number",
+      "default": 0.05,
+      "min": 0,
+      "max": 0.5,
+      "step": 0.01
+    },
+    {
+      "path": "bb.donut.label.ratio",
+      "label": "Label Position Ratio",
+      "group": "Labels",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "dn.arcLabel",
+      "label": "Label Shows",
+      "group": "Labels",
+      "type": "pick",
+      "choices": [
+        "Percent",
+        "Value",
+        "Name",
+        "Name + Percent",
+        "Name + Value",
+        "Value + Percent"
+      ],
+      "default": "Percent"
+    },
+    {
+      "path": "bb.donut.label.show",
+      "label": "Show Labels",
+      "group": "Labels",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.on.donut_label_line",
+      "label": "Connector Lines",
+      "group": "Labels",
+      "sub": "Connector Lines",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.donut.label.line.distance",
+      "label": "Line Distance (px)",
+      "group": "Labels",
+      "sub": "Connector Lines",
+      "type": "number",
+      "default": 20,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "when": {
+        "path": "dn.on.donut_label_line",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.donut.label.line.text",
+      "label": "Text at Line End",
+      "group": "Labels",
+      "sub": "Connector Lines",
+      "type": "boolean",
+      "default": true,
+      "when": {
+        "path": "dn.on.donut_label_line",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.boost.useCssRule",
+      "label": "Boost: CSS Rules",
+      "group": "Layout",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.clipPath",
+      "label": "Clip Path",
+      "group": "Layout",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.emptyText",
+      "label": "No Data Text",
+      "group": "Layout",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "bb.svg.classname",
+      "label": "SVG Class Name",
+      "group": "Layout",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "bb.background.class",
+      "label": "Background Class",
+      "group": "Layout",
+      "sub": "Background",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "bb.background.color",
+      "label": "Background Color",
+      "group": "Layout",
+      "sub": "Background",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.background.imgUrl",
+      "label": "Background Image URL",
+      "group": "Layout",
+      "sub": "Background",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "dn.paddingAuto",
+      "label": "Auto Padding",
+      "group": "Layout",
+      "sub": "Padding",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.padding.bottom",
+      "label": "Padding Bottom",
+      "group": "Layout",
+      "sub": "Padding",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "when": {
+        "path": "dn.paddingAuto",
+        "is": false
+      }
+    },
+    {
+      "path": "bb.padding.left",
+      "label": "Padding Left",
+      "group": "Layout",
+      "sub": "Padding",
+      "type": "number",
+      "default": 40,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "when": {
+        "path": "dn.paddingAuto",
+        "is": false
+      }
+    },
+    {
+      "path": "bb.padding.mode",
+      "label": "Padding Mode",
+      "group": "Layout",
+      "sub": "Padding",
+      "type": "pick",
+      "choices": [
+        "Auto",
+        "fit"
+      ],
+      "default": "Auto"
+    },
+    {
+      "path": "bb.padding.right",
+      "label": "Padding Right",
+      "group": "Layout",
+      "sub": "Padding",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "when": {
+        "path": "dn.paddingAuto",
+        "is": false
+      }
+    },
+    {
+      "path": "bb.padding.top",
+      "label": "Padding Top",
+      "group": "Layout",
+      "sub": "Padding",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "when": {
+        "path": "dn.paddingAuto",
+        "is": false
+      }
+    },
+    {
+      "path": "bb.legend.equally",
+      "label": "Equal Widths",
+      "group": "Legend",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.legend.padding",
+      "label": "Padding",
+      "group": "Legend",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.legend.position",
+      "label": "Position",
+      "group": "Legend",
+      "type": "pick",
+      "choices": [
+        "bottom",
+        "right",
+        "inset"
+      ],
+      "default": "bottom"
+    },
+    {
+      "path": "dn.legendShow",
+      "label": "Show Legend",
+      "group": "Legend",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.legend.tooltip",
+      "label": "Tooltip on Long Names",
+      "group": "Legend",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.legend.usePoint",
+      "label": "Use Point Shape",
+      "group": "Legend",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.legend.inset.anchor",
+      "label": "Inset Anchor",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "pick",
+      "choices": [
+        "top-left",
+        "top-right",
+        "bottom-left",
+        "bottom-right"
+      ],
+      "default": "top-left",
+      "when": {
+        "path": "bb.legend.position",
+        "is": "inset"
+      }
+    },
+    {
+      "path": "bb.legend.inset.step",
+      "label": "Inset Step (rows)",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "text",
+      "default": "",
+      "when": {
+        "path": "bb.legend.position",
+        "is": "inset"
+      }
+    },
+    {
+      "path": "bb.legend.inset.x",
+      "label": "Inset X",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "when": {
+        "path": "bb.legend.position",
+        "is": "inset"
+      }
+    },
+    {
+      "path": "bb.legend.inset.y",
+      "label": "Inset Y",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 200,
+      "step": 1,
+      "when": {
+        "path": "bb.legend.position",
+        "is": "inset"
+      }
+    },
+    {
+      "path": "bb.legend.item.dblclick",
+      "label": "Double Click to Focus",
+      "group": "Legend",
+      "sub": "Items",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.legend.item.interaction",
+      "label": "Item Interaction",
+      "group": "Legend",
+      "sub": "Items",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.legend.item.tile.height",
+      "label": "Tile Height",
+      "group": "Legend",
+      "sub": "Items",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.legend.item.tile.r",
+      "label": "Tile Radius (circle)",
+      "group": "Legend",
+      "sub": "Items",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.legend.item.tile.type",
+      "label": "Tile Type",
+      "group": "Legend",
+      "sub": "Items",
+      "type": "pick",
+      "choices": [
+        "rectangle",
+        "circle"
+      ],
+      "default": "rectangle"
+    },
+    {
+      "path": "bb.legend.item.tile.width",
+      "label": "Tile Width",
+      "group": "Legend",
+      "sub": "Items",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.title.position",
+      "label": "Position",
+      "group": "Title",
+      "type": "pick",
+      "choices": [
+        "center",
+        "left",
+        "right"
+      ],
+      "default": "center"
+    },
+    {
+      "path": "bb.title.text",
+      "label": "Title",
+      "group": "Title",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "path": "bb.title.padding.bottom",
+      "label": "Padding Bottom",
+      "group": "Title",
+      "sub": "Padding",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.title.padding.left",
+      "label": "Padding Left",
+      "group": "Title",
+      "sub": "Padding",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.title.padding.right",
+      "label": "Padding Right",
+      "group": "Title",
+      "sub": "Padding",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.title.padding.top",
+      "label": "Padding Top",
+      "group": "Title",
+      "sub": "Padding",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    },
+    {
+      "path": "bb.tooltip.grouped",
+      "label": "Grouped",
+      "group": "Tooltip",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.tooltip.doNotHide",
+      "label": "Keep Shown",
+      "group": "Tooltip",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.tooltip.linked",
+      "label": "Linked (all charts)",
+      "group": "Tooltip",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.tooltip.order",
+      "label": "Order",
+      "group": "Tooltip",
+      "type": "pick",
+      "choices": [
+        "None",
+        "asc",
+        "desc"
+      ],
+      "default": "None"
+    },
+    {
+      "path": "dn.tooltipShow",
+      "label": "Show Tooltip",
+      "group": "Tooltip",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "dn.tooltipPercent",
+      "label": "Tooltip Shows Percent",
+      "group": "Tooltip",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "path": "bb.tooltip.init.show",
+      "label": "Show at Start",
+      "group": "Tooltip",
+      "sub": "Start",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "path": "bb.tooltip.init.x",
+      "label": "Start Index",
+      "group": "Tooltip",
+      "sub": "Start",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 50,
+      "step": 1
+    }
+  ],
+  "values": {}
+}

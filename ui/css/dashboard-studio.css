@@ -1,5 +1,5 @@
 /* Dashboard Studio (ui/html/dashboard-studio.html): the dashboard grid with its widget bar, and the Widget Editor over it
-   (the widget on the grid, its slots, the Data / Settings windows). The widgets' own look is their d3-style.css only. */
+   (the widget on the grid, its slots, the Data / Settings windows). The widgets' own look is their style.css only. */
 html, body { height: 100%; margin: 0; overflow: hidden; }
 * { scrollbar-width: thin; }
 .ds, .wed { position: fixed; inset: 0; }
@@ -229,8 +229,37 @@ body.barbottom .typebar { top: auto; bottom: 24px; }
 .linkov .lk-ghost { pointer-events: none; }
 
 /* Settings search (top of every widget Settings window): matching settings only, no highlight. */
-.set-search { position: sticky; top: 0; z-index: 2; margin: -12px -14px 0; padding: 10px 14px 6px; background: var(--panel); }
-.set-search input { box-sizing: border-box; width: 100%; height: 18px; padding: 0 8px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); outline: none; }
+.set-search { position: sticky; top: 0; z-index: 2; margin: -12px -14px 0; padding: 3px 14px 8px; background: var(--panel); }
+.set-search input { box-sizing: border-box; width: 100%; height: 24px; padding: 0 8px; font-size: 12px; background: color-mix(in srgb, var(--panel-2), #fff 6%); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); outline: none; }
 .set-search input:focus { border-color: var(--blue); }
 .set-root .srch-hide { display: none !important; }
 .set-root .optrow.srch-hide + .optrow { margin-top: 0; }
+
+/* Settings window: the Data section (never folds) - the widget's slots stacked, Add / Delete under a repeatable one */
+.sec-data { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.sec-data .sec-title { font-size: 13px; color: var(--text); font-weight: 600; padding: 2px 0; }
+.sec-data .slot-list { display: flex; flex-direction: column; gap: 6px; }
+.sec-data .slot { min-height: 18px; padding: 2px 4px 2px 8px; }
+.sec-data .slot b { min-width: 46px; }
+.sec-data .slot .f { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-data .slot select { height: 18px; }
+.sec-data .data-btns { display: flex; gap: 6px; }
+.sec-data .data-btns button { height: 18px; padding: 0 10px; font-size: 12px; line-height: 16px; text-align: center; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.sec-data .data-btns button:hover { border-color: var(--blue); }
+.sec-data .data-btns button[data-del]:hover { border-color: var(--err); color: var(--err); }
+.sec-data .data-btns button[data-add] { background: var(--blue); border-color: var(--blue); color: #fff; }
+.sec-data .data-btns button[data-add]:hover { filter: brightness(1.1); }
+.sec-data .slot { background: color-mix(in srgb, var(--panel-2), #fff 6%); }
+.sec-data .slot.over { background: color-mix(in srgb, var(--blue) 14%, var(--panel-2)); }
+.sec-data .slot { box-sizing: border-box; height: 24px; min-height: 24px; padding: 0 4px 0 8px; }
+.sec-data .slot select { box-sizing: border-box; height: 18px; min-height: 0; line-height: 16px; padding-top: 0; padding-bottom: 0; }
+.sec-data .slot .x { height: 18px; line-height: 18px; }
+.sec-data .data-btns button { box-sizing: border-box; height: 24px; line-height: 22px; }
+
+/* Category drop-down: billboard.js charts in one colour */
+.type.bb svg { fill: var(--blue, #4269d0); color: var(--blue, #4269d0); }
+
+/* Widget Editor: Add / Delete beside a repeatable slot (Series, Column ...) */
+.slots .slot.slot-btns { gap: 6px; }
+.slots .slot.slot-btns button { height: 24px; padding: 0 10px; font-size: 12px; }
+.slots .slot.slot-btns button[data-add] { background: var(--blue); border-color: var(--blue); color: #fff; }

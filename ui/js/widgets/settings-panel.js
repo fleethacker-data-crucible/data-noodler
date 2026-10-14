@@ -1,5 +1,5 @@
 // The widget settings panel (Dashboard Studio > Widget Editor): the X / Y slots beside the widget and the settings,
-// built from the widget's d3-settings.json (inputs, settings). Global: SettingsPanel. Look: ui/css/dashboard-studio.css.
+// built from the widget's settings.json (inputs, settings). Global: SettingsPanel. Look: ui/css/dashboard-studio.css.
 const SettingsPanel = (() => {
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, DATE = /DATE|TIME/i;
@@ -180,18 +180,9 @@ const SettingsPanel = (() => {
   addEventListener('blur', ddClose);
   document.addEventListener('scroll', e => { if (dd && !dd.contains(e.target)) ddClose(); }, true);
 
-  // One open at a time: opening a section folds the open one away at the same time; the same for sub groups.
-  document.addEventListener('click', e => {
-    const sum = e.target.closest?.('summary'), d = sum?.parentElement;
-    if (!(d instanceof HTMLDetailsElement) || d.open) return;
-    const cls = d.classList.contains('sec') ? 'sec' : d.classList.contains('subsec') ? 'subsec' : null; if (!cls) return;
-    const root = cls === 'sec' ? d.closest('aside') : d.closest('.sec');
-    const others = [...(root?.querySelectorAll(`details.${cls}[open]`) || [])].filter(x => x !== d);
-    if (!others.length) return;
-    others.forEach(x => { x.open = false; });   // they fold while the clicked one unfolds (the click opens it)
-  }, true);
+  // Sections and sub groups fold independently: any number can be open at once.
   // The Settings window's body: one folding section per group (A to Z; all start folded, a redraw keeps open ones open),
-  // colours under the other settings. s = the parsed d3-settings.json, rows = the data (kinds of the inputs),
+  // colours under the other settings. s = the parsed settings.json, rows = the data (kinds of the inputs),
   // setValue(path, value).
   function sections(el, s, rows, setValue) {
     const esc2 = esc, val = p => p in (s.values || {}) ? s.values[p] : s.settings.find(x => x.path === p)?.default;
@@ -203,7 +194,7 @@ const SettingsPanel = (() => {
     el.classList.add('set-root');
     el.innerHTML = (groups.length ? `<div class="set-search"><input type="search" placeholder="Search settings" spellcheck="false" value="${esc2(q)}"></div>` : '')
       + (groups.map((g, i) => `<details class="sec" data-g="${i}" ${opened.has(g) ? 'open' : ''}><summary>${esc2(g)}</summary><div class="${s.settings.some(x => (x.group || 'Settings') === g && x.type !== 'color') ? 'opts' : ''}"></div><div class="swatches"></div></details>`).join('')
-      || '<div class="hintbox">No settings: add them to d3-settings.json ("settings": [{ "path", "label", "group", "type", "default" }]).</div>')
+      || '<div class="hintbox">No settings: add them to settings.json ("settings": [{ "path", "label", "group", "type", "default" }]).</div>')
       + '<div class="hintbox set-none" hidden>No setting matches.</div>';
     el._search = () => search(el);
     el.querySelector(':scope > .set-search input')?.addEventListener('input', el._search);

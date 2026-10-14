@@ -4,7 +4,7 @@
 //     clean = the project's CLEAN_ datasets; dataset / links / size = what the container has now
 // The widget is drawn live on the grid (resize handles try other sizes). Data: drag a field from the Data window onto a
 // slot; SAMPLE_ datasets preview only: Save stays greyed until a CLEAN_ dataset is attached. Settings: built from
-// d3-settings.json (values are written back into it). Code: d3-code.js / d3-style.css / d3-settings.json in their own
+// settings.json (values are written back into it). Code: code.js / style.css / settings.json in their own
 // window (ui/html/widget-code.html, through window.WidgetCode). Save asks: Project, Global or both.
 const WidgetEditor = (() => {
   const { $, esc } = UI, G = 24;
@@ -55,7 +55,7 @@ const WidgetEditor = (() => {
     const left = Math.round(c - cw / 2), top = Math.max(4 * G, Math.round(H / 2 - ch / 2));
     Object.assign($('wCard').style, { left: `${left}px`, top: `${top}px`, width: `${cw + 1}px`, height: `${ch + 1}px` });
     Object.assign($('wName').style, { left: `${left + cw / 2}px`, top: `${top - 10}px` });
-    SettingsPanel.placeSlots($('wSlots'), s.inputs, { left, top, w: cw, h: ch });
+    SettingsPanel.placeSlots($('wSlots'), Widgets.expand(s.inputs, links, true), { left, top, w: cw, h: ch });
     $('wSz').textContent = `${cw} x ${ch} px`;
     drawNow();
   }
@@ -72,7 +72,13 @@ const WidgetEditor = (() => {
 
   // ---- data: slots (drop a field), the Data window (CLEAN_ + SAMPLE_ datasets) ----
   const columns = () => src()?.columns || [];
-  function drawSlots() { $('wSlots').innerHTML = SettingsPanel.slots(s.inputs, links); layout(); }
+  // Slots + Add / Delete under a repeatable input (Series, Column ...): Add = one more copy, Delete = the last copy.
+  function drawSlots() {
+    $('wSlots').innerHTML = SettingsPanel.slots(Widgets.expand(s.inputs, links, true), links)
+      + s.inputs.filter(i => i.repeat).map(i => `<div class="slot set slot-btns"><b>${esc(i.repeat)}</b><button type="button" class="ghost small" data-add="${esc(i.key)}">Add</button>`
+        + `${Widgets.copies(i, links).length ? `<button type="button" class="ghost small" data-del="${esc(i.key)}">Delete</button>` : ''}</div>`).join('');
+    layout();
+  }
   // Data window: names without the SAMPLE_ / CLEAN_ file prefix; the kind is the note on the right (sample / clean).
   const dsList = () => sources.map(d => ({ key: d.name, name: d.name.replace(/^(SAMPLE|CLEAN)_/i, ''), note: d.sample ? 'sample' : /^CLEAN_/i.test(d.name) ? 'clean' : '', columns: d.columns || [] }));
   const dataWin = () => DataWindow.update({ datasets: dsList(), current: dataset || null });
@@ -84,7 +90,7 @@ const WidgetEditor = (() => {
     dataWin();
   }
   function link(key, col) {
-    const i = s.inputs.find(x => x.key === key); if (!i) return;
+    const i = Widgets.expand(s.inputs, links, true).find(x => x.key === key); if (!i) return;
     const num = Widgets.NUMERIC.test(columns().find(c => c.name === col)?.type || '');
     links[key] = { col, ...(i.role === 'measure' ? { agg: links[key]?.agg || (i.agg === 'none' ? 'none' : num ? i.agg || 'sum' : 'count') } : {}) };
     changed(); drawSlots(); loadData();
@@ -95,7 +101,14 @@ const WidgetEditor = (() => {
     if (i) link(i.key, col);
   }
   $('wSlots').addEventListener('change', e => { const k = e.target.dataset.agg; if (k && links[k]) { links[k].agg = e.target.value; changed(); drawSlots(); loadData(); } });
-  $('wSlots').addEventListener('click', e => { const k = e.target.dataset.clear; if (k) { delete links[k]; changed(); drawSlots(); loadData(); } });
+  $('wSlots').addEventListener('click', e => {
+    const b = e.target.closest('[data-clear], [data-add], [data-del]'); if (!b) return;
+    const k = b.dataset.clear;
+    if (k) { if (Widgets.expand(s.inputs, links, true).find(x => x.key === k)?.base) links[k] = {}; else delete links[k]; }   // a cleared copy stays, empty
+    else if (b.dataset.add) { const base = b.dataset.add, n = Widgets.copies({ key: base }, links).map(x => +x.slice(base.length + 1)); links[`${base}_${Math.max(0, ...n) + 1}`] = {}; }
+    else { const last = Widgets.copies({ key: b.dataset.del }, links).pop(); if (last) delete links[last]; }
+    changed(); drawSlots(); loadData();
+  });
   const over = (el, on) => el?.classList.toggle('over', on);
   for (const zone of [$('wSlots'), $('wCard')]) {
     zone.addEventListener('dragover', e => { if (!e.dataTransfer.types.includes('text/x-field')) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; over(zone === $('wCard') ? zone : e.target.closest('.slot'), true); });
@@ -126,7 +139,7 @@ const WidgetEditor = (() => {
     $('wSave').title = isClean() ? 'Save the widget to the project and / or the global library' : 'Attach a CLEAN_ dataset to save (SAMPLE_ data is preview only)';
   }
 
-  // ---- settings window: built from d3-settings.json; a change is written into its "values" ----
+  // ---- settings window: built from settings.json; a change is written into its "values" ----
   let syncF = 0;
   function setValue(path, v) {
     s.values = { ...s.values, [path]: v };
@@ -167,8 +180,8 @@ const WidgetEditor = (() => {
       files[tab] = text; changed();
       if (tab === 'settings') {
         try { const n = Widgets.parse(text); s = { ...n, values: n.values || {} }; if (n.name && n.name !== $('wName').value) $('wName').value = n.name; }
-        catch (e) { return status(`d3-settings.json: ${e.message}`, true); }
-        for (const k of Object.keys(links)) if (!s.inputs.some(i => i.key === k)) delete links[k];
+        catch (e) { return status(`${Widgets.FILES.settings}: ${e.message}`, true); }
+        for (const k of Object.keys(links)) if (!Widgets.expand(s.inputs, links, true).some(i => i.key === k)) delete links[k];
         drawSlots(); drawSettings(); loadData(); return;
       }
       draw();
@@ -196,7 +209,7 @@ const WidgetEditor = (() => {
     try { await drawOnce(); } finally { busy = false; if (again) { again = false; draw(); } }
   }
   async function drawOnce() {
-    try { await Widgets.draw($('wPv'), { key: 'edit', code: files.code, css: files.css, settings: s }, (rows || []).map(r => ({ ...r }))); status(''); }
+    try { await Widgets.draw($('wPv'), { key: 'edit', code: files.code, css: files.css, settings: s }, (rows || []).map(r => ({ ...r })), undefined, { links }); status(''); }
     catch (e) { status(`The widget failed: ${String(e.message || e).split('\n')[0]}`, true); }
   }
   $('wName').oninput = () => { changed(); syncSettingsText(); };

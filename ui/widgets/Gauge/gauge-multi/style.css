@@ -1,0 +1,3 @@
+/* Multi Gauge (billboard.js). .WIDGET = its container (scoped automatically). The look comes from the billboard theme
+   (Settings > Colors > Theme, ui/js/widgets/bb-themes/ + ui/js/vendor/billboard/theme/); add to it here. */
+.WIDGET { font-family: 'Exo 2', system-ui, sans-serif; }

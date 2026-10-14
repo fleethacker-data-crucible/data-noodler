@@ -6,7 +6,10 @@
 //     more(offset) -> { rows, done } (optional, local grids): the next block of rows near the end; total = all rows.
 //     names = the column keys; columns = [{ name, type }] (types); rows = objects (local grid) or empty with
 //     remote(grid, bar) = GridRemote.attach (rows come from the engine: grid.provider = { load(state), more(state, at) }).
-//     props = spec options (showQuickFilter, showExport, exportFilename); columnDefaults = { sort, filter, resizable }.
+//     props = spec options (showQuickFilter, showExport, exportFilename, onRowClick(row, column, grid)); columnDefaults = { sort, filter, resizable }.
+//   Headers: click = sort ascending, again = descending, again = off; the funnel button (or right-click) = the column menu
+//   (sort, autosize, filter: condition + value); drag the right edge = resize, double-click it = autosize.
+//   Search (top left) = rows where any column contains the text.
 //   grid.destroy() removes it; grid-export { format } is raised on the box for engine grids and .parquet / .sqlite.
 window.DNGrid = (() => {
   const NUM = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, BOOL = /BOOL/i;
@@ -20,6 +23,7 @@ window.DNGrid = (() => {
       ['greaterThanOrEqual', 'Greater than or equal'], ['lessThanOrEqual', 'Less than or equal'], ['empty', 'Empty'], ['notEmpty', 'Not empty']],
     boolean: [['true', 'True'], ['false', 'False'], ['empty', 'Empty'], ['notEmpty', 'Not empty']] };
   const NOVAL = new Set(['empty', 'notEmpty', 'true', 'false']);
+  const FUNNEL = '<svg viewBox="0 0 16 16" width="11" height="11"><path d="M2 3h12l-4.5 5.2V13l-3 1.5V8.2z" fill="currentColor"/></svg>';
 
   // One filter on a local row value (the engine grids do the same in SQL: ui/js/grid/grid-remote.js).
   function test(v, f, type) {
@@ -88,7 +92,8 @@ window.DNGrid = (() => {
     function header() {
       headRow.innerHTML = cols.map((c, i) => {
         const s = st.sort?.key === c.key ? ` sorted-${st.sort.dir}` : '', f = st.filters.has(c.key) ? ' filtered' : '';
-        return `<th data-i="${i}" class="${c.type === 'number' ? 'num' : ''}${s}${f}"><span class="ht">${esc(c.key)}</span>${canResize ? '<span class="rz"></span>' : ''}</th>`;
+        return `<th data-i="${i}" class="${c.type === 'number' ? 'num' : ''}${s}${f}${canSort ? ' sortable' : ''}"><span class="ht">${esc(c.key)}</span>`
+          + `${canFilter || canSort ? `<span class="fb" title="Sort and filter">${FUNNEL}</span>` : ''}${canResize ? '<span class="rz"></span>' : ''}</th>`;
       }).join('');
     }
 
@@ -231,9 +236,29 @@ window.DNGrid = (() => {
     const close = () => { menu.hidden = true; };
     on(doc, 'pointerdown', e => { if (!menu.contains(e.target)) close(); }, true);
     on(win, 'blur', close); on(doc, 'keydown', e => { if (e.key === 'Escape') close(); });
+    // A click on a header (not its resize edge or filter button): sort ascending -> descending -> off.
+    let downOnRz = false;
+    on(headRow, 'pointerdown', e => { downOnRz = !!e.target.closest('.rz'); }, true);
+    on(headRow, 'click', e => {
+      const th = e.target.closest('th'); if (!th || downOnRz || e.target.closest('.rz')) return;
+      if (e.target.closest('.fb')) { const r = e.target.closest('.fb').getBoundingClientRect(); return openMenu(th, r.left, r.bottom + 2); }
+      if (!canSort) return;
+      const k = cols[+th.dataset.i].key, cur = st.sort?.key === k ? st.sort.dir : null;
+      st.sort = cur === 'asc' ? { key: k, dir: 'desc' } : cur === 'desc' ? null : { key: k, dir: 'asc' };
+      reload();
+    });
     on(headRow, 'contextmenu', e => {
       const th = e.target.closest('th'); if (!th) return;
       e.preventDefault(); e.stopPropagation();   // the page's own right-click menu (e.g. the Dashboard widget menu) stays shut
+      openMenu(th, e.clientX, e.clientY);
+    });
+    if (props.onRowClick) on(body, 'click', e => {
+      const tr = e.target.closest('tr[data-i]'), td = e.target.closest('td'); if (!tr) return;
+      const row = view[+tr.dataset.i], col = cols[[...tr.children].indexOf(td)]?.key;
+      body.querySelectorAll('tr.picked').forEach(x => x.classList.remove('picked')); tr.classList.add('picked');
+      props.onRowClick(row, col, grid);
+    });
+    function openMenu(th, x, y) {
       const c = cols[+th.dataset.i], cur = st.filters.get(c.key), conds = CONDS[c.type] || CONDS.string, cond = cur?.condition || conds[0][0];
       const h = [];
       if (canSort) h.push('<div data-act="asc">Sort ascending</div>', '<div data-act="desc">Sort descending</div>');
@@ -243,8 +268,9 @@ window.DNGrid = (() => {
         + `<input type="text" placeholder="Filter value" spellcheck="false" value="${esc(cur?.searchTerm)}"></div>`, `<div data-act="nofilter"${cur ? '' : ' class="off"'}>Clear filter</div>`);
       menu.innerHTML = h.join(''); menu.hidden = false;
       const r = menu.getBoundingClientRect();
-      menu.style.left = `${Math.max(4, Math.min(e.clientX, win.innerWidth - r.width - 4))}px`;
-      menu.style.top = `${Math.max(4, Math.min(e.clientY, win.innerHeight - r.height - 4))}px`;
+      menu.style.left = `${Math.max(4, Math.min(x, win.innerWidth - r.width - 4))}px`;
+      menu.style.top = `${Math.max(4, Math.min(y, win.innerHeight - r.height - 4))}px`;
+      menu.querySelector('.gflt input')?.focus();
       const sel = menu.querySelector('.gflt select'), inp = menu.querySelector('.gflt input');
       if (sel) {
         let t;
@@ -266,7 +292,7 @@ window.DNGrid = (() => {
         else if (a === 'nofilter') { st.filters.delete(c.key); reload(); }
         else if (a === 'size') autosize(c);
       };
-    });
+    }
 
     // ---- Pop-out / Export ----
     bar.querySelector('.gpop')?.addEventListener('click', e => { e.stopPropagation(); o.onPop?.({ rows: o.rows || [] }); });   // the rows loaded so far go along

@@ -40,6 +40,16 @@
 .GRID .dg-t thead th.sorted-asc .ht::after { content: " \2191"; color: var(--muted); }
 .GRID .dg-t thead th.sorted-desc .ht::after { content: " \2193"; color: var(--muted); }
 .GRID .dg-t thead th.filtered .ht::before { content: "\25CF "; color: var(--muted); font-size: 9px; vertical-align: 1px; }
+/* Sortable headers: click = sort; the funnel button = sort / filter menu (bright while that column is filtered). */
+.GRID .dg-t thead th.sortable { cursor: pointer; }
+.GRID .dg-t thead th { position: sticky; }
+.GRID .dg-t thead th .fb { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); display: inline-flex; padding: 2px; border-radius: 4px;
+  color: var(--muted); opacity: 0; cursor: pointer; }
+.GRID .dg-t thead th:hover .fb, .GRID .dg-t thead th.filtered .fb { opacity: 1; }
+.GRID .dg-t thead th.filtered .fb { color: var(--blue); }
+.GRID .dg-t thead th .fb:hover { background: var(--sel); color: var(--text); }
+.GRID .dg-t thead th { padding-right: 26px; }
+.GRID .dg-t tbody tr.picked td { background: color-mix(in srgb, var(--blue) 18%, transparent); }
 /* Column resize handle: the header's right edge (drag; double-click = autosize). */
 .GRID .dg-t thead th .rz { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; }
 .GRID .dg-t thead th .rz::after { content: ""; position: absolute; top: 25%; bottom: 25%; right: 0; width: 1px; background: var(--border); }

@@ -1,0 +1,377 @@
+/* Data Noodler theme for billboard.js (based on billboard.css 4.1.0, MIT, NAVER Corp.): frame colours follow the app theme
+   (ui/css/theme.css variables), so charts match the app in light and dark. Scoped per chart by BBChart (.bbt-<theme>). */
+/*-- Colour pattern (series colours, in order): billboard's default (d3 Category 10) --*/
+.bb-color-pattern {
+  background-image: url("#1f77b4;#ff7f0e;#2ca02c;#d62728;#9467bd;#8c564b;#e377c2;#7f7f7f;#bcbd22;#17becf;");
+}
+.bb text { fill: var(--text-2, #555); }
+.bb .bb-axis path.domain, .bb .bb-axis line { stroke: var(--border, #ccc); }
+/*-- Chart --*/
+.bb svg {
+  font: 11px "Exo 2", system-ui, sans-serif;
+  color: var(--text-2, #555);
+  -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
+}
+.bb path, .bb line {
+  fill: none;
+  stroke: var(--border, #ccc);
+}
+.bb text, .bb .bb-button {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+
+.bb-legend-item-tile,
+.bb-xgrid-focus,
+.bb-ygrid-focus,
+.bb-ygrid {
+  shape-rendering: crispEdges;
+}
+
+.bb-chart-arcs .bb-needle {
+  fill: var(--text, #222);
+}
+
+.bb-chart-arc .bb-gauge-value {
+  fill: var(--text, #222);
+}
+.bb-chart-arc path {
+  stroke: var(--panel, #fff);
+}
+.bb-chart-arc rect {
+  stroke: var(--panel, #fff);
+  stroke-width: 1;
+}
+.bb-chart-arc text {
+  fill: #fff;
+  font-size: 13px;
+}
+.bb-chart-arc {
+  /* Connector line base styles */
+}
+.bb-chart-arc .bb-arc-label-line {
+  fill: none;
+  stroke-width: 1px;
+  pointer-events: none;
+}
+.bb-chart-arc .bb-arc-label-line {
+  stroke: #7f7f7f;
+}
+.bb-chart-arc > text.bb-arc-label-line-text {
+  fill: var(--text, #222);
+}
+
+/*-- Funnel --*/
+.bb-chart-funnels path {
+  stroke-width: 0;
+}
+.bb-chart-funnels + .bb-chart-texts text {
+  font-size: 13px;
+  fill: #fff;
+}
+
+/*-- Axis --*/
+.bb-axis {
+  shape-rendering: crispEdges;
+}
+.bb-axis .bb-axis-x-tooltip, .bb-axis .bb-axis-y-tooltip, .bb-axis .bb-axis-y2-tooltip {
+  font-size: 1em;
+  fill: #fff;
+  white-space: nowrap;
+}
+
+/*-- Grid --*/
+.bb-grid {
+  pointer-events: none;
+}
+.bb-grid line {
+  stroke: var(--border, #ddd);
+}
+.bb-grid text {
+  fill: var(--muted, #888);
+}
+
+.bb-xgrid, .bb-ygrid {
+  stroke-dasharray: 3 3;
+}
+
+/*-- Text on Chart --*/
+.bb-text.bb-empty {
+  fill: var(--muted, #888);
+  font-size: 2em;
+}
+
+/*-- Line --*/
+.bb-line {
+  stroke-width: 1px;
+}
+
+/*-- Point --*/
+.bb-circle._expanded_ {
+  stroke-width: 1px;
+  stroke: var(--panel, #fff);
+}
+
+.bb-selected-circle {
+  fill: var(--panel, #fff);
+  stroke-width: 2px;
+}
+
+/*-- Bar --*/
+.bb-bar {
+  stroke-width: 0;
+}
+.bb-bar._expanded_ {
+  fill-opacity: 0.75;
+}
+
+/*-- Candlestick --*/
+.bb-candlestick {
+  stroke-width: 1px;
+}
+.bb-candlestick._expanded_ {
+  fill-opacity: 0.75;
+}
+
+/*-- Focus --*/
+.bb-target.bb-focused, .bb-circles.bb-focused {
+  opacity: 1;
+}
+.bb-target.bb-focused path.bb-line, .bb-target.bb-focused path.bb-step, .bb-circles.bb-focused path.bb-line, .bb-circles.bb-focused path.bb-step {
+  stroke-width: 2px;
+}
+.bb-target.bb-defocused, .bb-circles.bb-defocused {
+  opacity: 0.3 !important;
+}
+.bb-target.bb-defocused .text-overlapping, .bb-circles.bb-defocused .text-overlapping {
+  opacity: 0.05 !important;
+}
+
+/*-- Region --*/
+.bb-region {
+  fill: var(--blue, #4269d0);
+}
+.bb-region rect {
+  fill-opacity: 0.1;
+}
+
+/*-- Zoom region --*/
+.bb-zoom-brush {
+  fill-opacity: 0.1;
+}
+
+/*-- Brush --*/
+.bb-brush .extent {
+  fill-opacity: 0.1;
+}
+
+/*-- Legend --*/
+.bb-legend-item {
+  font-size: 12px;
+  fill: var(--text-2, #555);
+  user-select: none;
+}
+
+div.bb-canvas-legend {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  display: block;
+  overflow: visible;
+  pointer-events: auto;
+  font-family: sans-serif;
+  font-size: 12px;
+  color: var(--text-2, #555);
+}
+div.bb-canvas-legend.bb-canvas-legend-bottom {
+  right: 0;
+  bottom: 6px;
+  left: 0;
+}
+div.bb-canvas-legend.bb-canvas-legend-right {
+  overflow: visible;
+}
+
+button.bb-legend-item {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: normal;
+  text-align: left;
+}
+button.bb-legend-item.bb-legend-item-interactive {
+  cursor: pointer;
+}
+
+.bb-canvas-legend .bb-legend-item-title {
+  position: absolute;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.bb-canvas-legend .bb-legend-item-tile {
+  position: absolute;
+  display: block;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+}
+.bb-canvas-legend .bb-legend-item-tile.bb-legend-item-tile-circle {
+  border-radius: 50%;
+}
+
+.bb-legend-item-hidden {
+  opacity: 0.15;
+}
+
+.bb-legend-background {
+  opacity: 0.85;
+  fill: var(--panel, #fff);
+  stroke: var(--border, #ccc);
+  stroke-width: 1;
+}
+
+/*-- Title --*/
+.bb-title {
+  font: 600 14px "Exo 2", system-ui, sans-serif;
+  fill: var(--text, #222);
+}
+
+/*-- Treemap --*/
+.bb-chart-treemaps rect {
+  stroke: var(--panel, #fff);
+  stroke-width: 1px;
+}
+
+/*-- Tooltip --*/
+.bb-tooltip-container {
+  z-index: 10;
+  user-select: none;
+  transform: translateZ(0);
+}
+
+.bb-tooltip {
+  border-collapse: collapse;
+  border-spacing: 0;
+  background-color: var(--panel-2, #fff);
+  empty-cells: show;
+  opacity: 0.97;
+  box-shadow: 0 6px 18px #0006;
+  font-family: "Exo 2", system-ui, sans-serif;
+  white-space: nowrap;
+}
+.bb-tooltip tr {
+  border: 1px solid var(--border, #ccc);
+}
+.bb-tooltip th {
+  background-color: var(--sel, #aaa);
+  font-size: 12px;
+  padding: 3px 6px;
+  text-align: left;
+  color: var(--text, #222);
+}
+.bb-tooltip td {
+  font-size: 12px;
+  padding: 3px 6px;
+  background-color: var(--panel-2, #fff);
+  color: var(--text, #222);
+  border-left: 1px dotted var(--border, #999);
+}
+.bb-tooltip td > span, .bb-tooltip td > svg {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+}
+.bb-tooltip.value {
+  text-align: right;
+}
+
+/*-- Area --*/
+.bb-area {
+  stroke-width: 0;
+  opacity: 0.2;
+}
+
+/*-- Arc --*/
+.bb-chart-arcs-title {
+  dominant-baseline: middle;
+  font-size: 1.3em;
+}
+
+text.bb-chart-arcs-gauge-title {
+  dominant-baseline: middle;
+  font-size: 2.7em;
+}
+
+.bb-chart-arcs .bb-chart-arcs-background {
+  fill: var(--sel, #e0e0e0);
+  stroke: none;
+}
+.bb-chart-arcs .bb-chart-arcs-gauge-unit {
+  fill: var(--text-2, #555);
+  font-size: 16px;
+}
+.bb-chart-arcs .bb-chart-arcs-gauge-max {
+  fill: var(--muted, #777);
+}
+.bb-chart-arcs .bb-chart-arcs-gauge-min {
+  fill: var(--muted, #777);
+}
+.bb-chart-arcs {
+  /*-- Polar --*/
+}
+.bb-chart-arcs .bb-levels circle {
+  fill: none;
+  stroke: var(--border, #848282);
+  stroke-width: 0.5px;
+}
+.bb-chart-arcs .bb-levels text {
+  fill: var(--muted, #848282);
+}
+
+/*-- Radar --*/
+.bb-chart-radars .bb-levels polygon {
+  fill: none;
+  stroke: var(--border, #848282);
+  stroke-width: 0.5px;
+}
+.bb-chart-radars .bb-levels text {
+  fill: var(--muted, #848282);
+}
+.bb-chart-radars .bb-axis line {
+  stroke: var(--border, #848282);
+  stroke-width: 0.5px;
+}
+.bb-chart-radars .bb-axis text {
+  font-size: 1.15em;
+  cursor: default;
+}
+.bb-chart-radars .bb-shapes polygon {
+  fill-opacity: 0.2;
+  stroke-width: 1px;
+}
+
+/*-- Button --*/
+.bb-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.bb-button .bb-zoom-reset {
+  font-size: 11px;
+  border: solid 1px var(--border, #ccc);
+  background-color: var(--panel-2, #fff);
+  color: var(--text, #222);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}

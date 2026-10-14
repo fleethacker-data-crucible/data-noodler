@@ -1,20 +1,21 @@
 // Widgets (Dashboard Studio): packages, data and drawing. Global: Widgets. Needs ui/js/vendor/d3.v7.min.js (global d3),
-// dn-fs.js and engine-client.js.
+// ui/js/vendor/billboard/billboard.min.js (global bb), ui/js/widgets/bb-chart.js (BBChart), dn-fs.js and engine-client.js.
 //
 // A widget package is a folder with three files:
-//   d3-code.js        an ES module: export default function (data, { width, height, settings, inputs }) -> element
-//                     It builds its own root (controls + SVG) with d3, selects only inside it, and returns it. Filters /
-//                     buttons fire CustomEvents from the root.
-//   d3-style.css      the widget's only style. ".WIDGET" = its container (scoped here per widget). Frame colours (axes,
-//                     grid, text, background) use the app theme variables; data colours come from settings.
-//   d3-settings.json  { name, inputs: [{ key, label, role: 'dimension' | 'measure', agg, axis, optional }],
-//                       settings: [{ path, label, group, sub, type, default, ... }], values: { <path>: value } }
+//   code.js        an ES module: export default function (data, ctx) -> element (or a Promise of one)
+//                  ctx = { width, height, settings, inputs, container, links, filter, static }. Charts are billboard.js:
+//                  `return BBChart.render(data, ctx, { family, type })` (ui/js/widgets/bb-chart.js). Other widgets (the
+//                  Filter) build their own root, select only inside it, and return it. Filters fire CustomEvents from it.
+//   style.css      the widget's own style. ".WIDGET" = its container (scoped here per widget). Charts get their look
+//                  from the billboard theme (Settings > Theme); this file only adds to it.
+//   settings.json  { name, chart, filter, inputs: [{ key, label, role: 'dimension' | 'measure', agg, axis, optional, repeat }],
+//                    settings: [{ path, label, group, sub, type, default, ... }], values: { <path>: value } }
 // Where they live: GLOBAL (workspace/dashboard-studio/widgets/<id>/) and each project (<project>/dashboard/widgets/<id>/).
 // A project only uses its own copy. Data: the project's CLEAN_ datasets; SAMPLE_ datasets (workspace/sample-data/) are
 // for the editor's preview only.
 const Widgets = (() => {
   const GLOBAL = 'workspace/dashboard-studio/widgets', SAMPLES = 'workspace/sample-data';
-  const FILES = { code: 'd3-code.js', css: 'd3-style.css', settings: 'd3-settings.json' };
+  const FILES = { code: 'code.js', css: 'style.css', settings: 'settings.json' };
   const projectDir = ctx => `${ctx.dir}/dashboard/widgets`;
   const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'widget';
   const isSample = name => /^SAMPLE_/i.test(name || '');
@@ -43,7 +44,7 @@ const Widgets = (() => {
     await DNFS.remove(to, { recursive: true }).catch(() => {});
     await DNFS.copy(from, to, { overwrite: true });
   }
-  // d3-settings.json text -> object (a broken file throws with the reason).
+  // settings.json text -> object (a broken file throws with the reason).
   function parse(text) {
     const s = JSON.parse(text || '{}');
     return { name: s.name || '', inputs: Array.isArray(s.inputs) ? s.inputs.filter(i => i && i.key) : [], settings: Array.isArray(s.settings) ? s.settings.filter(o => o && o.path) : [], values: s.values || {} };
@@ -70,11 +71,11 @@ const Widgets = (() => {
     }
     let m;
     try { m = await mods.get(code); } catch (e) { mods.delete(code); throw e; }
-    if (typeof m.default !== 'function') throw new Error('d3-code.js must "export default function (data, { width, height, settings }) { ... }".');
+    if (typeof m.default !== 'function') throw new Error('code.js must "export default function (data, ctx) { ... }".');
     return m.default;
   }
 
-  // ---- style: ".WIDGET" in d3-style.css = the widget's container, scoped by the class dn-widget-<key> ----
+  // ---- style: ".WIDGET" in style.css = the widget's container, scoped by the class dn-widget-<key> ----
   const cls = key => `dn-widget-${String(key).replace(/[^A-Za-z0-9_-]/g, '_')}`;
   function useStyle(el, key, css) {
     const doc = el.ownerDocument, id = `${cls(key)}-style`, text = String(css || '').replace(/\.WIDGET\b/g, '.' + cls(key));
@@ -91,8 +92,8 @@ const Widgets = (() => {
     const s = typeof p.settings === 'string' ? parse(p.settings) : p.settings, fn = await compile(p.code);
     useStyle(el, p.key || p.id || 'edit', p.css);
     const width = Math.max(40, Math.floor(el.clientWidth)), height = Math.max(40, Math.floor(el.clientHeight));
-    const node = fn(data || [], { ...extra, width, height, settings: values(s, over), inputs: s.inputs });
-    if (node instanceof Node) el.replaceChildren(node);
+    const node = await fn(data || [], { ...extra, container: el, width, height, settings: values(s, over), inputs: expand(s.inputs, extra?.links || {}) });
+    if (node instanceof Node) { if (!(el.childNodes.length === 1 && el.firstChild === node)) el.replaceChildren(node); }
     else if (node != null) throw new Error('The widget function must return an element (e.g. svg.node()).');
   }
 
@@ -113,10 +114,18 @@ const Widgets = (() => {
     return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  // ---- repeated inputs: an input with "repeat": "Line" can be added again (Line 1, Line 2 ...). Its copies are keyed
+  // <key>_1, <key>_2 ... in links (an added copy with no field yet = {}). all = also the copies with no field (the Data
+  // section shows them); otherwise only linked copies (the query reads them, the widget gets rows with those keys).
+  const copies = (i, links) => Object.keys(links || {}).filter(k => k.startsWith(i.key + '_') && /^\d+$/.test(k.slice(i.key.length + 1)))
+    .sort((a, b) => a.slice(i.key.length + 1) - b.slice(i.key.length + 1));
+  const expand = (inputs, links, all = false) => (inputs || []).flatMap(i => !i.repeat ? [i] : [i, ...copies(i, links)
+    .filter(k => all || links[k]?.col).map(k => ({ ...i, key: k, label: `${i.repeat} ${k.slice(i.key.length + 1)}`, optional: true, repeat: undefined, base: i.key }))]);
+
   // ---- data: one declarative engine query for the linked inputs; rows come back keyed by input key ----
   // links = { <input key>: { col, agg } }. Dimensions are grouped by, measures aggregated (agg 'none' = raw rows).
   const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, DATE = /DATE|TIME/i;
-  const ready = (inputs, links) => inputs.length > 0 && inputs.every(i => i.optional || links[i.key]?.col || (i.role === 'measure' && links[i.key]?.agg === 'count'));
+  const ready = (inputs, links) => (inputs = expand(inputs, links)).length > 0 && inputs.every(i => i.optional || links[i.key]?.col || (i.role === 'measure' && links[i.key]?.agg === 'count'));
   // A dimension input with "count": true (filter widgets) is grouped and its rows counted: rows = { <key>, count }.
   const counted = inputs => inputs.some(i => i.role !== 'measure' && i.count);
   const isRaw = (inputs, links) => (!inputs.some(i => i.role === 'measure') && !counted(inputs)) || inputs.some(i => i.role === 'measure' && (links[i.key]?.agg || i.agg) === 'none');
@@ -150,6 +159,7 @@ const Widgets = (() => {
     }).join(' AND ');
   }
   async function load(inputs, links, d, cond) {
+    inputs = expand(inputs, links);
     const r = await Engine.call('query', { query: query(inputs, links, d.name, cond), views: Engine.views([d]) });
     const raw = isRaw(inputs, links), dates = new Set((d.columns || []).filter(c => DATE.test(c.type)).map(c => c.name));
     return r.rows.map(row => {
@@ -165,5 +175,5 @@ const Widgets = (() => {
     });
   }
 
-  return { GLOBAL, SAMPLES, FILES, NUMERIC, DATE, projectDir, slug, isSample, read, list, write, copy, parse, values, compile, useStyle, draw, samples, ready, query, where, load };
+  return { GLOBAL, SAMPLES, FILES, NUMERIC, DATE, projectDir, slug, isSample, read, list, write, copy, parse, values, compile, useStyle, draw, samples, ready, query, where, load, expand, copies };
 })();
