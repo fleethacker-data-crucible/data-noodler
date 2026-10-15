@@ -4,8 +4,11 @@
 // Columns: the fields on the Column / Group By / Value slots (in slot order), named after the field. The grid sorts
 // (click a header), filters (its funnel button or right-click), resizes (drag a header edge) and searches (contains).
 // Click to filter (dn.filter): a row click fires 'dn-filter' on the clicked column's value; linked containers follow.
+// Engine paging: a table of plain columns (no Value slots) with ctx.source { dataset, where } (the dashboard) reads its
+// rows from the engine 1,000 at a time as the reader scrolls (GridRemote; search, filters and sort run in SQL).
 // Settings: dn.search, dn.export, dn.sort, dn.colFilter, dn.resize, dn.filter, dn.rowHeight, dn.fontSize, dn.stripes, dn.fmtNum.
 const DNTable = (() => {
+  const PAGE = 1000;   // engine-paged tables: rows per request
   let cssReady = null;
   // The Data Grid's look (ui/js/grid/data-grid.css) once per page, for every table box (.dn-table).
   function css() {
@@ -39,8 +42,25 @@ const DNTable = (() => {
     root.style.fontSize = '';
     try { root._grid?.destroy(); } catch {}
     const box = document.createElement('div'); box.style.cssText = 'flex:1;min-height:0;display:flex;flex-direction:column'; root.replaceChildren(box);
-    if (!cols.length) { box.innerHTML = '<div style="margin:auto;color:var(--muted);font-size:13px">Drag fields onto the Column slots (Settings > Data)</div>'; return root; }
+    if (!cols.length && !(ctx.source?.dataset && Object.values(ctx.links || {}).some(l => l?.col))) { box.innerHTML = '<div style="margin:auto;color:var(--muted);font-size:13px">Drag fields onto the Column slots (Settings > Data)</div>'; return root; }
     // Numbers stay numbers for sorting unless a format turns them into text.
+    // Engine paging (plain columns on a dashboard): the grid asks the engine for 1,000 rows at a time.
+    const src = ctx.source, cnames = [...new Set((ctx.inputs || []).map(i => ctx.links?.[i.key]?.col).filter(Boolean))];
+    if (src?.dataset && typeof GridRemote !== 'undefined' && !ctx.static && cnames.length && !(ctx.inputs || []).some(i => i.role === 'measure')) {
+      const d = src.dataset, byCol = new Map((ctx.inputs || []).filter(i => ctx.links?.[i.key]?.col).map(i => [ctx.links[i.key].col, i.key]).reverse());
+      root._grid = DNGrid.create(box, {
+        names: cnames, columns: cnames.map(n => ({ name: n, type: (d.columns || []).find(c => c.name === n)?.type || 'VARCHAR' })), rows: [],
+        remote: (g, bar) => GridRemote.attach(g, { dataset: d.name, views: () => Engine.views([d]), cols: cnames, columns: d.columns || [], where: src.where || '', page: PAGE, more: PAGE }),
+        props: { showQuickFilter: S.search !== false, showExport: S.export !== false, exportFilename: 'table',
+          onRowClick: S.filter === false ? null : (row, col) => {
+            const key = byCol.get(col); if (!key) return; const v = row[col];
+            root.dispatchEvent(new CustomEvent('dn-filter', { bubbles: true, detail: { input: key, values: v == null ? [] : [v], state: { col, v } } }));
+          } },
+        columnDefaults: { sort: S.sort !== false, filter: S.colFilter !== false, resizable: S.resize !== false },
+      });
+      const t = box.querySelector('.dg-t'); if (t && S.fontSize) t.style.fontSize = `${S.fontSize}px`;
+      return root;
+    }
     const types = cols.map(c => ({ name: c.name, type: !f && (data || []).some(r => typeof r[c.key] === 'number') ? 'DOUBLE' : 'VARCHAR' }));
     const back = new Map(cols.map(c => [c.name, c.key]));
     root._grid = DNGrid.create(box, {

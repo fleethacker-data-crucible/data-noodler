@@ -13,7 +13,8 @@
 // Text values: '' = not set (billboard's default), a number in text = that number, 'None' on a pick = null.
 //
 // Data updates: a redraw with the same options (only the rows changed) calls chart.load(), so billboard animates the
-// change (transition.duration); other changes rebuild the chart. A size change resizes it.
+// change (transition.duration); other changes rebuild the chart. A size change only resizes it (same rows: no load).
+// Render Mode Auto: an axis chart with more than CANVAS_AT points draws on canvas (billboard render.mode).
 // Click to filter (dn.filter): a click on a point / bar / slice fires 'dn-filter' { input, values, state } from the chart
 // (Ctrl / Shift click adds to the pick, a click on the only picked value clears it); the dashboard filters the linked
 // containers. The picked values are dimmed-around and marked (x grid line) and come back on redraw (ctx.filter).
@@ -239,6 +240,7 @@ const BBChart = (() => {
   }
 
   // ---------------- options ----------------
+  const CANVAS_AT = 1500;   // points above which Render Mode Auto uses canvas
   const PICK_NULL = v => v === 'None' ? null : v;
   function options(S, spec, built, ctx) {
     const dn = S.dn, mine = clean(S.bb || {}) || {};
@@ -346,11 +348,17 @@ const BBChart = (() => {
     if (get(o, 'tooltip.order') === null) delete o.tooltip.order;
     if (dn.noAnimation || ctx.static) set(o, 'transition.duration', 0);
     if (dn.subchart === false) set(o, 'subchart.show', false);
+    // Render mode Auto: big axis charts draw on one canvas (billboard 4.1 render.mode) instead of thousands of SVG nodes;
+    // small ones stay SVG, as in billboard's examples. Arc / funnel charts are SVG only.
+    if (!get(o, 'render.mode') && !['pie', 'donut', 'gauge', 'polar', 'funnel', 'treemap'].includes(spec.type)) {
+      const n = (built.data.columns || []).reduce((a, c) => a + (c[0] === 'x' || String(c[0]).endsWith('__x') ? 0 : c.length - 1), 0);
+      if (n > CANVAS_AT) set(o, 'render.mode', 'canvas');
+    }
     return o;
   }
 
   // Configuration without the data (functions as their text): equal = only the rows changed -> chart.load().
-  const signature = o => JSON.stringify({ ...o, data: { ...o.data, columns: undefined, x: undefined, xs: undefined, labels: o.data?.labels ? String(o.data.labels.format || o.data.labels) : o.data?.labels }, size: undefined, bindto: undefined },
+  const signature = o => JSON.stringify({ ...o, data: { ...o.data, columns: undefined, x: undefined, xs: undefined, types: undefined, labels: o.data?.labels ? String(o.data.labels.format || o.data.labels) : o.data?.labels }, size: undefined, bindto: undefined },
     (k, v) => typeof v === 'function' ? String(v) : v instanceof Date ? v.toISOString() : v);
 
   // ---------------- render ----------------
@@ -417,14 +425,25 @@ const BBChart = (() => {
       };
     }
     // ---- reuse (animated data change) or build ----
+    // Combination: a series keeps the type it was given while Series Types stay the same (a filter that drops a
+    // series must not shift the types of the ones after it).
+    if (spec.combo && o.data.types) {
+      const k = JSON.stringify(S.dn.types || {});
+      if (root._comboKey !== k) { root._comboKey = k; root._comboTypes = {}; }
+      for (const id of Object.keys(o.data.types)) { if (root._comboTypes[id]) o.data.types[id] = root._comboTypes[id]; else root._comboTypes[id] = o.data.types[id]; }
+    }
     const sig = signature(o), chart = root._bb;
-    if (chart && root._sig === sig && !ctx.static) {
+    // billboard 4.1 canvas mode does not re-lay the axes on resize(): a canvas chart is rebuilt at its new size (~40 ms).
+    const canvasResize = get(o, 'render.mode') === 'canvas' && (root._w !== width || root._h !== height);
+    if (chart && root._sig === sig && !ctx.static && !canvasResize) {
       try {
         const next = new Set(o.data.columns.map(c => String(c[0]))), gone = (root._ids || []).filter(id => !next.has(id));
         if (root._w !== width || root._h !== height) chart.resize({ width, height });
+        // Same rows (a resize or repaint): no load, so nothing re-animates and no load piles up behind a resize drag.
+        if (data === root._data) { root._w = width; root._h = height; return root; }
         // One load at a time: a load started while another animates would leave its points behind; the newest waits.
         // (billboard 4.1.0 skips a load given an empty unload list: only series that went away are passed)
-        const args = { columns: o.data.columns, ...(o.data.xs ? { xs: o.data.xs } : {}), ...(gone.length ? { unload: gone } : {}), ...(o.data.types && Object.keys(o.data.types).length ? { types: o.data.types } : {}) };
+        const args = { columns: o.data.columns, ...(o.data.xs ? { xs: o.data.xs } : {}), ...(gone.length ? { unload: gone } : {}), types: o.data.types && Object.keys(o.data.types).length ? o.data.types : Object.fromEntries([...next].filter(id => id !== 'x' && !id.endsWith('__x')).map(id => [id, o.data.type || 'line'])) };
         const run = a => {
           root._busy = true;
           let t = 0; const fin = () => { clearTimeout(t); if (!root._busy) return; root._busy = false; const nx = root._next; root._next = null; if (nx) run(nx); };
@@ -432,7 +451,7 @@ const BBChart = (() => {
           chart.load({ ...a, done: fin });
         };
         if (root._busy) root._next = args; else run(args);
-        root._ids = [...next]; root._w = width; root._h = height; root._rows = rows;
+        root._ids = [...next]; root._w = width; root._h = height; root._rows = rows; root._data = data;
         return root;
       } catch { /* rebuild below */ }
     }
@@ -446,7 +465,7 @@ const BBChart = (() => {
     o.onrendered = function () { userRendered?.call(this); done(); };
     if (!host) document.body.append(root);   // billboard measures text: the chart must be in the page while it is built
     root._bb = bb.generate(o);
-    root._sig = sig; root._ids = o.data.columns.map(c => String(c[0])); root._w = width; root._h = height; root._rows = rows;
+    root._sig = sig; root._ids = o.data.columns.map(c => String(c[0])); root._w = width; root._h = height; root._rows = rows; root._data = data;
     if (ctx.static) { await Promise.race([rendered, new Promise(r => setTimeout(r, 400))]); await new Promise(r => setTimeout(r, 30)); }
     if (!host) root.remove();
     return root;

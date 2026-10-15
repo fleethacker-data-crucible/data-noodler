@@ -178,15 +178,18 @@
     const note = (h, err) => { pv.className = 'pv'; pv.innerHTML = `<div class="note ${err ? 'err' : ''}">${h}</div>`; };
     if (!w.widget) return note('Custom Widget<br><small>Right-click > Edit</small>');
     if (!p) return note(`Widget "${esc(w.widget)}" not found in dashboard/widgets/. Right-click > Edit, or delete it.`, true);
-    try { await Widgets.draw(pv, { ...p, key: p.id }, results.get(w.id) || [], undefined, { filter: filters.get(w.id)?.detail || null, links: w.inputs || {} }); }
+    const d = paged(p) ? dsOf(w.dataset) : null, source = d ? { dataset: d, where: whereFor(w) } : null;
+    try { await Widgets.draw(pv, { ...p, key: p.id }, results.get(w.id) || [], undefined, { filter: filters.get(w.id)?.detail || null, links: w.inputs || {}, source }); }
     catch (e) { note(esc(String(e.message || e).split('\n')[0]), true); }
   }
+  // Tables of plain columns page their rows from the engine themselves (DNTable + GridRemote, 1,000 at a time): no query here.
+  const paged = p => { try { const s = Widgets.parse(p.settings); return s.chart === 'table' && !(s.inputs || []).some(i => i.role === 'measure'); } catch { return false; } };
   let queue = Promise.resolve();
   function draw(w) {
     queue = queue.then(async () => {
       results.delete(w.id);
       const p = pkgs.get(w.widget), d = dsOf(w.dataset);
-      if (p && d) {
+      if (p && d && !paged(p)) {
         try { const s = Widgets.parse(p.settings); if (Widgets.ready(s.inputs, w.inputs || {})) { await Engine.memory.load([d.path]).catch(() => {}); results.set(w.id, await Widgets.load(s.inputs, w.inputs || {}, d, whereFor(w))); } }
         catch (e) { ctx.log(`${p.name}: ${String(e.message || e).split('\n')[0]}`, 'warn'); }
       }

@@ -1463,14 +1463,15 @@
     },
     {
       "path": "bb.render.mode",
-      "label": "Render Mode (canvas = big data)",
+      "label": "Render Mode (Auto: canvas above 1500 points)",
       "group": "Layout",
       "type": "pick",
       "choices": [
+        "Auto",
         "svg",
         "canvas"
       ],
-      "default": "svg"
+      "default": "Auto"
     },
     {
       "path": "bb.svg.classname",

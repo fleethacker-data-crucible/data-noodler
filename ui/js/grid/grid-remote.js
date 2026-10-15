@@ -4,7 +4,7 @@
 // the reader nears the end. Global: GridRemote.
 //   GridRemote.attach(grid, { dataset, views(), cols, columns, where, onCount(total, loaded, stat) })
 //     views() = engine views for the dataset; cols = the picked fields; columns = [{ name, type }] of the dataset;
-//     where = SQL from the Dashboard's Filter widgets.
+//     where = SQL from the Dashboard's Filter widgets; page / more = rows in the first / each next request (default 100).
 const GridRemote = (() => {
   const PAGE = 100, MORE = 100;   // first 100 rows, then the next 100 each time the reader nears the end
   const BLOCK = 1000;             // sorted grids: rows fetched per request (each request is a full top-N over the data)
@@ -67,6 +67,7 @@ const GridRemote = (() => {
     const stat = { wall: 0, engine: 0 };
     const run = async sql => { const r = await Engine.call('query', { sql, views: o.views() }); stat.engine = Math.max(stat.engine, +r.ms || 0); return r.rows.map(row => Object.fromEntries(r.cols.map((c, k) => [typeof c === 'string' ? c : c.name, row[k]]))); };
     const timed = async fn => { const t0 = performance.now(); stat.engine = 0; const v = await fn(); stat.wall = performance.now() - t0; return v; };
+    const block = Math.max(BLOCK, o.more || 0);
     const page = (where, order, offset, n) => run(`SELECT ${select} FROM ${from}${where ? ` WHERE ${where}` : ''}${order} LIMIT ${n} OFFSET ${offset}`);
     const count = async where => +Object.values((await run(`SELECT count(*) AS n FROM ${from}${where ? ` WHERE ${where}` : ''}`))[0] || {})[0] || 0;
     let total = 0;
@@ -77,8 +78,8 @@ const GridRemote = (() => {
       if (!order) { const rows = await page(where, order, at, n); return { rows, done: rows.length < n }; }
       if (!buf || buf.key !== key || at < buf.at || at >= buf.at + buf.rows.length) {
         if (buf && buf.key === key && buf.end && at >= buf.at + buf.rows.length) return { rows: [], done: true };
-        const rows = await page(where, order, at, BLOCK);
-        buf = { key, at, rows, end: rows.length < BLOCK };
+        const rows = await page(where, order, at, block);
+        buf = { key, at, rows, end: rows.length < block };
       }
       const from = at - buf.at, rows = buf.rows.slice(from, from + n);
       return { rows, done: buf.end && from + n >= buf.rows.length };
@@ -87,13 +88,13 @@ const GridRemote = (() => {
       async load(s) {
         const where = whereOf(s, o, types), order = orderOf(s), key = where + order;
         buf = null;
-        const [r, n] = await timed(() => Promise.all([fetch(where, order, key, 0, PAGE), count(where)]));
+        const [r, n] = await timed(() => Promise.all([fetch(where, order, key, 0, o.page || PAGE), count(where)]));
         total = n; o.onCount?.(n, r.rows.length, stat);
         return { rows: r.rows, total: n, done: r.done };
       },
       async more(s, at) {
         const where = whereOf(s, o, types), order = orderOf(s);
-        const r = await timed(() => fetch(where, order, where + order, at, MORE));
+        const r = await timed(() => fetch(where, order, where + order, at, o.more || MORE));
         o.onCount?.(total, at + r.rows.length, stat);
         return r;
       },
