@@ -5,7 +5,7 @@
 // Global: GlobalHeader.setInfo(title, project)   (ModulePage calls it once the project is loaded)
 (() => {
   const id = location.pathname.split('/').pop().replace(/\.html$/, '');
-  const MODS = { project_manager: ['Project Management Module', 'PR'], import: ['Import', 'IM'], pipeline: ['Transform', 'PL'], 'dashboard-studio': ['Dashboard Studio', 'DS'],
+  const MODS = { project_manager: ['Project Management Module', 'PR'], import: ['Import', 'IM'], pipeline: ['Transform', 'PL'], 'dashboard-studio': ['Dashboard Studio', 'DS'], new_app: ['Data Noodler', 'NA'],
     publish: ['Publish', 'PU'], update: ['Update', 'UP'] };
   const [label, initials] = MODS[id] || [document.title || id, id.slice(0, 2).toUpperCase()];
   document.documentElement.classList.add('embedded');
@@ -17,6 +17,7 @@
         document.title = 'Import'; return;
       }
       const el = document.getElementById('gh-sub'); if (el) el.textContent = project ? `${title} · ${project}` : title;
+      if (id === 'new_app') return;   // keeps its own <title>
       document.title = project ? `${title} · ${project}` : id === 'project_manager' ? 'Project Manager' : `${title} · Data Noodler`;
     },
   };
@@ -25,10 +26,8 @@
     const h = document.createElement('header');
     h.className = 'topbar gh';
     h.innerHTML = `<div class="brand"><span class="logo">${esc(initials)}</span><div><h1>Data Noodler</h1><div class="sub" id="gh-sub">${esc(label)}</div></div></div>
-      <div class="spacer"></div>
-      <div class="gh-status"><div class="stat"><label>Web Server (PowerShell)</label><b id="gh-srv" class="wait">CONNECTING</b></div>
-      <div class="stat"><label>Data Engine (C#)</label><b id="gh-eng" class="wait" title="Click to re-run the test">TESTING</b></div></div>`;
-    if (id === 'project_manager') document.body.prepend(h);   // the header is on the Project Manager only; modules use the full window
+      <div class="spacer"></div><button id="srvctl" class="danger" title="Open the server control panel">Server Control</button>`;
+    if (id === 'project_manager') { document.body.prepend(h); h.querySelector('#srvctl').onclick = () => fetch('/api/panel', { method: 'POST', headers: hdr() }).catch(() => {}); }   // the header is on the Project Manager only; modules use the full window
     G.setInfo(label, null);
     const hdr = () => ({ 'X-DN-Token': window.DN_TOKEN || '', 'Content-Type': 'application/json' });
 

@@ -1,5 +1,5 @@
 // Data Grid on the engine: the grid never holds the whole dataset. Its search box, column filters and sort are turned
-// into one SQL query (WHERE / ORDER BY / LIMIT / OFFSET) that the engine runs on all workers (the dataset's rows
+// into one SQL query (WHERE / ORDER BY / OFFSET ... ROWS FETCH NEXT ... ROWS ONLY) that the engine runs on all workers (the dataset's rows
 // resident in engine memory, else its Arrow parts on disk). The first 100 rows load at once, then 100 more at a time as
 // the reader nears the end. Global: GridRemote.
 //   GridRemote.attach(grid, { dataset, views(), cols, columns, where, onCount(total, loaded, stat) })
@@ -14,21 +14,23 @@ const GridRemote = (() => {
 
   // One grid filter expression -> SQL. Expressions: { key, condition: { name } | name, searchTerm, criteria, caseSensitive }.
   function term(e, types) {
-    const c = qid(e.key), t = types.get(e.key) || '', v = e.searchTerm, s = `CAST(${c} AS VARCHAR)`, like = e.caseSensitive ? 'LIKE' : 'ILIKE';
+    const c = qid(e.key), t = types.get(e.key) || '', v = e.searchTerm, s = `CAST(${c} AS VARCHAR2(4000))`, cs = e.caseSensitive;
+    // Case-insensitive match: UPPER on both sides (Oracle has no ILIKE).
+    const like = (pat, not) => cs ? `${s} ${not ? 'NOT ' : ''}LIKE ${str(pat)}` : `UPPER(${s}) ${not ? 'NOT ' : ''}LIKE UPPER(${str(pat)})`;
     const num = NUM.test(t) && v !== '' && v != null && !isNaN(+v), cmp = op => num ? `${c} ${op} ${+v}` : `${s} ${op} ${str(v)}`;
-    const blank = NUM.test(t) || BOOL.test(t) ? `${c} IS NULL` : `(${c} IS NULL OR ${s} = '')`;
+    const blank = NUM.test(t) || BOOL.test(t) ? `${c} IS NULL` : `(${c} IS NULL OR TRIM(${s}) IS NULL)`;   // '' is NULL in Oracle
     switch (e.condition?.name ?? e.condition) {
       case 'all': return 'TRUE';
       case 'true': return `${c} = TRUE`;
       case 'false': return `${c} = FALSE`;
       case 'empty': return blank;
       case 'notEmpty': return `NOT ${blank}`;
-      case 'contains': return `${s} ${like} ${str(`%${v ?? ''}%`)}`;
-      case 'doesNotContain': return `(${c} IS NULL OR ${s} NOT ${like} ${str(`%${v ?? ''}%`)})`;
-      case 'startsWith': return `${s} ${like} ${str(`${v ?? ''}%`)}`;
-      case 'endsWith': return `${s} ${like} ${str(`%${v ?? ''}`)}`;
-      case 'equals': return num ? `${c} = ${+v}` : e.caseSensitive ? `${s} = ${str(v)}` : `lower(${s}) = lower(${str(v)})`;
-      case 'doesNotEqual': return num ? `${c} <> ${+v}` : e.caseSensitive ? `${s} <> ${str(v)}` : `lower(${s}) <> lower(${str(v)})`;
+      case 'contains': return like(`%${v ?? ''}%`);
+      case 'doesNotContain': return `(${c} IS NULL OR ${like(`%${v ?? ''}%`, true)})`;
+      case 'startsWith': return like(`${v ?? ''}%`);
+      case 'endsWith': return like(`%${v ?? ''}`);
+      case 'equals': return num ? `${c} = ${+v}` : e.caseSensitive ? `${s} = ${str(v)}` : `UPPER(${s}) = UPPER(${str(v)})`;
+      case 'doesNotEqual': return num ? `${c} <> ${+v}` : e.caseSensitive ? `${s} <> ${str(v)}` : `UPPER(${s}) <> UPPER(${str(v)})`;
       case 'greaterThan': return cmp('>');
       case 'lessThan': return cmp('<');
       case 'greaterThanOrEqual': return cmp('>=');
@@ -45,7 +47,7 @@ const GridRemote = (() => {
       // Only columns whose text could contain q (same rows as searching them all, far less work: numbers / dates /
       // flags are not turned into text for every row when q cannot match them).
       const look = o.cols.filter(c => canHold(types.get(c) || '', q));
-      parts.push(look.length ? `(${look.map(c => `CAST(${qid(c)} AS VARCHAR) ILIKE ${str(`%${q}%`)}`).join(' OR ')})` : 'FALSE');
+      parts.push(look.length ? `(${look.map(c => `UPPER(CAST(${qid(c)} AS VARCHAR2(4000))) LIKE UPPER(${str(`%${q}%`)})`).join(' OR ')})` : 'FALSE');
     }
     return parts.join(' AND ');
   }
@@ -68,8 +70,8 @@ const GridRemote = (() => {
     const run = async sql => { const r = await Engine.call('query', { sql, views: o.views() }); stat.engine = Math.max(stat.engine, +r.ms || 0); return r.rows.map(row => Object.fromEntries(r.cols.map((c, k) => [typeof c === 'string' ? c : c.name, row[k]]))); };
     const timed = async fn => { const t0 = performance.now(); stat.engine = 0; const v = await fn(); stat.wall = performance.now() - t0; return v; };
     const block = Math.max(BLOCK, o.more || 0);
-    const page = (where, order, offset, n) => run(`SELECT ${select} FROM ${from}${where ? ` WHERE ${where}` : ''}${order} LIMIT ${n} OFFSET ${offset}`);
-    const count = async where => +Object.values((await run(`SELECT count(*) AS n FROM ${from}${where ? ` WHERE ${where}` : ''}`))[0] || {})[0] || 0;
+    const page = (where, order, offset, n) => run(`SELECT ${select} FROM ${from}${where ? ` WHERE ${where}` : ''}${order} OFFSET ${offset} ROWS FETCH NEXT ${n} ROWS ONLY`);
+    const count = async where => +Object.values((await run(`SELECT COUNT(*) AS n FROM ${from}${where ? ` WHERE ${where}` : ''}`))[0] || {})[0] || 0;
     let total = 0;
     // Sorted: rows come BLOCK at a time into buf (rows buf.at .. buf.at + buf.rows.length of this query) and the grid's
     // pages are served from it, so scrolling a sorted grid runs one sort per 1,000 rows instead of one per 100.

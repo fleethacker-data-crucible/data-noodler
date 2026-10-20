@@ -27,7 +27,7 @@ namespace NativeDataEngine
     }
     public sealed class ColDef
     {
-        public string Name; public DataType Type; public bool NotNull, Pk, Unique, Auto; public string Default, Check;
+        public string Name; public DataType Type; public bool NotNull, Pk, Unique, Auto, Seq, Always; public string Default, Check;   // Seq: Oracle identity (own counter); Always: GENERATED ALWAYS
     }
     public sealed class CreateTableS : Stmt
     {
@@ -77,14 +77,16 @@ namespace NativeDataEngine
         public string Target, TAlias, Source, SAlias, On; public List<MergeWhen> Whens = new List<MergeWhen>();
         public override string Kind { get { return "MERGE"; } }
     }
-    public sealed class TxS : Stmt { public string What; public override string Kind { get { return What; } } }
-    public sealed class TryS : Stmt { public List<Stmt> Try = new List<Stmt>(), Catch = new List<Stmt>(); public override string Kind { get { return "TRY/CATCH"; } } }
+    // Implicit: Oracle transactions (always open; COMMIT keeps the changes, ROLLBACK goes back to the last COMMIT).
+    public sealed class TxS : Stmt { public string What; public bool Implicit; public override string Kind { get { return What; } } }
+    // BEGIN TRY ... / PL/SQL BEGIN ... EXCEPTION WHEN OTHERS THEN ... END (Catch null: a block without EXCEPTION).
+    public sealed class TryS : Stmt { public List<Stmt> Try = new List<Stmt>(), Catch = new List<Stmt>(); public bool PlSql; public override string Kind { get { return PlSql ? "BEGIN ... END" : "TRY/CATCH"; } } }
     public sealed class IndexS : Stmt
     {
         public string Name, Table; public bool Unique, Clustered, IfNotExists; public List<string> Cols = new List<string>();
         public override string Kind { get { return "CREATE INDEX"; } }
     }
-    public sealed class ThrowS : Stmt { public string Message; public override string Kind { get { return "THROW"; } } }
+    public sealed class ThrowS : Stmt { public string Message; public long Number = -20000; public override string Kind { get { return "THROW"; } } }
     public sealed class NoopS : Stmt { public string What; public override string Kind { get { return What; } } }
 
     // ---------- statement parser ----------
@@ -92,29 +94,41 @@ namespace NativeDataEngine
     {
         static readonly HashSet<string> StmtWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
             "SELECT", "WITH", "FROM", "VALUES", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE", "MERGE", "BEGIN", "START",
-            "COMMIT", "ROLLBACK", "THROW", "RAISERROR", "GO", "PRINT", "SET", "USE", "DESCRIBE", "END", "REPLACE" };
+            "COMMIT", "ROLLBACK", "THROW", "RAISERROR", "GO", "PRINT", "SET", "USE", "DESCRIBE", "END", "REPLACE",
+            "DECLARE", "EXECUTE", "RENAME", "PROMPT", "DESC", "RAISE", "RAISE_APPLICATION_ERROR", "EXCEPTION", "DBMS_OUTPUT" };
 
-        public static List<Stmt> ParseScript(string sql)
+        // User scripts: Oracle SQL (see .claude/docs/SQL_DIALECT.md).
+        public static List<Stmt> ParseScript(string sql) { return ParseScript(sql, true); }
+        public static List<Stmt> ParseScript(string sql, bool oracle)
         {
-            Parser ps = new Parser(sql);
+            Parser ps = new Parser(sql, oracle);
             List<Stmt> r = ps.Statements(null);
             if (ps.Cur.T != Tk.End) throw ps.Err("Unexpected " + ps.Cur);
             return r;
         }
-        // Statements until the end, or until END <block> (TRY / CATCH).
+        // Statements until the end, or until END <block> (TRY / CATCH), or (block "PLSQL") until EXCEPTION / END.
+        // ';' or '/' (SQL*Plus, after a PL/SQL block) separate statements.
         List<Stmt> Statements(string block)
         {
             List<Stmt> r = new List<Stmt>();
             while (true)
             {
-                while (AcceptOp(";")) { }
-                if (Cur.T == Tk.End) { if (block != null) throw Err("Missing END " + block); break; }
-                if (block != null && IsKw("END") && IsKwAt(1, block)) break;
+                while (AcceptOp(";") || AcceptOp("/")) { }
+                if (Cur.T == Tk.End) { if (block != null) throw Err("Missing END" + (block == "PLSQL" ? "" : " " + block)); break; }
+                if (block == "PLSQL" && (IsKw("END") || IsKw("EXCEPTION"))) break;
+                if (block != null && block != "PLSQL" && IsKw("END") && IsKwAt(1, block)) break;
                 r.Add(Statement());
-                if (!IsOp(";") && Cur.T != Tk.End && !StatementStart()) throw Err("Expected ; between statements but found " + Cur);
+                if (!IsOp(";") && !IsOp("/") && Cur.T != Tk.End && !StatementStart()) throw Err("Expected ; between statements but found " + Cur);
             }
             return r;
         }
+        // SQL*Plus commands (SET ..., PROMPT ...) end at the end of the line.
+        void SkipLine()
+        {
+            int nl = src.IndexOf('\n', Cur.Pos); if (nl < 0) nl = src.Length;
+            while (Cur.T != Tk.End && Cur.Pos < nl) p++;
+        }
+        static string LitTextOf(Expr e) { Lit l = e as Lit; return l != null && l.Value != null ? Convert.ToString(l.Value, CultureInfo.InvariantCulture) : null; }
         bool StatementStart() { return (Cur.T == Tk.Ident && StmtWords.Contains(Cur.V)) || IsOp("("); }
         string Slice(int a, int b)
         {
@@ -166,8 +180,89 @@ namespace NativeDataEngine
             st.Pos = t[start].Pos; st.Text = Slice(start, p);
             return st;
         }
+        // Oracle statements: PL/SQL blocks, implicit transactions, SQL*Plus lines; non-Oracle statements are errors.
+        // Returns null for the statements shared with the lenient grammar (CREATE, INSERT, ... checked in their parsers).
+        Stmt OracleStatement()
+        {
+            if (IsKw("BEGIN"))
+            {
+                // BEGIN stmt; ... [EXCEPTION WHEN OTHERS THEN stmt; ...] END [name];
+                p++; TryS b = new TryS(); b.PlSql = true; b.Catch = null;
+                b.Try = Statements("PLSQL");
+                if (Accept("EXCEPTION"))
+                {
+                    b.Catch = new List<Stmt>();
+                    while (Accept("WHEN"))
+                    {
+                        if (!IsKw("OTHERS")) throw Err("Only WHEN OTHERS THEN is supported in EXCEPTION (named exceptions are not)");
+                        p++; Expect("THEN");
+                        b.Catch.AddRange(Statements("PLSQL"));
+                        if (IsKw("EXCEPTION")) throw Err("Expected END");
+                    }
+                }
+                Expect("END");
+                if (Cur.T == Tk.Ident && !StmtWords.Contains(Cur.V)) p++;   // END block_name
+                return b;
+            }
+            if (IsKw("DECLARE")) throw Err("DECLARE blocks (PL/SQL variables) are not supported; use BEGIN ... END");
+            if (IsKw("NULL") && (Peek(1).V == ";" || Peek(1).T == Tk.End)) { p++; NoopS n = new NoopS(); n.What = "NULL"; return n; }
+            if (IsKw("RAISE")) { p++; return new ThrowS(); }   // re-raise inside EXCEPTION
+            if (IsKw("RAISE_APPLICATION_ERROR"))
+            {
+                p++; ExpectOp("("); Expr num = Expression(); ExpectOp(",");
+                ThrowS th = new ThrowS(); Lit nl = num as Lit; if (nl != null && nl.Value is long) th.Number = (long)nl.Value;
+                string m = LitTextOf(Expression()); th.Message = m ?? "Error";
+                if (AcceptOp(",")) Expression();
+                ExpectOp(")"); return th;
+            }
+            if (IsKw("EXECUTE") && IsKwAt(1, "IMMEDIATE"))
+            {
+                // EXECUTE IMMEDIATE 'statement': runs the text as a statement (a text literal only)
+                p += 2; Token lt = Cur; string text = LitTextOf(Expression());
+                if (text == null) throw Lexer.Err("EXECUTE IMMEDIATE needs the statement as one text literal", lt.Pos);
+                List<Stmt> inner;
+                try { inner = ParseScript(text, true); }
+                catch (EngineException e) { throw Lexer.Err("In EXECUTE IMMEDIATE: " + e.Message, lt.Pos); }
+                TryS blk = new TryS(); blk.PlSql = true; blk.Catch = null; blk.Try = inner; return blk;
+            }
+            if (IsKw("DBMS_OUTPUT") && Peek(1).V == ".") { p += 2; Name(); if (IsOp("(")) SkipBalanced(); NoopS n = new NoopS(); n.What = "DBMS_OUTPUT"; return n; }
+            if (IsKw("COMMIT") || IsKw("ROLLBACK"))
+            {
+                TxS tx = Tx(t[p++].V.ToUpperInvariant()); tx.Implicit = true; Accept("WORK");
+                if (IsKw("TO")) throw Err("ROLLBACK TO SAVEPOINT is not supported");
+                return tx;
+            }
+            if (IsKw("SAVEPOINT")) throw Err("SAVEPOINT is not supported");
+            if (IsKw("SET") || IsKw("PROMPT") || IsKw("SPOOL"))
+            {
+                // SQL*Plus lines: ignored
+                NoopS n = new NoopS(); n.What = Cur.V.ToUpperInvariant(); p++; SkipLine(); return n;
+            }
+            if (IsKw("DESC") || IsKw("DESCRIBE"))
+            {
+                p++; QueryS q = new QueryS();
+                if (IsKw("SELECT") || IsKw("WITH") || IsOp("(")) q.Q = Query();   // DESCRIBE query: its columns
+                else q.Q = ParseQuery("SELECT * FROM \"" + TableName().Replace("\"", "\"\"") + "\"");
+                q.Q.Describe = true; return q;
+            }
+            if (IsKw("RENAME") && !IsKwAt(1, "TO"))
+            {
+                // RENAME old TO new
+                p++; AlterS a = new AlterS(); a.Table = TableName(); Expect("TO");
+                AlterOp o = new AlterOp(); o.Op = "RENAME TO"; o.NewName = TableName(); a.Ops.Add(o); return a;
+            }
+            if (IsKw("REPLACE") && IsKwAt(1, "INTO")) throw NotOraS("REPLACE INTO", "MERGE INTO ... USING ... ON (...) WHEN MATCHED THEN UPDATE ... WHEN NOT MATCHED THEN INSERT ...");
+            if (IsKw("THROW") || IsKw("RAISERROR")) throw NotOraS(Cur.V.ToUpperInvariant(), "RAISE_APPLICATION_ERROR(-20001, 'message')");
+            if (IsKw("GO") || IsKw("PRINT") || IsKw("USE")) throw NotOraS(Cur.V.ToUpperInvariant(), null);
+            if (IsKw("START") && IsKwAt(1, "TRANSACTION")) throw NotOraS("START TRANSACTION", "nothing: Oracle transactions start by themselves; end them with COMMIT or ROLLBACK");
+            if (IsKw("FROM") || IsKw("VALUES")) throw NotOraS("A statement starting with " + Cur.V.ToUpperInvariant(), "SELECT ... FROM ...");
+            return null;
+        }
+        EngineException NotOraS(string what, string use) { return Err(what + " is not Oracle SQL" + (use != null ? ": use " + use : "")); }
+
         Stmt Statement0()
         {
+            if (Oracle) { Stmt o = OracleStatement(); if (o != null) return o; }
             if (IsKw("SELECT") || IsKw("WITH") || IsKw("FROM") || IsKw("VALUES") || IsOp("(")) { QueryS q = new QueryS(); q.Q = Query(); return q; }
             if (IsKw("DESCRIBE")) { p++; QueryS q = new QueryS(); q.Q = Query(); q.Q.Describe = true; return q; }
             if (IsKw("CREATE")) return CreateP();
@@ -175,7 +270,7 @@ namespace NativeDataEngine
             if (IsKw("INSERT") || (IsKw("REPLACE") && IsKwAt(1, "INTO"))) return InsertP();
             if (IsKw("UPDATE")) return UpdateP();
             if (IsKw("DELETE")) return DeleteP();
-            if (IsKw("TRUNCATE")) { p++; Accept("TABLE"); TruncateS s = new TruncateS(); s.Table = TableName(); return s; }
+            if (IsKw("TRUNCATE")) { p++; if (Oracle && !IsKw("TABLE")) throw Err("Expected TABLE (Oracle: TRUNCATE TABLE name)"); Accept("TABLE"); TruncateS s = new TruncateS(); s.Table = TableName(); return s; }
             if (IsKw("ALTER")) return AlterP();
             if (IsKw("MERGE")) return MergeP();
             if (IsKw("BEGIN"))
@@ -230,32 +325,55 @@ namespace NativeDataEngine
         {
             p++;
             bool orReplace = false;
-            if (Accept("OR")) { if (!Accept("REPLACE")) Expect("ALTER"); orReplace = true; }
-            bool temp = Accept("TEMPORARY") || Accept("TEMP");
-            bool unique = Accept("UNIQUE"), clustered = Accept("CLUSTERED");
-            if (!clustered) Accept("NONCLUSTERED");
+            if (Accept("OR"))
+            {
+                if (Oracle && !IsKw("REPLACE")) throw NotOraS("CREATE OR " + Cur.V.ToUpperInvariant(), "CREATE OR REPLACE VIEW");
+                if (!Accept("REPLACE")) Expect("ALTER"); orReplace = true;
+            }
+            bool temp;
+            if (Oracle)
+            {
+                // CREATE [GLOBAL | PRIVATE] TEMPORARY TABLE, CREATE [OR REPLACE] [[NO]FORCE] [EDITIONABLE] VIEW, CREATE [UNIQUE | BITMAP] INDEX
+                if (IsKw("TEMP") || (IsKw("TEMPORARY") && !IsKwAt(1, "TABLE"))) throw NotOraS("CREATE TEMP", "CREATE GLOBAL TEMPORARY TABLE");
+                if (IsKw("TEMPORARY")) throw NotOraS("CREATE TEMPORARY TABLE", "CREATE GLOBAL TEMPORARY TABLE");
+                temp = (Accept("GLOBAL") || Accept("PRIVATE")) && Accept("TEMPORARY");
+                if (!Accept("FORCE")) Accept("NOFORCE");
+                if (!Accept("EDITIONABLE")) Accept("NONEDITIONABLE");
+                if (IsKw("CLUSTERED") || IsKw("NONCLUSTERED")) throw NotOraS(Cur.V.ToUpperInvariant() + " INDEX", "CREATE INDEX");
+                Accept("BITMAP");
+                if (orReplace && IsKw("TABLE")) throw NotOraS("CREATE OR REPLACE TABLE", "DROP TABLE, then CREATE TABLE");
+            }
+            else temp = Accept("TEMPORARY") || Accept("TEMP");
+            bool unique = Accept("UNIQUE"), clustered = !Oracle && Accept("CLUSTERED");
+            if (!Oracle && !clustered) Accept("NONCLUSTERED");
+            if (Oracle) Accept("BITMAP");
             if (Accept("TABLE")) { CreateTableS ct = CreateTableP(orReplace); ct.Temp = temp; return ct; }
             if (Accept("VIEW"))
             {
                 CreateViewS v = new CreateViewS(); v.OrReplace = orReplace; v.IfNotExists = IfNotExists(); v.Name = TableName();
                 if (IsOp("(")) { v.Cols = new List<string>(); p++; do { v.Cols.Add(Name()); } while (AcceptOp(",")); ExpectOp(")"); }
                 Expect("AS"); v.QueryText = QueryText();
+                if (IsKw("WITH") && (IsKwAt(1, "READ") || IsKwAt(1, "CHECK"))) { p += 2; Accept("ONLY"); Accept("OPTION"); if (Accept("CONSTRAINT")) Name(); }
                 return v;
             }
             if (Accept("INDEX"))
             {
                 IndexS x = new IndexS(); x.Unique = unique; x.Clustered = clustered; x.IfNotExists = IfNotExists();
                 x.Name = Name(); Expect("ON"); x.Table = TableName(); x.Cols = NameList();
+                if (Oracle && (IsKw("INCLUDE") || IsKw("WHERE") || (IsKw("WITH") && Peek(1).V == "("))) throw NotOraS("CREATE INDEX ... " + Cur.V.ToUpperInvariant(), null);
                 if (Accept("INCLUDE")) NameList();
                 if (Accept("WHERE")) Expression();
                 if (IsKw("WITH") && Peek(1).V == "(") { p++; SkipBalanced(); }
+                if (Oracle) while (Cur.T != Tk.End && !IsOp(";") && !IsOp("/") && !StatementStart()) p++;   // TABLESPACE ..., COMPRESS ...
                 return x;
             }
+            if (Oracle && IsKw("SEQUENCE")) throw Err("CREATE SEQUENCE is not supported; use GENERATED AS IDENTITY on a column");
             throw Err("Expected TABLE, VIEW or INDEX after CREATE");
         }
         CreateTableS CreateTableP(bool orReplace)
         {
             CreateTableS c = new CreateTableS(); c.OrReplace = orReplace; c.IfNotExists = IfNotExists(); c.Name = TableName();
+            if (IsKw("ON") && IsKwAt(1, "COMMIT")) { p += 3; Expect("ROWS"); }   // GLOBAL TEMPORARY ... ON COMMIT ... ROWS AS SELECT
             if (Accept("AS")) { c.AsQuery = QueryText(); return c; }
             ExpectOp("(");
             do
@@ -268,13 +386,15 @@ namespace NativeDataEngine
                 else c.Cols.Add(ColDefP());
             } while (AcceptOp(","));
             ExpectOp(")");
-            while (Cur.T != Tk.End && !IsOp(";") && !StatementStart()) p++;   // table options (ENGINE=..., WITH (...))
+            if (IsKw("ON") && IsKwAt(1, "COMMIT")) { p += 3; Expect("ROWS"); }   // ON COMMIT DELETE | PRESERVE ROWS
+            while (Cur.T != Tk.End && !IsOp(";") && !IsOp("/") && !StatementStart()) p++;   // table options (TABLESPACE ..., ENGINE=..., WITH (...))
             foreach (ColDef d in c.Cols) { if (d.Pk) c.Pk = new List<string> { d.Name }; if (d.Unique) c.Uniques.Add(new List<string> { d.Name }); if (d.Check != null) c.Checks.Add(d.Check); }
             return c;
         }
         ColDef ColDefP()
         {
             ColDef d = new ColDef(); d.Name = Name();
+            if (Oracle && (IsKw("SERIAL") || IsKw("BIGSERIAL") || IsKw("SMALLSERIAL"))) throw NotOraS(Cur.V.ToUpperInvariant(), "NUMBER GENERATED ALWAYS AS IDENTITY");
             if (IsKw("SERIAL") || IsKw("BIGSERIAL") || IsKw("SMALLSERIAL")) { d.Type = IsKw("BIGSERIAL") ? DataType.BigInt : DataType.Integer; d.Auto = true; d.NotNull = true; p++; }
             else
             {
@@ -282,6 +402,13 @@ namespace NativeDataEngine
             }
             while (true)
             {
+                if (Oracle)
+                {
+                    if (IsKw("AUTO_INCREMENT") || IsKw("AUTOINCREMENT") || IsKw("IDENTITY")) throw NotOraS(Cur.V.ToUpperInvariant(), "GENERATED ALWAYS AS IDENTITY");
+                    if (IsKw("UNSIGNED") || IsKw("SIGNED") || IsKw("COMMENT")) throw NotOraS(Cur.V.ToUpperInvariant(), null);
+                    if (IsKw("DEFAULT") && IsKwAt(1, "ON") && IsKwAt(2, "NULL")) p += 2;   // DEFAULT ON NULL expr
+                    if (IsKw("ENABLE") || IsKw("DISABLE")) { p++; continue; }
+                }
                 if (Accept("CONSTRAINT")) { Name(); continue; }
                 if (IsKw("PRIMARY")) { p++; Expect("KEY"); if (!Accept("ASC")) Accept("DESC"); d.Pk = true; d.NotNull = true; if (Accept("AUTOINCREMENT") || Accept("AUTO_INCREMENT")) d.Auto = true; continue; }
                 if (IsKw("NOT") && IsKwAt(1, "NULL")) { p += 2; d.NotNull = true; continue; }
@@ -290,7 +417,7 @@ namespace NativeDataEngine
                 if (Accept("DEFAULT")) { d.Default = Cur.T == Tk.Op && Cur.V == "(" ? ExprText() : PrimaryText(); continue; }
                 if (Accept("AUTO_INCREMENT") || Accept("AUTOINCREMENT")) { d.Auto = true; continue; }
                 if (Accept("IDENTITY")) { if (IsOp("(")) SkipBalanced(); d.Auto = true; d.NotNull = true; continue; }
-                if (IsKw("GENERATED")) { while (!IsKw("IDENTITY") && Cur.T != Tk.End) p++; p++; if (IsOp("(")) SkipBalanced(); d.Auto = true; d.NotNull = true; continue; }
+                if (IsKw("GENERATED")) { p++; d.Always = !IsKw("BY"); while (!IsKw("IDENTITY") && Cur.T != Tk.End) p++; p++; if (IsOp("(")) SkipBalanced(); d.Auto = true; d.Seq = true; d.NotNull = true; continue; }
                 if (Accept("REFERENCES"))
                 {
                     TableName(); if (IsOp("(")) SkipBalanced();
@@ -309,6 +436,7 @@ namespace NativeDataEngine
         string PrimaryText() { int a = p; Unary(); return Slice(a, p); }
         DataType ColType()
         {
+            if (Oracle) return TypeName();   // Oracle type names only (SqlParser.TypeName)
             string n = Name();
             if (IsKw("VARYING")) p++;   // CHARACTER VARYING
             if (IsKw("PRECISION")) p++;
@@ -318,7 +446,7 @@ namespace NativeDataEngine
             if (IsOp("("))
             {
                 p++; sb.Append('(');
-                do { sb.Append(t[p++].V); if (IsOp(",")) sb.Append(','); } while (AcceptOp(","));
+                do { sb.Append(t[p++].V); if (IsKw("BYTE") || IsKw("CHAR")) p++; if (IsOp(",")) sb.Append(','); } while (AcceptOp(","));
                 ExpectOp(")"); sb.Append(')');
             }
             DataType dt = DataType.TryParse(sb.ToString()) ?? DataType.TryParse(n) ?? ExtraType(n);
@@ -347,6 +475,14 @@ namespace NativeDataEngine
             else throw Err("Expected TABLE, VIEW or INDEX after DROP");
             d.IfExists = IfExists();
             do { d.Names.Add(TableName()); } while (AcceptOp(","));
+            if (Oracle)
+            {
+                if (d.Names.Count > 1) throw NotOraS("DROP " + d.What + " with several names", "one DROP " + d.What + " per name");
+                if (IsKw("ON") || IsKw("RESTRICT")) throw NotOraS("DROP " + d.What + " ... " + Cur.V.ToUpperInvariant(), null);
+                if (Accept("CASCADE")) Accept("CONSTRAINTS");
+                Accept("PURGE");
+                return d;
+            }
             if (d.What == "INDEX" && Accept("ON")) d.OnTable = TableName();
             if (!Accept("CASCADE")) Accept("RESTRICT");
             return d;
@@ -354,6 +490,20 @@ namespace NativeDataEngine
         Stmt InsertP()
         {
             InsertS s = new InsertS();
+            if (Oracle)
+            {
+                p++;
+                if (IsKw("OR") || IsKw("IGNORE")) throw NotOraS("INSERT " + Cur.V.ToUpperInvariant(), "MERGE INTO ... WHEN NOT MATCHED THEN INSERT ...");
+                if (IsKw("ALL") || IsKw("FIRST")) throw Err("INSERT ALL / INSERT FIRST is not supported; use one INSERT per table");
+                Expect("INTO");
+                s.Table = TableName();
+                if (Cur.T == Tk.Ident && !Reserved.Contains(Cur.V) && !IsKw("VALUES")) p++;   // table alias
+                if (IsOp("(") && !IsKwAt(1, "SELECT") && !IsKwAt(1, "WITH")) { p++; s.Cols = new List<string>(); do { s.Cols.Add(Name()); } while (AcceptOp(",")); ExpectOp(")"); }
+                if (IsKw("DEFAULT") || IsKw("VALUE") || IsKw("SET")) throw NotOraS("INSERT ... " + Cur.V.ToUpperInvariant(), "INSERT INTO t (columns) VALUES (...)");
+                if (Accept("VALUES")) s.Rows = ValueRows(); else s.QueryText = QueryText();
+                if (IsKw("ON")) throw NotOraS("INSERT ... ON " + Peek(1).V.ToUpperInvariant(), "MERGE INTO ... USING ... ON (...) WHEN MATCHED THEN UPDATE ... WHEN NOT MATCHED THEN INSERT ...");
+                return s;
+            }
             if (Accept("REPLACE")) s.OrReplace = true;
             else
             {
@@ -405,7 +555,10 @@ namespace NativeDataEngine
         Stmt UpdateP()
         {
             p++; UpdateS u = new UpdateS(); u.Table = TableName(); u.Alias = AliasP("SET");
-            Expect("SET"); u.Sets = Assignments();
+            Expect("SET");
+            if (Oracle && IsOp("(")) throw Err("UPDATE ... SET (a, b) = (SELECT ...) is not supported; set each column: SET a = (SELECT ...), b = (SELECT ...)");
+            u.Sets = Assignments();
+            if (Oracle && IsKw("FROM")) throw NotOraS("UPDATE ... FROM", "MERGE INTO t USING (...) s ON (...) WHEN MATCHED THEN UPDATE SET ...");
             if (Accept("FROM")) { int a = p; FromList(); u.From = Slice(a, p); }
             if (Accept("WHERE")) u.Where = ExprText();
             return u;
@@ -416,8 +569,143 @@ namespace NativeDataEngine
             if (Accept("WHERE")) d.Where = ExprText();
             return d;
         }
+        // Oracle ALTER TABLE: one or more of ADD (cols) | ADD col | ADD [CONSTRAINT n] PRIMARY KEY / UNIQUE / CHECK / FOREIGN KEY,
+        // MODIFY (col [type] [DEFAULT e] [NULL | NOT NULL], ...), DROP COLUMN c | DROP (c, ...) | DROP CONSTRAINT n | DROP PRIMARY KEY,
+        // RENAME COLUMN a TO b | RENAME TO n.
+        Stmt AlterOra()
+        {
+            p++; Expect("TABLE"); IfExists();
+            AlterS a = new AlterS(); a.Table = TableName();
+            bool any = false;
+            while (IsKw("ADD") || IsKw("MODIFY") || IsKw("DROP") || IsKw("RENAME"))
+            {
+                any = true;
+                if (Accept("ADD"))
+                {
+                    AlterOp o = new AlterOp();
+                    if (IsKw("COLUMN")) throw NotOraS("ADD COLUMN", "ADD name type, or ADD (name type, ...)");
+                    if (Accept("CONSTRAINT")) o.Name = Name();
+                    if (IsKw("PRIMARY")) { p++; Expect("KEY"); o.Op = "ADD PRIMARY KEY"; o.Cols = NameList(); }
+                    else if (IsKw("UNIQUE")) { p++; o.Op = "ADD UNIQUE"; o.Cols = NameList(); }
+                    else if (IsKw("CHECK")) { p++; ExpectOp("("); o.Op = "ADD CHECK"; o.Expr = ExprText(); ExpectOp(")"); }
+                    else if (IsKw("FOREIGN")) { SkipClause(); o.Op = "NOOP"; }
+                    else if (IsOp("("))
+                    {
+                        p++;
+                        do { AlterOp x = new AlterOp(); x.Op = "ADD COLUMN"; x.Col = ColDefP(); a.Ops.Add(x); } while (AcceptOp(","));
+                        ExpectOp(")"); continue;
+                    }
+                    else { o.Op = "ADD COLUMN"; o.Col = ColDefP(); }
+                    a.Ops.Add(o);
+                }
+                else if (Accept("MODIFY"))
+                {
+                    if (IsKw("COLUMN")) throw NotOraS("MODIFY COLUMN", "MODIFY (name type)");
+                    bool paren = AcceptOp("(");
+                    do { ModifyOra(a); } while (paren && AcceptOp(","));
+                    if (paren) ExpectOp(")");
+                }
+                else if (Accept("DROP"))
+                {
+                    AlterOp o = new AlterOp();
+                    if (Accept("CONSTRAINT")) { o.Op = "DROP CONSTRAINT"; o.Name = Name(); if (Accept("CASCADE")) { } }
+                    else if (IsKw("PRIMARY")) { p++; Expect("KEY"); o.Op = "DROP PRIMARY KEY"; }
+                    else if (IsOp("("))
+                    {
+                        p++;
+                        do { AlterOp x = new AlterOp(); x.Op = "DROP COLUMN"; x.Name = Name(); a.Ops.Add(x); } while (AcceptOp(","));
+                        ExpectOp(")"); if (Accept("CASCADE")) Accept("CONSTRAINTS"); continue;
+                    }
+                    else { Expect("COLUMN"); o.Op = "DROP COLUMN"; o.Name = Name(); if (Accept("CASCADE")) Accept("CONSTRAINTS"); }
+                    a.Ops.Add(o);
+                }
+                else
+                {
+                    p++; AlterOp o = new AlterOp();
+                    if (Accept("TO")) { o.Op = "RENAME TO"; o.NewName = TableName(); }
+                    else if (Accept("COLUMN")) { o.Op = "RENAME COLUMN"; o.Name = Name(); Expect("TO"); o.NewName = Name(); }
+                    else if (Accept("CONSTRAINT")) { Name(); Expect("TO"); Name(); o.Op = "NOOP"; }
+                    else throw Err("Expected RENAME COLUMN a TO b or RENAME TO name");
+                    a.Ops.Add(o);
+                }
+                if (IsOp(",")) throw Err("Oracle ALTER TABLE takes ADD (a type, b type) / MODIFY (...) / DROP (a, b) lists, not commas between clauses");
+            }
+            if (!any)
+            {
+                if (IsKw("ALTER") || IsKw("CHANGE")) throw NotOraS("ALTER TABLE ... " + Cur.V.ToUpperInvariant(), "MODIFY (name type)");
+                throw Err("Expected ADD, MODIFY, DROP or RENAME in ALTER TABLE");
+            }
+            return a;
+        }
+        // MODIFY name [type] [DEFAULT e] [NULL | NOT NULL] [constraints]
+        void ModifyOra(AlterS a)
+        {
+            string col = Name();
+            if (Cur.T == Tk.Ident && !IsKw("DEFAULT") && !IsKw("NULL") && !IsKw("NOT") && !IsKw("CONSTRAINT") && !IsKw("PRIMARY") && !IsKw("UNIQUE") && !IsKw("CHECK"))
+            { AlterOp t1 = new AlterOp(); t1.Op = "SET TYPE"; t1.Name = col; t1.Type = ColType(); a.Ops.Add(t1); }
+            while (true)
+            {
+                if (Accept("DEFAULT")) { if (IsKw("ON") && IsKwAt(1, "NULL")) p += 2; AlterOp o = new AlterOp(); o.Op = "SET DEFAULT"; o.Name = col; o.Expr = IsKw("NULL") ? NullDefault() : PrimaryText(); a.Ops.Add(o); continue; }
+                if (IsKw("NOT") && IsKwAt(1, "NULL")) { p += 2; AlterOp o = new AlterOp(); o.Op = "SET NOT NULL"; o.Name = col; a.Ops.Add(o); continue; }
+                if (Accept("NULL")) { AlterOp o = new AlterOp(); o.Op = "DROP NOT NULL"; o.Name = col; a.Ops.Add(o); continue; }
+                if (Accept("CONSTRAINT")) { Name(); continue; }
+                if (Accept("ENABLE") || Accept("DISABLE")) continue;
+                break;
+            }
+        }
+        string NullDefault() { p++; return "NULL"; }
+        // Oracle MERGE: MERGE INTO t [a] USING src [b] ON (cond) WHEN MATCHED THEN UPDATE SET ... [WHERE c] [DELETE WHERE c2]
+        // WHEN NOT MATCHED THEN INSERT [(cols)] VALUES (...) [WHERE c]. DELETE WHERE runs as a second MERGE on the updated rows.
+        Stmt MergeOra()
+        {
+            p++; Expect("INTO");
+            MergeS m = new MergeS(); m.Target = TableName(); m.TAlias = AliasP("USING");
+            Expect("USING");
+            int a0 = p;
+            if (IsOp("(")) { p++; Query(); ExpectOp(")"); m.Source = Slice(a0, p); }
+            else { string n = TableName(); m.Source = "\"" + n.Replace("\"", "\"\"") + "\""; m.SAlias = n; }
+            string al = AliasP("ON"); if (al != null) m.SAlias = al;
+            if (m.SAlias == null) throw Err("MERGE ... USING (subquery) needs an alias");
+            Expect("ON");
+            if (!IsOp("(")) throw Err("Oracle MERGE needs the condition in parentheses: ON (t.id = s.id)");
+            m.On = ExprText();
+            string deleteWhere = null, updWhere = null;
+            while (Accept("WHEN"))
+            {
+                MergeWhen w = new MergeWhen();
+                if (Accept("NOT")) { Expect("MATCHED"); w.Match = "NOT MATCHED"; }
+                else { Expect("MATCHED"); w.Match = "MATCHED"; }
+                if (IsKw("AND") || IsKw("BY")) throw NotOraS("WHEN " + w.Match + " " + Cur.V.ToUpperInvariant(), "WHEN " + w.Match + " THEN ... WHERE condition");
+                Expect("THEN");
+                if (w.Match == "MATCHED")
+                {
+                    if (!Accept("UPDATE")) throw Err("Oracle WHEN MATCHED THEN UPDATE SET ... (DELETE WHERE ... goes after the UPDATE)");
+                    Expect("SET"); w.Action = "UPDATE"; w.Sets = Assignments();
+                    if (Accept("WHERE")) { w.Cond = ExprText(); updWhere = w.Cond; }
+                    if (Accept("DELETE")) { Expect("WHERE"); deleteWhere = ExprText(); }
+                }
+                else
+                {
+                    Expect("INSERT"); w.Action = "INSERT";
+                    if (IsOp("(")) { p++; w.InsCols = new List<string>(); do { w.InsCols.Add(Name()); } while (AcceptOp(",")); ExpectOp(")"); }
+                    Expect("VALUES"); List<List<string>> rows = ValueRows(); if (rows.Count != 1) throw Err("MERGE INSERT takes one row of VALUES");
+                    w.InsVals = rows[0];
+                    if (Accept("WHERE")) w.Cond = ExprText();
+                }
+                m.Whens.Add(w);
+            }
+            if (m.Whens.Count == 0) throw Err("MERGE needs at least one WHEN clause");
+            if (deleteWhere == null) return m;
+            // DELETE WHERE: rows matched (and updated) that meet the condition after the update are deleted.
+            MergeS del = new MergeS(); del.Target = m.Target; del.TAlias = m.TAlias; del.Source = m.Source; del.SAlias = m.SAlias; del.On = m.On;
+            MergeWhen dw = new MergeWhen(); dw.Match = "MATCHED"; dw.Action = "DELETE"; dw.Cond = updWhere != null ? "(" + updWhere + ") AND (" + deleteWhere + ")" : deleteWhere;
+            del.Whens.Add(dw);
+            TryS blk = new TryS(); blk.PlSql = true; blk.Catch = null; blk.Try.Add(m); blk.Try.Add(del);
+            m.Text = del.Text = ""; return blk;
+        }
         Stmt AlterP()
         {
+            if (Oracle) return AlterOra();
             p++; Expect("TABLE"); IfExists();
             AlterS a = new AlterS(); a.Table = TableName();
             do
@@ -475,6 +763,7 @@ namespace NativeDataEngine
         }
         Stmt MergeP()
         {
+            if (Oracle) return MergeOra();
             p++; Accept("INTO");
             MergeS m = new MergeS(); m.Target = TableName(); m.TAlias = AliasP("USING");
             Expect("USING");
@@ -550,13 +839,14 @@ namespace NativeDataEngine
             public Dictionary<string, string> Defaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             public List<string> Checks = new List<string>();
             public string AutoCol;
+            public bool AutoSeq, AutoAlways; public long AutoNext = 1;   // Oracle identity: its own counter from 1 (not max + 1)
             public SessTable CopyMeta()
             {
                 SessTable t = new SessTable(); t.Name = Name; t.Schema = Schema;
                 t.Pk = new List<string>(Pk); t.Uniques = Uniques.Select(u => new List<string>(u)).ToList();
                 t.NotNull = new HashSet<string>(NotNull, StringComparer.OrdinalIgnoreCase);
                 t.Defaults = new Dictionary<string, string>(Defaults, StringComparer.OrdinalIgnoreCase);
-                t.Checks = new List<string>(Checks); t.AutoCol = AutoCol;
+                t.Checks = new List<string>(Checks); t.AutoCol = AutoCol; t.AutoSeq = AutoSeq; t.AutoAlways = AutoAlways; t.AutoNext = AutoNext;
                 return t;
             }
             public bool Has(string col) { return Schema.IndexOf(col) >= 0; }
@@ -580,6 +870,7 @@ namespace NativeDataEngine
             internal readonly List<string> Outputs = new List<string>();   // CREATE TABLE (not TEMP) names, in order: saved by WriteTables
             internal Snapshot Tx; internal int TxDepth;
             internal EngineException CatchErr;
+            internal Snapshot OraStart;   // Oracle ROLLBACK with no COMMIT yet: back to the script start
             internal Catalog Cat;
             internal int Seq;
             internal readonly List<string> Spills = new List<string>();
@@ -603,6 +894,7 @@ namespace NativeDataEngine
         {
             List<Stmt> stmts = Parser.ParseScript(sql);
             if (stmts.Count == 0) throw new EngineException("SQL_SYNTAX", "The query is empty.");
+            CheckViews(views);
             cat = new Catalog(this, views);
             QueryS only = stmts.Count == 1 ? stmts[0] as QueryS : null;
             if (only != null && !only.HasInto) return only.Q;
@@ -611,8 +903,20 @@ namespace NativeDataEngine
             catch { cat.Dispose(); throw; }
         }
 
+        // Views sent with a request (pipeline steps, datasets) are user SQL: Oracle only. Planned later with the lenient parser.
+        static void CheckViews(Dictionary<string, string> views)
+        {
+            if (views == null) return;
+            foreach (KeyValuePair<string, string> kv in views)
+            {
+                if (kv.Value == null || kv.Value.StartsWith("SELECT * FROM read_", StringComparison.OrdinalIgnoreCase)) continue;
+                try { Parser.ParseQuery(kv.Value, true); }
+                catch (EngineException e) { throw new EngineException(e.Code, "In \"" + kv.Key + "\": " + e.Message); }
+            }
+        }
         QueryStmt RunScript(ScriptSession s, List<Stmt> stmts, CancellationToken ct)
         {
+            s.OraStart = Snap(s);
             int last = stmts.Count - 1;
             QueryS fin = stmts[last] as QueryS;
             bool finalQuery = fin != null && !fin.HasInto;
@@ -686,6 +990,8 @@ namespace NativeDataEngine
         }
         static int Line(string sql, int pos) { int n = 1; for (int i = 0; i < pos && i < sql.Length; i++) if (sql[i] == '\n') n++; return n; }
 
+        // RAISE_APPLICATION_ERROR numbers of errors in flight (SQLCODE in the EXCEPTION handler); other errors are -20000.
+        static readonly Dictionary<EngineException, long> ErrNumbers = new Dictionary<EngineException, long>();
         void Exec(ScriptSession s, Stmt st, CancellationToken ct, bool inTry)
         {
             QueryS qs = st as QueryS;
@@ -714,6 +1020,13 @@ namespace NativeDataEngine
             if (st is MergeS) { Merge(s, (MergeS)st, ct); return; }
             if (st is IndexS) { CreateIndex(s, (IndexS)st, ct); return; }
             TxS tx = st as TxS;
+            if (tx != null && tx.Implicit)
+            {
+                // Oracle: COMMIT keeps everything so far; ROLLBACK goes back to the last COMMIT (or the script start).
+                if (tx.What == "COMMIT") { s.Tx = Snap(s); s.TxDepth = 0; return; }
+                if (s.OraStart == null && s.Tx == null) throw new EngineException("SQL_TRANSACTION", "Nothing to roll back.");
+                Restore(s, s.Tx ?? s.OraStart); s.Tx = Snap(s); return;
+            }
             if (tx != null)
             {
                 if (tx.What == "BEGIN") { if (s.TxDepth == 0) s.Tx = Snap(s); s.TxDepth++; return; }
@@ -725,13 +1038,14 @@ namespace NativeDataEngine
             TryS ts = st as TryS;
             if (ts != null)
             {
+                if (ts.Catch == null) { foreach (Stmt x in ts.Try) Exec(s, x, ct, inTry); return; }   // PL/SQL block without EXCEPTION
                 try { foreach (Stmt x in ts.Try) Exec(s, x, ct, true); }
                 catch (EngineException e)
                 {
                     EngineException prevErr = s.CatchErr; string prevMsg = Functions.CatchError;
-                    s.CatchErr = e; Functions.CatchError = e.Message;
+                    s.CatchErr = e; Functions.CatchError = e.Message; long en; lock (ErrNumbers) { if (!ErrNumbers.TryGetValue(e, out en)) en = -20000; ErrNumbers.Remove(e); } long prevNum = Functions.CatchErrorNumber; Functions.CatchErrorNumber = en;
                     try { foreach (Stmt x in ts.Catch) Exec(s, x, ct, true); }
-                    finally { s.CatchErr = prevErr; Functions.CatchError = prevMsg; }
+                    finally { s.CatchErr = prevErr; Functions.CatchError = prevMsg; Functions.CatchErrorNumber = prevNum; }
                 }
                 return;
             }
@@ -740,10 +1054,10 @@ namespace NativeDataEngine
             {
                 if (th.Message == null)
                 {
-                    if (s.CatchErr == null) throw new EngineException("SQL_THROW", "THROW without arguments is only allowed inside CATCH.");
+                    if (s.CatchErr == null) throw new EngineException("SQL_THROW", "RAISE without an error is only allowed inside EXCEPTION.");
                     throw s.CatchErr;
                 }
-                throw new EngineException("SQL_THROW", th.Message);
+                { EngineException te = new EngineException("SQL_THROW", th.Message); lock (ErrNumbers) ErrNumbers[te] = th.Number; throw te; }
             }
             if (st is NoopS) return;
             throw new EngineException("SQL_UNSUPPORTED", st.Kind + " is not supported.");
@@ -906,15 +1220,17 @@ namespace NativeDataEngine
             if (t.AutoCol == null) return;
             int k = t.Schema.IndexOf(t.AutoCol); if (k < 0) return;
             long next = 1;
-            foreach (Batch b in existing.Concat(rows)) for (int i = 0; i < b.Rows; i++) if (!b.Cols[k].IsNull(i)) next = Math.Max(next, Convert.ToInt64(Values.Text(b.Cols[k], i), CultureInfo.InvariantCulture) + 1);
+            if (t.AutoSeq) next = t.AutoNext;
+            else foreach (Batch b in existing.Concat(rows)) for (int i = 0; i < b.Rows; i++) if (!b.Cols[k].IsNull(i)) next = Math.Max(next, Convert.ToInt64(Values.Text(b.Cols[k], i), CultureInfo.InvariantCulture) + 1);
             for (int r = 0; r < rows.Count; r++)
             {
                 Batch b = rows[r]; Column c = b.Cols[k];
-                bool any = false; for (int i = 0; i < b.Rows; i++) if (c.IsNull(i)) any = true;
+                bool any = false; for (int i = 0; i < b.Rows; i++) { if (c.IsNull(i)) any = true; else if (t.AutoAlways && existing.Count >= 0 && rows.Count > 0 && !ReferenceEquals(existing, rows)) throw new EngineException("CONSTRAINT_IDENTITY", "Column \"" + t.AutoCol + "\" is GENERATED ALWAYS AS IDENTITY: leave it out of the INSERT."); }
                 if (!any) continue;
                 Column n = Cast.To(c, DataType.BigInt, false);
                 Column o = new Column(DataType.BigInt, b.Rows);
                 for (int i = 0; i < b.Rows; i++) o.I[i] = n.IsNull(i) ? next++ : n.I[i];
+                if (t.AutoSeq) t.AutoNext = next;
                 Column[] cs = (Column[])b.Cols.Clone(); cs[k] = Cast.To(o, t.Schema[k].Type, false);
                 rows[r] = new Batch(b.Schema, cs, b.Rows);
             }
@@ -992,7 +1308,7 @@ namespace NativeDataEngine
                 {
                     if (d.NotNull) t.NotNull.Add(d.Name);
                     if (d.Default != null) t.Defaults[d.Name] = d.Default;
-                    if (d.Auto) { if (t.AutoCol != null) throw new EngineException("SQL_SYNTAX", "Only one auto-increment column is allowed."); t.AutoCol = d.Name; }
+                    if (d.Auto) { if (t.AutoCol != null) throw new EngineException("SQL_SYNTAX", "Only one auto-increment column is allowed."); t.AutoCol = d.Name; t.AutoSeq = d.Seq; t.AutoAlways = d.Always; }
                 }
                 foreach (string k in c.Pk) t.Col(k);
                 foreach (List<string> u in c.Uniques) foreach (string k in u) t.Col(k);
@@ -1325,6 +1641,7 @@ namespace NativeDataEngine
                     if (w.Action == "DELETE") deletes.Add(k + 1);
                 }
                 act.Append(" ELSE 0 END");
+                if (act.ToString() == "CASE ELSE 0 END") { act.Length = 0; act.Append("0"); }   // insert-only MERGE
                 List<string> items = new List<string> { act + " AS __act" };
                 foreach (Field f in t.Schema.Fields)
                 {

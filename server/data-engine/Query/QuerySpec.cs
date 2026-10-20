@@ -1,4 +1,4 @@
-// Declarative query (dashboard widgets, plan 02 section 11) -> SQL:
+// Declarative query (dashboard widgets, plan 02 section 11) -> Oracle SQL:
 //   { dataset, select: [cols], groupBy: [cols], aggregate: [{ function, column, as, distinct }],
 //     where: "expr", sort: [{ column, direction } | { expr }], limit }
 // function: count | count_distinct | sum | avg | min | max (count with no column = count(*)).
@@ -20,7 +20,7 @@ namespace NativeDataEngine
             List<string> items = new List<string>();
             List<string> groups = Json.Strs(s, "groupBy");
             foreach (string g in groups) items.Add(Q(g));
-            foreach (string c in Json.Strs(s, "select")) { if (c == "*") items.Add("*"); else if (!groups.Contains(c)) items.Add(Q(c)); }
+            foreach (string c in Json.Strs(s, "select")) { if (c == "*") items.Add(Q(ds) + ".*"); else if (!groups.Contains(c)) items.Add(Q(c)); }
             object[] aggs = Json.Arr(s, "aggregate") ?? new object[0];
             foreach (object o in aggs)
             {
@@ -39,7 +39,7 @@ namespace NativeDataEngine
             sb.Append(string.Join(", ", items)).Append(" FROM ").Append(Q(ds));
             string where = Json.Str(s, "where");
             if (!string.IsNullOrWhiteSpace(where)) sb.Append(" WHERE ").Append(where);
-            if (groups.Count > 0) { sb.Append(" GROUP BY "); for (int i = 0; i < groups.Count; i++) sb.Append(i > 0 ? ", " : "").Append(i + 1); }
+            if (groups.Count > 0) { sb.Append(" GROUP BY "); for (int i = 0; i < groups.Count; i++) sb.Append(i > 0 ? ", " : "").Append(Q(groups[i])); }
             object[] sort = Json.Arr(s, "sort");
             if (sort != null && sort.Length > 0)
             {
@@ -56,7 +56,7 @@ namespace NativeDataEngine
                 if (ob.Count > 0) sb.Append(" ORDER BY ").Append(string.Join(", ", ob));
             }
             long limit = Json.Long(s, "limit", -1);
-            if (limit > 0) sb.Append(" LIMIT ").Append(limit.ToString(CultureInfo.InvariantCulture));
+            if (limit > 0) sb.Append(" FETCH FIRST ").Append(limit.ToString(CultureInfo.InvariantCulture)).Append(" ROWS ONLY");
             return sb.ToString();
         }
     }

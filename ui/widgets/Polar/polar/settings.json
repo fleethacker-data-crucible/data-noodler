@@ -112,18 +112,6 @@
       "default": false
     },
     {
-      "path": "bb.arc.needle.color",
-      "label": "Needle Color",
-      "group": "Arc",
-      "sub": "Needle",
-      "type": "color",
-      "default": "",
-      "when": {
-        "path": "bb.arc.needle.show",
-        "is": true
-      }
-    },
-    {
       "path": "bb.arc.needle.length",
       "label": "Needle Length (%)",
       "group": "Arc",
@@ -224,8 +212,62 @@
       "default": ""
     },
     {
+      "path": "bb.arc.needle.color",
+      "label": "Arc Needle Color",
+      "group": "Colors",
+      "type": "color",
+      "default": "",
+      "when": {
+        "path": "bb.arc.needle.show",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.backgroundColors",
+      "label": "Data Labels Background Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.data.labels.border.stroke",
+      "label": "Data Labels Border Color",
+      "group": "Colors",
+      "type": "color",
+      "default": "#000000",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.fill",
+      "label": "Data Labels Border Fill",
+      "group": "Colors",
+      "type": "color",
+      "default": "",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "dn.labelColor",
+      "label": "Data Labels Text Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
       "path": "bb.color.onover",
       "label": "Hover Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.background.color",
+      "label": "Layout Background Color",
       "group": "Colors",
       "type": "color",
       "default": ""
@@ -253,6 +295,13 @@
         "Traffic"
       ],
       "default": "Theme"
+    },
+    {
+      "path": "bb.polar.level.text.backgroundColor",
+      "label": "Polar Level Text Background",
+      "group": "Colors",
+      "type": "color",
+      "default": "#ffffff"
     },
     {
       "path": "dn.theme",
@@ -408,18 +457,14 @@
       "step": 1
     },
     {
-      "path": "bb.data.labels.backgroundColors",
-      "label": "Background Color",
+      "path": "dn.font.labels",
+      "label": "Font Size",
       "group": "Data Labels",
-      "type": "color",
-      "default": ""
-    },
-    {
-      "path": "dn.labelColor",
-      "label": "Text Color",
-      "group": "Data Labels",
-      "type": "color",
-      "default": ""
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "dn.on.data_labels_border",
@@ -428,30 +473,6 @@
       "sub": "Border",
       "type": "boolean",
       "default": false
-    },
-    {
-      "path": "bb.data.labels.border.stroke",
-      "label": "Border Color",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "#000000",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
-    },
-    {
-      "path": "bb.data.labels.border.fill",
-      "label": "Border Fill",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
     },
     {
       "path": "bb.data.labels.border.padding",
@@ -649,8 +670,24 @@
       "path": "bb.polar.label.ratio",
       "label": "Label Position Ratio",
       "group": "Labels",
-      "type": "text",
-      "default": "1.07"
+      "type": "number",
+      "default": "1.07",
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "when": [
+        {
+          "path": "dn.auto.polar_label_ratio",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.polar_label_ratio",
+      "label": "Label Position Ratio Auto",
+      "group": "Labels",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "dn.arcLabel",
@@ -728,29 +765,6 @@
       "label": "No Data Text",
       "group": "Layout",
       "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.svg.classname",
-      "label": "SVG Class Name",
-      "group": "Layout",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.class",
-      "label": "Background Class",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.color",
-      "label": "Background Color",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "color",
       "default": ""
     },
     {
@@ -849,6 +863,16 @@
       "default": false
     },
     {
+      "path": "dn.font.legend",
+      "label": "Font Size",
+      "group": "Legend",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.legend.padding",
       "label": "Padding",
       "group": "Legend",
@@ -914,8 +938,29 @@
       "label": "Inset Step (rows)",
       "group": "Legend",
       "sub": "Inset",
-      "type": "text",
-      "default": "",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "when": [
+        {
+          "path": "bb.legend.position",
+          "is": "inset"
+        },
+        {
+          "path": "dn.auto.legend_inset_step",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.legend_inset_step",
+      "label": "Inset Step (rows) Auto",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "boolean",
+      "default": true,
       "when": {
         "path": "bb.legend.position",
         "is": "inset"
@@ -1027,13 +1072,6 @@
       "default": true
     },
     {
-      "path": "bb.polar.level.text.backgroundColor",
-      "label": "Level Text Background",
-      "group": "Polar",
-      "type": "color",
-      "default": "#ffffff"
-    },
-    {
       "path": "bb.polar.level.depth",
       "label": "Levels",
       "group": "Polar",
@@ -1079,6 +1117,16 @@
       "min": 0,
       "max": 6.3,
       "step": 0.05
+    },
+    {
+      "path": "dn.font.title",
+      "label": "Font Size",
+      "group": "Title",
+      "type": "number",
+      "default": 14,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "bb.title.position",
@@ -1141,6 +1189,16 @@
       "default": 0,
       "min": 0,
       "max": 50,
+      "step": 1
+    },
+    {
+      "path": "dn.font.tooltip",
+      "label": "Font Size",
+      "group": "Tooltip",
+      "type": "number",
+      "default": 12,
+      "min": 6,
+      "max": 40,
       "step": 1
     },
     {

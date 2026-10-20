@@ -44,6 +44,26 @@ const Widgets = (() => {
     await DNFS.remove(to, { recursive: true }).catch(() => {});
     await DNFS.copy(from, to, { overwrite: true });
   }
+  // Copies of a built-in chart (project / global widgets whose settings.json "chart" matches a built-in one) take the
+  // built-in's current setting list, so a setting added to the charts reaches every copy; the copy keeps its own name,
+  // inputs, values and any setting the built-in does not have. builtins = the packaged widgets (list() results).
+  // Returns the packages whose settings.json changed (already written back).
+  async function syncBuiltins(pkgs, builtins) {
+    const by = new Map();
+    for (const b of builtins) { try { const r = JSON.parse(b.settings); if (r.chart) by.set(r.chart, r); } catch {} }
+    const changed = [];
+    for (const p of pkgs) {
+      let r; try { r = JSON.parse(p.settings); } catch { continue; }
+      const b = r.chart && by.get(r.chart); if (!b) continue;
+      const have = new Set(b.settings.map(x => x.path));
+      const next = { ...r, settings: [...b.settings, ...(r.settings || []).filter(x => x?.path && !have.has(x.path))] };
+      const text = JSON.stringify(next, null, 2);
+      if (JSON.stringify(next.settings) === JSON.stringify(r.settings)) continue;
+      p.settings = text; changed.push(p);
+      await DNFS.writeText(`${p.dir}/${FILES.settings}`, text).catch(() => {});
+    }
+    return changed;
+  }
   // settings.json text -> object (a broken file throws with the reason).
   function parse(text) {
     const s = JSON.parse(text || '{}');
@@ -143,7 +163,8 @@ const Widgets = (() => {
   function where(filters) {
     const q = n => `"${String(n).replace(/"/g, '""')}"`, s = v => `'${String(v).replace(/'/g, "''")}'`;
     const midnight = d => d.getUTCHours() + d.getUTCMinutes() + d.getUTCSeconds() + d.getUTCMilliseconds() === 0;
-    const dlit = d => s(midnight(d) ? d.toISOString().slice(0, 10) : d.toISOString().replace('T', ' ').replace(/\.\d+Z$|Z$/, ''));
+    // Oracle date / timestamp literals: DATE 'YYYY-MM-DD', TIMESTAMP 'YYYY-MM-DD HH24:MI:SS'.
+    const dlit = d => midnight(d) ? `DATE ${s(d.toISOString().slice(0, 10))}` : `TIMESTAMP ${s(d.toISOString().replace('T', ' ').replace(/\.\d+Z$|Z$/, ''))}`;
     const lit = v => typeof v === 'number' ? (Number.isFinite(v) ? String(v) : 'NULL') : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE')
       : v instanceof Date ? dlit(v) : s(v);
     const range = (c, r) => {
@@ -151,8 +172,9 @@ const Widgets = (() => {
         : r.max instanceof Date && midnight(r.max) ? `${c} < ${dlit(new Date(+r.max + 864e5))}` : `${c} <= ${lit(r.max)}`;
       return [lo, hi].filter(Boolean).join(' AND ') || 'TRUE';
     };
+    // '' is NULL in Oracle: an empty value is matched by IS NULL.
     return filters.filter(f => f.col && (f.values?.length || f.ranges?.length)).map(f => {
-      const c = q(f.col), all = f.values || [], vals = all.filter(v => v != null), parts = vals.length ? [`${c} IN (${vals.map(lit).join(', ')})`] : [];
+      const c = q(f.col), all = f.values || [], vals = all.filter(v => v != null && v !== ''), parts = vals.length ? [`${c} IN (${vals.map(lit).join(', ')})`] : [];
       if (vals.length < all.length) parts.push(`${c} IS NULL`);
       for (const r of f.ranges || []) parts.push(`(${range(c, r)})`);
       return parts.length > 1 ? `(${parts.join(' OR ')})` : parts[0];
@@ -175,5 +197,5 @@ const Widgets = (() => {
     });
   }
 
-  return { GLOBAL, SAMPLES, FILES, NUMERIC, DATE, projectDir, slug, isSample, read, list, write, copy, parse, values, compile, useStyle, draw, samples, ready, query, where, load, expand, copies };
+  return { GLOBAL, SAMPLES, FILES, NUMERIC, DATE, projectDir, slug, isSample, read, list, write, copy, parse, values, compile, useStyle, draw, samples, ready, query, where, load, expand, copies, syncBuiltins };
 })();

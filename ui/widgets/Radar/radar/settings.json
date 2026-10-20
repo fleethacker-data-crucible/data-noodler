@@ -43,8 +43,51 @@
       "default": false
     },
     {
+      "path": "bb.data.labels.backgroundColors",
+      "label": "Data Labels Background Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.data.labels.border.stroke",
+      "label": "Data Labels Border Color",
+      "group": "Colors",
+      "type": "color",
+      "default": "#000000",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.fill",
+      "label": "Data Labels Border Fill",
+      "group": "Colors",
+      "type": "color",
+      "default": "",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "dn.labelColor",
+      "label": "Data Labels Text Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
       "path": "bb.color.onover",
       "label": "Hover Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.background.color",
+      "label": "Layout Background Color",
       "group": "Colors",
       "type": "color",
       "default": ""
@@ -198,11 +241,14 @@
       "default": ""
     },
     {
-      "path": "bb.data.labels.backgroundColors",
-      "label": "Background Color",
+      "path": "dn.font.labels",
+      "label": "Font Size",
       "group": "Data Labels",
-      "type": "color",
-      "default": ""
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "dn.labelsShow",
@@ -212,43 +258,12 @@
       "default": true
     },
     {
-      "path": "dn.labelColor",
-      "label": "Text Color",
-      "group": "Data Labels",
-      "type": "color",
-      "default": ""
-    },
-    {
       "path": "dn.on.data_labels_border",
       "label": "Border",
       "group": "Data Labels",
       "sub": "Border",
       "type": "boolean",
       "default": false
-    },
-    {
-      "path": "bb.data.labels.border.stroke",
-      "label": "Border Color",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "#000000",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
-    },
-    {
-      "path": "bb.data.labels.border.fill",
-      "label": "Border Fill",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
     },
     {
       "path": "bb.data.labels.border.padding",
@@ -478,29 +493,6 @@
       "default": ""
     },
     {
-      "path": "bb.svg.classname",
-      "label": "SVG Class Name",
-      "group": "Layout",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.class",
-      "label": "Background Class",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.color",
-      "label": "Background Color",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "color",
-      "default": ""
-    },
-    {
       "path": "bb.background.imgUrl",
       "label": "Background Image URL",
       "group": "Layout",
@@ -596,6 +588,16 @@
       "default": false
     },
     {
+      "path": "dn.font.legend",
+      "label": "Font Size",
+      "group": "Legend",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.legend.padding",
       "label": "Padding",
       "group": "Legend",
@@ -661,8 +663,29 @@
       "label": "Inset Step (rows)",
       "group": "Legend",
       "sub": "Inset",
-      "type": "text",
-      "default": "",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "when": [
+        {
+          "path": "bb.legend.position",
+          "is": "inset"
+        },
+        {
+          "path": "dn.auto.legend_inset_step",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.legend_inset_step",
+      "label": "Inset Step (rows) Auto",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "boolean",
+      "default": true,
       "when": {
         "path": "bb.legend.position",
         "is": "inset"
@@ -761,10 +784,26 @@
     },
     {
       "path": "bb.point.opacity",
-      "label": "Opacity (0 - 1, blank = auto)",
+      "label": "Opacity",
       "group": "Points",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "when": [
+        {
+          "path": "dn.auto.point_opacity",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.point_opacity",
+      "label": "Opacity Auto",
+      "group": "Points",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "dn.on.point_radialGradient",
@@ -785,17 +824,36 @@
     },
     {
       "path": "bb.point.select.r",
-      "label": "Selected Radius (blank = r x 4)",
+      "label": "Selected Radius",
       "group": "Points",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.point_select_r",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.point_select_r",
+      "label": "Selected Radius Auto",
+      "group": "Points",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "bb.point.sensitivity",
-      "label": "Sensitivity (px or radius)",
+      "label": "Sensitivity (px)",
       "group": "Points",
-      "type": "text",
-      "default": "10"
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "step": 1
     },
     {
       "path": "bb.point.type",
@@ -817,11 +875,28 @@
     },
     {
       "path": "bb.point.focus.expand.r",
-      "label": "Focus Radius (blank = r x 1.75)",
+      "label": "Focus Radius",
       "group": "Points",
       "sub": "Focus",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.point_focus_expand_r",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.point_focus_expand_r",
+      "label": "Focus Radius Auto",
+      "group": "Points",
+      "sub": "Focus",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "bb.point.focus.expand.enabled",
@@ -922,6 +997,16 @@
       "step": 0.01
     },
     {
+      "path": "dn.font.title",
+      "label": "Font Size",
+      "group": "Title",
+      "type": "number",
+      "default": 14,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.title.position",
       "label": "Position",
       "group": "Title",
@@ -982,6 +1067,16 @@
       "default": 0,
       "min": 0,
       "max": 50,
+      "step": 1
+    },
+    {
+      "path": "dn.font.tooltip",
+      "label": "Font Size",
+      "group": "Tooltip",
+      "type": "number",
+      "default": 12,
+      "min": 6,
+      "max": 40,
       "step": 1
     },
     {

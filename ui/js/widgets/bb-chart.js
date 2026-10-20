@@ -59,8 +59,10 @@ const BBChart = (() => {
   // The scoped CSS of the themes in use (Publish embeds it in the page).
   const css = () => [...document.querySelectorAll('style[id^="dn-bb-theme-"]')].map(s => s.textContent).join('\n') + '\n' + BASE_CSS;
   const BASE_CSS = '.dn-bb{width:100%;height:100%;position:relative;overflow:hidden}.dn-bb .bb{width:100%;height:100%}'
+    + '.dn-bb .bb-tooltip-container .bb-tooltip{border-collapse:separate;border-spacing:0;border-radius:4px;overflow:hidden}'   // tooltips: 4px corners, every theme
     + '.dn-bb .bb-xgrid-line.dn-pick line{stroke:var(--blue,#4269d0);stroke-width:2;stroke-dasharray:none;opacity:.8}'
-    + '.dn-bb .bb-text.bb-empty{font-size:13px;fill:var(--muted,#888)}.dn-bb.is-empty .bb-axis,.dn-bb.is-empty .bb-legend-item,.dn-bb.is-empty .bb-grid{display:none}';
+    + '.dn-bb .bb-text.bb-empty{font-size:13px;fill:var(--muted,#888)}.dn-bb.is-empty .bb-axis,.dn-bb.is-empty .bb-legend-item,.dn-bb.is-empty .bb-grid{display:none}'
+    + '.dn-bb[data-empty]::after{content:attr(data-empty);position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:13px;color:var(--muted,#888);pointer-events:none}';
 
   // ---------------- palettes (dn.palette); 'Theme' = the theme's own pattern ----------------
   const PALETTES = {
@@ -241,6 +243,8 @@ const BBChart = (() => {
 
   // ---------------- options ----------------
   const CANVAS_AT = 1500;   // points above which Render Mode Auto uses canvas
+  // Vendor patch (billboard.min.js, canvas mode): the visible-range helper keeps 3 points past each edge (was 1), so a
+  // curve (spline) keeps its shape while panning / zooming instead of re-bending at the edges. Re-apply after an upgrade.
   const PICK_NULL = v => v === 'None' ? null : v;
   function options(S, spec, built, ctx) {
     const dn = S.dn, mine = clean(S.bb || {}) || {};
@@ -335,6 +339,8 @@ const BBChart = (() => {
     if (dn.cornerRatio && ['pie', 'donut', 'gauge'].includes(spec.type)) set(o, 'arc.cornerRadius', { ratio: dn.cornerRatio / 100 });
     if (dn.barRadius && /bar/.test(spec.type || '') || dn.barRadius && spec.combo) set(o, 'bar.radius', { ratio: dn.barRadius / 100 });
     if (dn.funnelNeckW || dn.funnelNeckH) { set(o, 'funnel.neck.width', { ratio: (dn.funnelNeckW || 0) / 100 }); set(o, 'funnel.neck.height', { ratio: (dn.funnelNeckH || 0) / 100 }); }
+    // Auto numbers (dn.auto.<path with _> on): billboard works the option out itself, so it is left out.
+    for (const [k, auto] of Object.entries(dn.auto || {})) if (auto) { const p = k.replace(/_/g, '.'), i = p.lastIndexOf('.'), par = i < 0 ? o : get(o, p.slice(0, i)); if (isObj(par)) delete par[p.slice(i + 1)]; }
     // On / off for options that are either false or an object (dn.on.pie_label_line = pie.label.line ...).
     for (const [k, on] of Object.entries(dn.on || {})) {
       const p = k.replace(/_/g, '.'), cur = get(o, p);
@@ -380,11 +386,58 @@ const BBChart = (() => {
     const built = (FAMILY[spec.family] || FAMILY.xy)(rows, ctx, S, spec);
     const o = options(S, spec, built, ctx);
     const empty = !(built.data.columns || []).some(c => c.length > 1 && c[0] !== 'x' && !String(c[0]).endsWith('__x'));
-    if (empty) set(o, 'data.empty.label.text', S.dn.emptyText || spec.empty || 'Drop fields on Settings > Data');
+    // Empty: our own label, dead centre of the whole widget (billboard's sits in the plot area).
+    set(o, 'data.empty.label.text', '');
     root.classList.toggle('is-empty', empty);
+    if (empty) root.dataset.empty = S.dn.emptyText || spec.empty || 'Drop fields on Settings > Data'; else delete root.dataset.empty;
     const width = Math.max(40, Math.floor(ctx.width || host?.clientWidth || 400)), height = Math.max(40, Math.floor(ctx.height || host?.clientHeight || 300));
     // Size: the container's (we resize on redraw); a published chart scales with its card (viewBox).
     o.size = { width, height }; o.resize = ctx.static ? { auto: 'viewBox' } : { auto: false };
+    // X ticks (dates / numbers): a fixed set of evenly spaced tick marks that never move; zooming only changes the
+    // values they show (the x at each mark in the zoomed view).
+    if (['timeseries', 'indexed'].includes(get(o, 'axis.x.type')) && get(o, 'axis.x.tick.values') == null) {
+      const xc = (o.data.columns || []).find(c => c[0] === 'x' || String(c[0]).endsWith('__x'));
+      const ts = get(o, 'axis.x.type') === 'timeseries';
+      const xv = xc ? xc.slice(1).filter(v => v != null).map(v => +(v instanceof Date ? v : ts ? new Date(v) : v)).filter(Number.isFinite) : [];
+      if (xv.length) {
+        const xs = [...new Set(xv)].sort((a, b) => a - b), x0 = xs[0], x1 = xs[xs.length - 1];
+        const n = Math.max(2, Math.min(+get(o, 'axis.x.tick.culling.max') || Infinity, Math.floor(width / 90)));
+        const ticksFor = domain => {
+          const d = Array.isArray(domain) && domain.length > 1 ? domain : [x0, x1];   // billboard may call it without a domain
+          const lo = +d[0], hi = +d[1], inView = xs.filter(v => v >= lo && v <= hi);
+          // Evenly spaced marks; fewer marks than points in view (never two marks on the same date), never a jump to
+          // other positions.
+          const k = Math.max(2, Math.min(n, inView.length));
+          return Array.from({ length: k }, (_, i) => { const v = lo + (hi - lo) * i / (k - 1); return ts ? new Date(v) : v; });
+        };
+        set(o, 'axis.x.tick.values', ticksFor);
+        root._ticksFor = ticksFor;
+        // Rescale Y on Zoom: the y range of the points in a zoomed view (+5% each side), so the lines stay inside.
+        const ys = (o.data.columns || []).filter(c => c !== xc && c[0] !== 'x' && !String(c[0]).endsWith('__x') && c.length === xc.length);
+        const yMin0 = get(o, 'axis.y.min'), yMax0 = get(o, 'axis.y.max'), yTicks0 = get(o, 'axis.y.tick.values');
+        const xi = xc.map((v, i) => i && v != null ? +(v instanceof Date ? v : ts ? new Date(v) : v) : NaN);   // x per row, aligned with the series
+        root._fitY = get(o, 'zoom.rescale') && ys.length ? (cfg, d) => {
+          if (!d) { cfg.axis_y_min = yMin0; cfg.axis_y_max = yMax0; cfg.axis_y_tick_values = yTicks0; return; }
+          let lo = Infinity, hi = -Infinity;
+          for (let i = 1; i < xc.length; i++) { const x = xi[i]; if (!(x >= +d[0]) || x > +d[1]) continue; for (const c of ys) { const v = +c[i]; if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } } }
+          if (!(lo <= hi)) return; const pad = (hi - lo || Math.abs(hi) || 1) * 0.05;
+          cfg.axis_y_min = lo - pad; cfg.axis_y_max = hi + pad;
+          // Y marks fixed too: 5 evenly spaced over the view (billboard's 'nice' ticks would hop every frame).
+          const a = lo - pad, b = hi + pad, r = v => +v.toPrecision(4);
+          cfg.axis_y_tick_values = Array.from({ length: 5 }, (_, i) => r(a + (b - a) * i / 4));
+        } : null;
+        root._minSpan = xs.length > 1 ? Math.min(...xs.slice(1).map((v, i) => v - xs[i])) * 2 : 0;   // zoom in no further than 2 data points   // the zoom code sets the values for each new view (billboard keeps the first ones)
+        set(o, 'axis.x.tick.culling', false);   // the marks are already spaced to fit
+      } else root._ticksFor = null;
+    } else root._ticksFor = null;
+    // Tooltips: stuck to the mouse, on whichever side (left / right, above / below) keeps them inside the widget.
+    if (!get(o, 'tooltip.position')) set(o, 'tooltip.position', (d, tw, th, el, pos) => {
+      const G = 12, mx = pos?.x ?? 0, my = pos?.y ?? 0;
+      let left = mx + G, top = my + G;
+      if (left + tw > width) left = mx - G - tw;
+      if (top + th > height) top = my - G - th;
+      return { left: Math.max(0, Math.min(width - tw, left)), top: Math.max(0, Math.min(height - th, top)) };
+    });
     // ---- click to filter ----
     const pick = new Set((ctx.filter?.state?.pick || []).map(String));
     const key = built.filterKey, canFilter = S.dn.filter !== false && key && rows.some(r => r[key] != null) && !ctx.static;
@@ -432,7 +485,20 @@ const BBChart = (() => {
       if (root._comboKey !== k) { root._comboKey = k; root._comboTypes = {}; }
       for (const id of Object.keys(o.data.types)) { if (root._comboTypes[id]) o.data.types[id] = root._comboTypes[id]; else root._comboTypes[id] = o.data.types[id]; }
     }
+    // Font sizes (Settings > Font Size per text group): only a size changed from its default is applied (the theme keeps
+    // its own otherwise). Part of the signature, so the chart re-lays out for it.
+    const FONT = { legend: [11, '.bb-legend-item text'], title: [14, '.bb-title'], tooltip: [12, '.bb-tooltip-container, .bb-tooltip th, .bb-tooltip td'],
+      labels: [11, '.bb-texts text, .bb-chart-arc text'], xTick: [11, '.bb-axis-x .tick text'], yTick: [11, '.bb-axis-y .tick text'], y2Tick: [11, '.bb-axis-y2 .tick text'],
+      xLabel: [11, '.bb-axis-x-label'], yLabel: [11, '.bb-axis-y-label'], y2Label: [11, '.bb-axis-y2-label'] };
+    const fonts = Object.entries(FONT).map(([k, [def, sel]]) => [+S.dn.font?.[k], def, sel]).filter(([v, def]) => Number.isFinite(v) && v > 0 && v !== def);
+    o._dnFonts = fonts.map(f => f[0]).join(',');   // ignored by billboard; only for the signature
+    const fontCss = fonts.map(([v, , sel]) => sel.split(',').map(x => `.dn-bb[data-fs] ${x.trim()}`).join(',') + `{font-size:${v}px}`).join('');
+    if (fontCss) { root.dataset.fs = ''; } else delete root.dataset.fs;
     const sig = signature(o), chart = root._bb;
+    // The zoomed view (x domain) survives a settings change / data update; null = not zoomed.
+    const zoomOf = c => { try { const $$ = c?.internal; return $$?.scale?.zoom && get(o, 'zoom.enabled') !== false ? $$.scale.zoom.domain() : null; } catch { return null; } };
+    const keepZoom = (c, z) => { try { if (z && get(o, 'zoom.enabled') && !zoomOf(c)) { if (root._ticksFor) c.internal.config.axis_x_tick_values = root._ticksFor(z); root._fitY?.(c.internal.config, z.map(Number)); c.zoom(z); } } catch {} };
+    const zoom0 = zoomOf(chart);
     // billboard 4.1 canvas mode does not re-lay the axes on resize(): a canvas chart is rebuilt at its new size (~40 ms).
     const canvasResize = get(o, 'render.mode') === 'canvas' && (root._w !== width || root._h !== height);
     if (chart && root._sig === sig && !ctx.static && !canvasResize) {
@@ -448,23 +514,91 @@ const BBChart = (() => {
           root._busy = true;
           let t = 0; const fin = () => { clearTimeout(t); if (!root._busy) return; root._busy = false; const nx = root._next; root._next = null; if (nx) run(nx); };
           t = setTimeout(fin, (get(o, 'transition.duration') ?? 250) + 800);   // never stuck if billboard skips done
-          chart.load({ ...a, done: fin });
+          chart.load({ ...a, done: () => { keepZoom(chart, zoom0); fin(); } });
         };
         if (root._busy) root._next = args; else run(args);
         root._ids = [...next]; root._w = width; root._h = height; root._rows = rows; root._data = data;
         return root;
       } catch { /* rebuild below */ }
     }
-    try { chart?.destroy(); } catch {}
-    root.replaceChildren();
+    // A chart already on screen (a settings change): the new one is built over it without its intro animation and the
+    // old one goes once the new one has drawn, so nothing flashes or re-grows.
+    const swap = chart && !ctx.static, old = swap ? [...root.children] : [];
+    if (!swap) { try { chart?.destroy(); } catch {} root.replaceChildren(); }
+    const dur0 = get(o, 'transition.duration');
+    if (swap) set(o, 'transition.duration', 0);
+    if (fontCss) root.append(Object.assign(document.createElement('style'), { textContent: fontCss.replace(/\.dn-bb\[data-fs\]/g, `#${root.id || (root.id = 'dnbb' + Math.random().toString(36).slice(2, 9))}`) }));
     const el = document.createElement('div'); root.append(el);
+    if (swap) Object.assign(el.style, { position: 'absolute', inset: '0' });
     o.bindto = el;
     let done;
     const rendered = new Promise(r => { done = r; });
     const userRendered = o.onrendered;
-    o.onrendered = function () { userRendered?.call(this); done(); };
+    // Tick marks only where a label shows: billboard can leave every culled tick's line behind (zooming in / out
+    // mashes them together).
+    const tidyTicks = () => root.querySelectorAll('.bb-axis-x .tick, .bb-axis-y .tick, .bb-axis-y2 .tick').forEach(t => {
+      const tx = t.querySelector('text'), ln = t.querySelector('line'); if (!ln) return;
+      const shown = tx && tx.textContent.trim() !== '' && tx.style.display !== 'none' && getComputedStyle(tx).display !== 'none' && tx.getAttribute('visibility') !== 'hidden';
+      ln.style.display = shown ? '' : 'none';
+    });
+    o.onrendered = function () { userRendered?.call(this); tidyTicks(); done(); };
+    if (get(o, 'zoom.enabled')) { const uz = get(o, 'zoom.onzoom'); set(o, 'zoom.onzoom', function (d) { uz?.call(this, d); requestAnimationFrame(tidyTicks); }); }
     if (!host) document.body.append(root);   // billboard measures text: the chart must be in the page while it is built
     root._bb = bb.generate(o);
+    if (swap) rendered.then(() => {
+      try { chart.destroy(); } catch {} old.forEach(n => n.remove()); el.style.position = ''; el.style.inset = '';
+      try { root._bb.internal.config.transition_duration = dur0 ?? 350; } catch {}   // later data updates animate again
+    });
+    if (zoom0) rendered.then(() => keepZoom(root._bb, zoom0));
+    // Shift + wheel on a zoomed chart: pan it left / right (10% of the view per notch), within the data.
+    if (!root._pan) {
+      root._pan = true;
+      // The mouse leaves the widget: its tooltip and the hover line go (billboard can leave them hanging).
+      root.addEventListener('pointerleave', () => { const c = root._bb; try { c?.tooltip.hide(); c?.internal?.hideGridFocus?.(); } catch {}
+        root.querySelectorAll('.bb-xgrid-focus line, .bb-ygrid-focus line').forEach(l => { l.style.visibility = 'hidden'; }); });
+      root.addEventListener('pointerenter', () => root.querySelectorAll('.bb-xgrid-focus line, .bb-ygrid-focus line').forEach(l => { l.style.visibility = ''; }));
+      // Wheel zoom, smooth: each notch sets a target view (15% in / out around the mouse); the view eases to it every
+      // frame (no transition per step).
+      let zt = null, zf = 0;
+      const ease = () => {
+        const c = root._bb, $$ = c?.internal; if (!zt || !$$) { zf = 0; return; }
+        const full = $$.scale.subX?.domain() || $$.scale.x.domain(), cur = ($$.scale.zoom || $$.scale.x).domain().map(Number);
+        const k = 0.35, nx = [cur[0] + (zt[0] - cur[0]) * k, cur[1] + (zt[1] - cur[1]) * k], fin = Math.abs(nx[0] - zt[0]) + Math.abs(nx[1] - zt[1]) < (zt[1] - zt[0]) * 0.002;
+        const v = fin ? zt : nx, date = full[0] instanceof Date, cfg = $$.config, dur = cfg.transition_duration;
+        cfg.transition_duration = 0;
+        const all = v[0] <= +full[0] && v[1] >= +full[1];
+        if (root._ticksFor) cfg.axis_x_tick_values = root._ticksFor(all ? full : v);
+        root._fitY?.(cfg, all ? null : v);
+        try { if (all) c.unzoom(); else c.zoom(date ? v.map(x => new Date(x)) : v); } catch {}
+        cfg.transition_duration = dur;
+        if (fin) { zt = null; zf = 0; } else zf = requestAnimationFrame(ease);
+      };
+      root.addEventListener('wheel', e => {
+        const c = root._bb, $$ = c?.internal; if (e.shiftKey || !$$?.config?.zoom_enabled || $$.config.zoom_type !== 'wheel' || !$$.scale?.x) return;
+        e.preventDefault(); e.stopPropagation();
+        const full = ($$.scale.subX?.domain() || $$.scale.x.domain()).map(Number), cur = zt || ($$.scale.zoom || $$.scale.x).domain().map(Number);
+        const sx = $$.scale.zoom || $$.scale.x, svg = root.querySelector('svg')?.getBoundingClientRect(), ml = $$.state?.current?.margin?.left ?? $$.state?.margin?.left ?? 0;
+        let at = svg ? +sx.invert(e.clientX - svg.left - ml) : (cur[0] + cur[1]) / 2; if (!Number.isFinite(at)) at = (cur[0] + cur[1]) / 2;
+        const f = Math.pow(e.deltaY < 0 ? 0.85 : 1 / 0.85, Math.min(3, Math.abs(e.deltaY) / 100 || 1));
+        let a = at - (at - cur[0]) * f, b = at + (cur[1] - at) * f;
+        if (root._minSpan && b - a < root._minSpan) { const m = root._minSpan / (b - a); a = at - (at - a) * m; b = at + (b - at) * m; }
+        const span = Math.min(full[1] - full[0], b - a); if (a < full[0]) { a = full[0]; b = a + span; } if (b > full[1]) { b = full[1]; a = b - span; }
+        zt = [a, b]; if (!zf) zf = requestAnimationFrame(ease);
+      }, { passive: false, capture: true });
+      root.addEventListener('wheel', e => {
+        const c = root._bb, $$ = c?.internal; if (!e.shiftKey || !$$?.scale?.zoom) return;
+        const full = $$.scale.subX?.domain(), cur = $$.scale.zoom.domain(); if (!full || !cur) return;
+        const n = v => +v, span = n(cur[1]) - n(cur[0]), lo = n(full[0]), hi = n(full[1]);
+        if (span >= hi - lo) return;   // not zoomed
+        e.preventDefault(); e.stopPropagation();
+        const d = Math.sign(e.deltaY || e.deltaX) * span * 0.1;
+        let a = Math.min(hi - span, Math.max(lo, n(cur[0]) + d));
+        const date = cur[0] instanceof Date;
+        if (root._ticksFor) $$.config.axis_x_tick_values = root._ticksFor([a, a + span]);
+        root._fitY?.($$.config, [a, a + span]);
+        c.zoom(date ? [new Date(a), new Date(a + span)] : [a, a + span]);
+      }, { passive: false, capture: true });   // capture: before billboard's own wheel zoom
+    }
     root._sig = sig; root._ids = o.data.columns.map(c => String(c[0])); root._w = width; root._h = height; root._rows = rows; root._data = data;
     if (ctx.static) { await Promise.race([rendered, new Promise(r => setTimeout(r, 400))]); await new Promise(r => setTimeout(r, 30)); }
     if (!host) root.remove();

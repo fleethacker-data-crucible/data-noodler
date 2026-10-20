@@ -106,6 +106,7 @@ namespace NativeDataEngine
             ValuesBody vb = body as ValuesBody;
             if (vb != null) return PlanValues(vb);
             SetOp so = (SetOp)body;
+            if (so.Op == "INTERSECT" || so.Op == "EXCEPT") return PlanIntersect(so);
             if (so.Op != "UNION") throw new EngineException("SQL_UNSUPPORTED", so.Op + " is not supported; use UNION or a JOIN.");
             Planned l = PlanSet(so.Left), r = PlanSet(so.Right);
             if (l.Op.Schema.Count != r.Op.Schema.Count) throw new EngineException("SQL_UNION", "UNION inputs have different column counts (" + l.Op.Schema.Count + " vs " + r.Op.Schema.Count + ").");
@@ -116,6 +117,39 @@ namespace NativeDataEngine
             if (!so.All) u = Distinct(u);
             Planned p = new Planned(); p.Op = u; p.Scope = Scope.Of(sch, null);
             return p;
+        }
+
+        // INTERSECT / MINUS (EXCEPT), distinct rows (NULLs match NULLs):
+        //   SELECT cols FROM (SELECT l.*, 1 __sa, 0 __sb FROM (left) l UNION ALL SELECT r.*, 0, 1 FROM (right) r)
+        //   GROUP BY cols HAVING MAX(__sa) = 1 AND MAX(__sb) = 1 (INTERSECT) / 0 (MINUS)
+        Planned PlanIntersect(SetOp so)
+        {
+            string what = so.Op == "EXCEPT" ? "MINUS" : "INTERSECT";
+            if (so.All) throw new EngineException("SQL_UNSUPPORTED", what + " ALL is not supported; use " + what + ".");
+            Planned lp = PlanSet(so.Left), rp = PlanSet(so.Right);
+            if (lp.Op.Schema.Count != rp.Op.Schema.Count) throw new EngineException("SQL_UNION", what + " inputs have different column counts (" + lp.Op.Schema.Count + " vs " + rp.Op.Schema.Count + ").");
+            SetOp u = new SetOp(); u.Op = "UNION"; u.All = true; u.Left = SetSide(so.Left, "__l", 1); u.Right = SetSide(so.Right, "__r", 0);
+            QueryStmt inner = new QueryStmt(); inner.Body = u;
+            SelectStmt outer = new SelectStmt();
+            SubqueryTable st = new SubqueryTable(); st.Query = inner; st.Alias = "__s"; outer.From = st;
+            foreach (Field f in lp.Op.Schema.Fields)
+            {
+                SelectItem it = new SelectItem(); it.E = Col(null, f.Name); it.Alias = f.Name; outer.Items.Add(it);
+                outer.GroupBy.Add(Col(null, f.Name));
+            }
+            outer.Having = AndOf(Bin("=", Fn("max", Col(null, "__sa")), LitOf(1L, DataType.BigInt)), Bin("=", Fn("max", Col(null, "__sb")), LitOf(so.Op == "EXCEPT" ? 0L : 1L, DataType.BigInt)));
+            QueryStmt q = new QueryStmt(); q.Body = outer;
+            return Plan(q);
+        }
+        static SelectStmt SetSide(object body, string alias, long left)
+        {
+            QueryStmt q = body as QueryStmt; if (q == null) { q = new QueryStmt(); q.Body = body; }
+            SelectStmt s = new SelectStmt();
+            SubqueryTable st = new SubqueryTable(); st.Query = q; st.Alias = alias; s.From = st;
+            SelectItem all = new SelectItem(); StarE se = new StarE(); se.Table = alias; all.E = se; s.Items.Add(all);
+            SelectItem a = new SelectItem(); a.E = LitOf(left, DataType.BigInt); a.Alias = "__sa"; s.Items.Add(a);
+            SelectItem b = new SelectItem(); b.E = LitOf(1 - left, DataType.BigInt); b.Alias = "__sb"; s.Items.Add(b);
+            return s;
         }
 
         // VALUES rows: each value is evaluated once (constants / functions), columns column1..columnN.
@@ -562,6 +596,7 @@ namespace NativeDataEngine
                         }
                     }
                     if (c.Filter != null) a.Filter = BCast.To(Bind(c.Filter, ph), DataType.Bool);
+                    if (c.WithinOrder != null && c.WithinOrder.Count > 0) { a.Order = Bind(c.WithinOrder[0].E, ph); a.OrderDesc = c.WithinOrder[0].Desc; }   // LISTAGG ... WITHIN GROUP (ORDER BY ...)
                     a.Out = AggSpec.OutType(a.Fn, a.Arg != null ? a.Arg.Type : DataType.BigInt);
                     int idx = gb.Count + specs.Count;
                     post.Exact[c.Key()] = idx;
@@ -641,7 +676,7 @@ namespace NativeDataEngine
             Call c = e as Call;
             if (c != null)
             {
-                Call n = new Call(); n.Name = c.Name; n.Distinct = c.Distinct; n.Star = c.Star; n.Over = c.Over; n.Filter = Rewrite(c.Filter, f);
+                Call n = new Call(); n.Name = c.Name; n.Distinct = c.Distinct; n.Star = c.Star; n.Over = c.Over; n.Filter = Rewrite(c.Filter, f); n.WithinOrder = c.WithinOrder;
                 foreach (Expr a in c.Args) n.Args.Add(Rewrite(a, f));
                 return n;
             }
@@ -650,7 +685,7 @@ namespace NativeDataEngine
             IsNullE isn = e as IsNullE; if (isn != null) { IsNullE n = new IsNullE(); n.Not = isn.Not; n.X = Rewrite(isn.X, f); return n; }
             InE ine = e as InE; if (ine != null) { InE n = new InE(); n.Not = ine.Not; n.X = Rewrite(ine.X, f); foreach (Expr x in ine.List) n.List.Add(Rewrite(x, f)); return n; }
             BetweenE bt = e as BetweenE; if (bt != null) { BetweenE n = new BetweenE(); n.Not = bt.Not; n.X = Rewrite(bt.X, f); n.Lo = Rewrite(bt.Lo, f); n.Hi = Rewrite(bt.Hi, f); return n; }
-            LikeE lk = e as LikeE; if (lk != null) { LikeE n = new LikeE(); n.Not = lk.Not; n.Insensitive = lk.Insensitive; n.X = Rewrite(lk.X, f); n.Pat = Rewrite(lk.Pat, f); return n; }
+            LikeE lk = e as LikeE; if (lk != null) { LikeE n = new LikeE(); n.Not = lk.Not; n.Insensitive = lk.Insensitive; n.Escape = lk.Escape; n.X = Rewrite(lk.X, f); n.Pat = Rewrite(lk.Pat, f); return n; }
             CaseE ce = e as CaseE;
             if (ce != null)
             {
@@ -773,7 +808,7 @@ namespace NativeDataEngine
                 BExpr r = new BLogic(true, new BCmp(">=", x, Bind(bt.Lo, ph)), new BCmp("<=", x, Bind(bt.Hi, ph)));
                 return bt.Not ? new BNot(r) : r;
             }
-            LikeE lk = e as LikeE; if (lk != null) return new BLike(Bind(lk.X, ph), Bind(lk.Pat, ph), lk.Not, lk.Insensitive);
+            LikeE lk = e as LikeE; if (lk != null) return new BLike(Bind(lk.X, ph), Bind(lk.Pat, ph), lk.Not, lk.Insensitive, lk.Escape);
             CaseE ce = e as CaseE;
             if (ce != null)
             {
@@ -822,7 +857,7 @@ namespace NativeDataEngine
             Call c = e as Call;
             if (c != null)
             {
-                Call n = new Call(); n.Name = c.Name; n.Distinct = c.Distinct; n.Star = c.Star; n.Over = c.Over; n.Filter = c.Filter != null ? m(c.Filter) : null;
+                Call n = new Call(); n.Name = c.Name; n.Distinct = c.Distinct; n.Star = c.Star; n.Over = c.Over; n.Filter = c.Filter != null ? m(c.Filter) : null; n.WithinOrder = c.WithinOrder;
                 foreach (Expr a in c.Args) n.Args.Add(m(a));
                 return n;
             }
@@ -831,7 +866,7 @@ namespace NativeDataEngine
             IsNullE isn = e as IsNullE; if (isn != null) return IsNullOf(m(isn.X), isn.Not);
             InE ine = e as InE; if (ine != null) { InE n = new InE(); n.Not = ine.Not; n.X = m(ine.X); foreach (Expr x in ine.List) n.List.Add(m(x)); return n; }
             BetweenE bt = e as BetweenE; if (bt != null) { BetweenE n = new BetweenE(); n.Not = bt.Not; n.X = m(bt.X); n.Lo = m(bt.Lo); n.Hi = m(bt.Hi); return n; }
-            LikeE lk = e as LikeE; if (lk != null) { LikeE n = new LikeE(); n.Not = lk.Not; n.Insensitive = lk.Insensitive; n.X = m(lk.X); n.Pat = m(lk.Pat); return n; }
+            LikeE lk = e as LikeE; if (lk != null) { LikeE n = new LikeE(); n.Not = lk.Not; n.Insensitive = lk.Insensitive; n.Escape = lk.Escape; n.X = m(lk.X); n.Pat = m(lk.Pat); return n; }
             CaseE ce = e as CaseE;
             if (ce != null)
             {

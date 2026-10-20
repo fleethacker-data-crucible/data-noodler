@@ -291,6 +291,49 @@ Add-Log 'sys' "Root: $root"
 Add-Log 'sys' "Control panel at $("http://localhost:$uiPort/"). Log file: $logFile"
 Add-Log 'sys' 'Site offline. Click Start server to begin.'
 
+# Usage numbers for the server windows (the panel's header cards): app folder size (no .git), this process's memory
+# (server + engine), RAM, project and dataset counts.
+# Workspaces: folders in workspace/ that hold a workspace.json (projects live in workspace/<ws>/<project>/).
+function Get-Workspaces {
+    $wsRoot = Join-Path $root 'workspace'
+    if (-not (Test-Path -LiteralPath $wsRoot)) { return @() }
+    @(Get-ChildItem -LiteralPath $wsRoot -Directory | Where-Object { -not $_.Name.StartsWith('.') -and (Test-Path -LiteralPath (Join-Path $_.FullName 'workspace.json')) } | ForEach-Object FullName)
+}
+# workspace/workspaces.json: read the list, change it ($change gets the list, returns the new one), write it back.
+function Set-WorkspaceMap([scriptblock]$change) {
+    $p = Join-Path $root 'workspace\workspaces.json'
+    $list = @(); if (Test-Path -LiteralPath $p) { $list = @(([IO.File]::ReadAllText($p) | ConvertFrom-Json).workspaces) }
+    $new = @(& $change $list | Where-Object { $_ })
+    [IO.File]::WriteAllText($p, (ConvertTo-Json @{ schemaVersion = 1; workspaces = $new } -Depth 5), (New-Object Text.UTF8Encoding $false))
+}
+# A project folder id: "<workspace>/<project>" (both lower case, digits and dashes).
+$projRx = '^[a-z0-9][a-z0-9-]{0,79}/[a-z0-9][a-z0-9-]{0,79}$'
+
+function Get-Usage {
+    $disk = [long]0
+    try {
+        foreach ($d in ([IO.DirectoryInfo]$root).EnumerateDirectories()) {
+            if ($d.Name -eq '.git') { continue }
+            try { foreach ($f in $d.EnumerateFiles('*', [IO.SearchOption]::AllDirectories)) { $disk += $f.Length } } catch {}
+        }
+        foreach ($f in ([IO.DirectoryInfo]$root).EnumerateFiles()) { $disk += $f.Length }
+    } catch {}
+    $p = [Diagnostics.Process]::GetCurrentProcess()
+    $ram = [long]0; try { $ram = [long](Get-CimInstance Win32_ComputerSystem -Property TotalPhysicalMemory).TotalPhysicalMemory } catch {}
+    # Projects = folders with a project-config.json in every workspace (workspace/<ws>/ with a workspace.json; trash
+    # excluded); datasets = their config lists.
+    $nProj = 0; $nDs = 0
+    foreach ($w in @(Get-Workspaces)) {
+        foreach ($d in ([IO.DirectoryInfo]$w).EnumerateDirectories()) {
+            $cfg = Join-Path $d.FullName 'project-config.json'
+            if ($d.Name.StartsWith('.') -or -not [IO.File]::Exists($cfg)) { continue }
+            $nProj++
+            try { $nDs += @((Get-Content -LiteralPath $cfg -Raw | ConvertFrom-Json).datasets).Count } catch {}
+        }
+    }
+    return @{ disk = $disk; mem = $p.WorkingSet64; ram = $ram; projects = $nProj; datasets = $nDs }
+}
+
 # --- api ---
 function Handle-Ui($req, $res, $rel) {
     switch ($rel) {
@@ -330,7 +373,8 @@ function Handle-Ui($req, $res, $rel) {
         }
         'api/site' {
             try {
-                if ((Read-Json $req).on) { Start-Site } else { Stop-Site }
+                $b = Read-Json $req
+                if ($b.on) { Start-Site; if ($b.restart) { Add-Log 'restart' 'SERVER RESTARTED' } } else { Stop-Site }
                 Send-Json $res @{ ok = $true }
             } catch {
                 Add-Log 'err' $_.Exception.Message
@@ -349,10 +393,10 @@ function Handle-Ui($req, $res, $rel) {
         }
         'api/clear' { $log.Clear(); Send-Json $res @{ ok = $true } }
         # Purge Temp Data: deletes everything in <root>\temp it can (files in use, e.g. the loaded engine DLL or an open
-        # app window's browser profile, are skipped). Purge Project Trash: deletes workspace\projects\.trash.
+        # app window's browser profile, are skipped). Purge Project Trash: deletes workspace\.trash.
         'api/purge' {
             $body = Read-Json $req
-            $dir = if ($body.what -eq 'trash') { Join-Path $root 'workspace\projects\.trash' } elseif ($body.what -eq 'temp') { Join-Path $root 'temp' } else { $null }
+            $dir = if ($body.what -eq 'trash') { Join-Path $root 'workspace\.trash' } elseif ($body.what -eq 'temp') { Join-Path $root 'temp' } else { $null }
             if (-not $dir) { Send-Json $res @{ ok = $false; error = 'Unknown purge.' }; break }
             $bytes = 0; $skipped = 0
             if ($body.what -eq 'temp' -and $script:engine) { try { [void]$script:engine.CacheDrop($null) } catch {} }
@@ -400,6 +444,24 @@ function Handle-Ui($req, $res, $rel) {
                 $out = [NativeDataEngine.Json]::Write($st)
             } catch { $out = ConvertTo-Json -Compress @{ ok = $false; error = $_.Exception.Message } }
             Send $res ([Text.Encoding]::UTF8.GetBytes($out)) 'application/json'
+        }
+        # Panel header cards: app folder size (no .git) and this process's memory (server + engine). Polled only while the panel is visible.
+        'api/usage' { Send-Json $res (Get-Usage) }
+        # Panel Purge Memory (as the Benchmark page's): cached tables (and spills), resident datasets, then a compacting GC.
+        'api/memory-purge' {
+            if (-not $engine) { Send-Json $res @{ ok = $false; error = 'The engine is not running.' }; break }
+            try {
+                $r = $engine.Purge(); $r['ok'] = $true
+                Add-Log 'sys' "Memory purged: $($r['tables']) table(s), $($r['datasets']) dataset(s) freed."
+                Send $res ([Text.Encoding]::UTF8.GetBytes([NativeDataEngine.Json]::Write($r))) 'application/json'
+            } catch { Send-Json $res @{ ok = $false; error = $_.Exception.Message } }
+        }
+        # Panel worker lights: per worker 0 idle, 1 reading / computing, 2 writing; writers = writing threads outside the pool.
+        'api/workers' {
+            if (-not $engine) { Send-Json $res @{ ok = $false }; break }
+            $d = New-Object 'System.Collections.Generic.Dictionary[string,object]'
+            $d['ok'] = $true; $d['states'] = $engine.Pool.States(); $d['writers'] = [NativeDataEngine.WorkerPool]::Writers
+            Send $res ([Text.Encoding]::UTF8.GetBytes([NativeDataEngine.Json]::Write($d))) 'application/json'
         }
         default {
             if ($rel -eq '') { $rel = 'server.html' }
@@ -473,6 +535,47 @@ function Resolve-ProjectPath([string]$rel, [switch]$AllowRoot) {
     return $full
 }
 
+# DirWatch: one FileSystemWatcher per watched folder; keeps the last change time (unix ms) per area:
+# "data/<sub>" for data, else the top folder. Files at the top, logs, archives and dot-folders are ignored.
+Add-Type @"
+using System; using System.IO; using System.Collections.Generic; using System.Collections.Concurrent;
+public static class DirWatch {
+    class W { public FileSystemWatcher F; public ConcurrentDictionary<string, long> A = new ConcurrentDictionary<string, long>(StringComparer.OrdinalIgnoreCase); }
+    static readonly ConcurrentDictionary<string, W> All = new ConcurrentDictionary<string, W>(StringComparer.OrdinalIgnoreCase);
+    static string Area(string rel) {
+        string[] p = rel.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+        if (p.Length < 2 || p[0].StartsWith(".")) return null;
+        string a = p[0].ToLowerInvariant();
+        if (a == "logs" || a == "archives" || a == "temp") return null;
+        if (a == "data") return p.Length > 2 ? "data/" + p[1].ToLowerInvariant() : null;
+        return a;
+    }
+    static long Ms(DateTime t) { return (long)(t.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds; }
+    static void Hit(W w, string root, string full, long ms) {
+        if (full.Length <= root.Length) return;
+        string a = Area(full.Substring(root.Length)); if (a == null) return;
+        w.A.AddOrUpdate(a, ms, (k, o) => Math.Max(o, ms));
+    }
+    public static Dictionary<string, long> Areas(string dir) {
+        string root = Path.GetFullPath(dir).TrimEnd('\\') + "\\";
+        W w = All.GetOrAdd(root, r => {
+            W n = new W();
+            FileSystemWatcher f = new FileSystemWatcher(r) { IncludeSubdirectories = true, InternalBufferSize = 16384,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
+            FileSystemEventHandler h = (s, e) => Hit(n, r, e.FullPath, Ms(DateTime.UtcNow));
+            f.Changed += h; f.Created += h; f.Deleted += h;
+            f.Renamed += (s, e) => { long t = Ms(DateTime.UtcNow); Hit(n, r, e.FullPath, t); Hit(n, r, e.OldFullPath, t); };
+            f.Error += (s, e) => { W x; if (All.TryRemove(r, out x)) x.F.Dispose(); };   // overflow / folder gone: rescan on the next call
+            n.F = f;
+            try { foreach (string e in Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories)) Hit(n, r, e, Ms(File.GetLastWriteTimeUtc(e))); } catch { }
+            f.EnableRaisingEvents = true;
+            return n;
+        });
+        return new Dictionary<string, long>(w.A);
+    }
+}
+"@
+
 # Same-site check: right Host (stops DNS rebinding), no foreign Origin, valid token.
 function Test-FsRequest($req) {
     $hostOk = $req.Headers['Host'] -in "localhost:$($settings.port)", "127.0.0.1:$($settings.port)"
@@ -498,6 +601,12 @@ function Handle-Fs($req, $res, $op) {
             $items = Get-ChildItem -LiteralPath $dir -Force -Recurse:($q['recursive'] -eq '1') |
                 Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.FullName.Substring($root.Length) -notmatch '\\\.' }
             Send-Json $res @{ entries = @($items | ForEach-Object { Get-Entry $_ }) }
+        }
+        'changes' {
+            # Last change per project area (OS change notifications; the folder is scanned once, on the first call).
+            $path = Resolve-ProjectPath $q['path']
+            if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw [FsError]::new(404, 'Folder not found.') }
+            Send-Json $res @{ areas = [DirWatch]::Areas($path) }
         }
         'stat' {
             $path = Resolve-ProjectPath $q['path'] -AllowRoot
@@ -632,13 +741,13 @@ function Complete-StaticJobs {
     }
 }
 
-# --- project archives: zipped snapshots in workspace/projects/<folder>/archives/<yyyyMMdd-HHmmss>.zip ---
+# --- project archives: zipped snapshots in workspace/<ws>/<project>/archives/<yyyyMMdd-HHmmss>.zip ---
 # A snapshot holds $archParts plus snapshot.json (taken, note, bytes, datasets, sig). sig = names / sizes / write times of
 # every file in the snapshot (times to 2 s, as zip stores them), so a restore skips its "current state" snapshot when
 # any snapshot already holds exactly that state. Restore keeps the project's current name / folder / id / created date.
 # Older snapshots kept as plain folders are listed, restored and deleted too. Zip / unzip runs on the file pool (a job);
 # the page polls api/project/archive/job for progress.
-$archParts = @('project-config.json', 'data/imported', 'data/source', 'pipeline', 'dashboard')
+$archParts = @('project-config.json', 'data/imported', 'data/clean', 'data/source', 'transform', 'pipeline', 'dashboard')
 $archJobs = [hashtable]::Synchronized(@{})
 $archScript = {
     param($st, $proj, $parts, $op, $id, $note, $meta)
@@ -751,8 +860,8 @@ $archScript = {
 # Folder of a project from ?folder= (404 when missing).
 function Get-ProjectDir($req) {
     $folder = [string]$req.QueryString['folder']
-    if ($folder -notmatch '^[a-z0-9][a-z0-9-]{0,79}$') { throw [FsError]::new(400, 'Invalid project folder.') }
-    $dir = Join-Path $root "workspace\projects\$folder"
+    if ($folder -notmatch $projRx) { throw [FsError]::new(400, 'Invalid project folder.') }
+    $dir = Join-Path $root ('workspace\' + $folder.Replace('/', '\'))
     if (-not (Test-Path -LiteralPath $dir -PathType Container)) { throw [FsError]::new(404, 'Project not found.') }
     return $dir
 }
@@ -791,7 +900,7 @@ function Handle-Archive($req, $res, $op) {
                     bytes = $(if ($m) { $m.bytes } else { $size }); size = $size; datasets = $(if ($m -and $m.datasets) { @($m.datasets).Count } else { 0 }) }
             }
         }
-        Send-Json $res @{ ok = $true; folder = "workspace/projects/$(Split-Path $proj -Leaf)/archives"; items = @($items) }
+        Send-Json $res @{ ok = $true; folder = "workspace/$(Split-Path (Split-Path $proj) -Leaf)/$(Split-Path $proj -Leaf)/archives"; items = @($items) }
         return
     }
     if ($req.HttpMethod -ne 'POST') { throw [FsError]::new(405, 'Use POST.') }
@@ -866,6 +975,43 @@ try {
         }
     }
 } catch { Add-Log 'server' "Rename staged -> imported failed: $($_.Exception.Message)" }
+
+# --- one-time: workspaces. Projects move from workspace/projects/<p> into the first workspace, SMPG (workspace/smpg/<p>);
+# trashed projects to workspace/.trash/smpg~<p>-<time>; stored "workspace/projects/<p>/" paths become "workspace/smpg/<p>/".
+# workspace/workspaces.json maps every workspace (UUID, name, folder); each workspace folder has its own workspace.json. ---
+try {
+    $wsMap = Join-Path $root 'workspace\workspaces.json'
+    if (-not (Test-Path -LiteralPath $wsMap)) {
+        $utf8 = New-Object Text.UTF8Encoding $false
+        $smpg = Join-Path $root 'workspace\smpg'
+        New-Item -ItemType Directory -Force $smpg | Out-Null
+        $ws = [ordered]@{ schemaVersion = 1; id = [guid]::NewGuid().ToString(); name = 'SMPG'; folder = 'smpg'; created = (Get-Date).ToUniversalTime().ToString('o') }
+        [IO.File]::WriteAllText((Join-Path $smpg 'workspace.json'), (ConvertTo-Json $ws), $utf8)
+        $old = Join-Path $root 'workspace\projects'
+        if (Test-Path -LiteralPath $old) {
+            foreach ($d in @(Get-ChildItem -LiteralPath $old -Directory -Force)) {
+                if ($d.Name -eq '.trash') {
+                    $t = Join-Path $root 'workspace\.trash'; New-Item -ItemType Directory -Force $t | Out-Null
+                    foreach ($x in @(Get-ChildItem -LiteralPath $d.FullName -Directory -Force)) { Move-Item -LiteralPath $x.FullName -Destination (Join-Path $t "smpg~$($x.Name)") }
+                    try { [IO.Directory]::Delete($d.FullName, $false) } catch {}
+                    continue
+                }
+                $to = Join-Path $smpg $d.Name
+                Move-Item -LiteralPath $d.FullName -Destination $to
+                # Stored paths (configs, dataset manifests, transform, dashboard, publish records): raw data and archives untouched.
+                Get-ChildItem -LiteralPath $to -Recurse -File -Force -Filter '*.json' | Where-Object { $_.FullName -notmatch '\\(data\\raw|archives)\\' } | ForEach-Object {
+                    $tx = [IO.File]::ReadAllText($_.FullName)
+                    $nx = $tx.Replace('workspace/projects/', 'workspace/smpg/')
+                    if ($nx -ne $tx) { [IO.File]::WriteAllText($_.FullName, $nx, $utf8) }
+                }
+                Add-Log 'server' "Moved project $($d.Name) into workspace SMPG (workspace/smpg/$($d.Name))"
+            }
+            try { [IO.Directory]::Delete($old, $false) } catch {}
+        }
+        [IO.File]::WriteAllText($wsMap, (ConvertTo-Json @{ schemaVersion = 1; workspaces = @($ws) } -Depth 5), $utf8)
+        Add-Log 'server' "Workspaces set up: SMPG ($($ws.id))"
+    }
+} catch { Add-Log 'err' "Workspace setup failed: $($_.Exception.Message)" }
 
 # --- Dashboard Studio folders: the global widget library and the SAMPLE_ datasets (preview only) ---
 foreach ($d in 'workspace\dashboard-studio\widgets', 'workspace\sample-data') {
@@ -992,13 +1138,6 @@ function Handle-Site($req, $res, $rel, $ctx) {
         }
         return $false
     }
-    # Project Manager closing stops the server (4 s grace so a reload, which says hello, cancels it).
-    if ($rel -eq 'api/bye' -or $rel -eq 'api/hello') {
-        if (-not (Test-FsRequest $req) -or $req.HttpMethod -ne 'POST') { $res.StatusCode = 403; return $false }
-        $script:byeAt = if ($rel -eq 'api/bye') { (Get-Date).AddSeconds(4) } else { $null }
-        Send-Json $res @{ ok = $true }
-        return $false
-    }
     # App shell header status, polled every 5 s: not logged. Also the app's heartbeat (main loop).
     if ($rel -eq 'api/status') {
         if (Test-FsRequest $req) {
@@ -1012,21 +1151,47 @@ function Handle-Site($req, $res, $rel, $ctx) {
         try { if (Test-FsRequest $req) { Send-Json $res (Get-BrowserMem) } else { $res.StatusCode = 403 } } catch { $res.StatusCode = 500 }
         return $false
     }
-    if ($rel -eq 'api/project/trash') {
-        # Moves workspace/projects/<folder> to workspace/projects/.trash/<folder>-<time> (dot-folders are closed to the file API).
+    if ($rel -eq 'api/workspace/trash') {
+        # Moves workspace/<ws> (with its projects) to workspace/.trash/<ws>-<time> and drops it from workspaces.json.
+        # SMPG (built in) never goes. Restore: the Trash dialog (api/project/trash/restore with that id).
         try {
             if (-not (Test-FsRequest $req)) { throw [FsError]::new(403, 'Forbidden: request did not come from this site.') }
             if ($req.HttpMethod -ne 'POST') { throw [FsError]::new(405, 'Use POST.') }
             $folder = [string]$req.QueryString['folder']
-            if ($folder -notmatch '^[a-z0-9][a-z0-9-]{0,79}$') { throw [FsError]::new(400, 'Invalid project folder.') }
-            $src = Join-Path $root "workspace\projects\$folder"
-            if (-not (Test-Path -LiteralPath $src -PathType Container)) { throw [FsError]::new(404, 'Project not found.') }
-            $trash = Join-Path $root 'workspace\projects\.trash'
+            if ($folder -notmatch '^[a-z0-9][a-z0-9-]{0,79}$') { throw [FsError]::new(400, 'Invalid workspace.') }
+            if ($folder -eq 'smpg') { throw [FsError]::new(403, 'SMPG is built in and cannot be deleted.') }
+            $src = Join-Path $root "workspace\$folder"
+            if (-not (Test-Path -LiteralPath (Join-Path $src 'workspace.json'))) { throw [FsError]::new(404, 'Workspace not found.') }
+            $trash = Join-Path $root 'workspace\.trash'
             New-Item -ItemType Directory -Force $trash | Out-Null
             $dest = Join-Path $trash ('{0}-{1:yyyyMMdd-HHmmss}' -f $folder, (Get-Date))
             Move-Item -LiteralPath $src -Destination $dest
-            Add-Log 'sys' "Project '$folder' moved to workspace/projects/.trash/$(Split-Path $dest -Leaf)"
-            Send-Json $res @{ ok = $true; trashed = "workspace/projects/.trash/$(Split-Path $dest -Leaf)" }
+            Set-WorkspaceMap { param($list) @($list | Where-Object { $_.folder -ne $folder }) }
+            Add-Log 'sys' "Workspace '$folder' moved to workspace/.trash/$(Split-Path $dest -Leaf)"
+            Send-Json $res @{ ok = $true; trashed = "workspace/.trash/$(Split-Path $dest -Leaf)" }
+        } catch {
+            $err = $_.Exception; if ($err.InnerException) { $err = $err.InnerException }
+            try { $res.StatusCode = if ($err -is [FsError]) { $err.Code } else { 500 } } catch {}
+            Add-Log 'err' "Workspace trash: $($err.Message)"
+            try { Send-Json $res @{ ok = $false; error = $err.Message } } catch {}
+        }
+        $size = 0
+    }
+    elseif ($rel -eq 'api/project/trash') {
+        # Moves workspace/<ws>/<project> to workspace/.trash/<ws>~<project>-<time> (dot-folders are closed to the file API).
+        try {
+            if (-not (Test-FsRequest $req)) { throw [FsError]::new(403, 'Forbidden: request did not come from this site.') }
+            if ($req.HttpMethod -ne 'POST') { throw [FsError]::new(405, 'Use POST.') }
+            $folder = [string]$req.QueryString['folder']
+            if ($folder -notmatch $projRx) { throw [FsError]::new(400, 'Invalid project folder.') }
+            $src = Join-Path $root ('workspace\' + $folder.Replace('/', '\'))
+            if (-not (Test-Path -LiteralPath $src -PathType Container)) { throw [FsError]::new(404, 'Project not found.') }
+            $trash = Join-Path $root 'workspace\.trash'
+            New-Item -ItemType Directory -Force $trash | Out-Null
+            $dest = Join-Path $trash ('{0}-{1:yyyyMMdd-HHmmss}' -f $folder.Replace('/', '~'), (Get-Date))
+            Move-Item -LiteralPath $src -Destination $dest
+            Add-Log 'sys' "Project '$folder' moved to workspace/.trash/$(Split-Path $dest -Leaf)"
+            Send-Json $res @{ ok = $true; trashed = "workspace/.trash/$(Split-Path $dest -Leaf)" }
         } catch {
             $err = $_.Exception; if ($err.InnerException) { $err = $err.InnerException }
             try { $res.StatusCode = if ($err -is [FsError]) { $err.Code } else { 500 } } catch {}
@@ -1036,17 +1201,19 @@ function Handle-Site($req, $res, $rel, $ctx) {
         $size = 0
     }
     elseif ($rel -in 'api/project/trash/list', 'api/project/trash/restore', 'api/project/trash/empty') {
-        # Trash dialog (Project Manager): list workspace/projects/.trash, move one back to workspace/projects/<folder>, or delete everything.
+        # Trash dialog: list workspace/.trash, move one back to workspace/<ws>/<project>, or delete everything.
         try {
             if (-not (Test-FsRequest $req)) { throw [FsError]::new(403, 'Forbidden: request did not come from this site.') }
-            $trash = Join-Path $root 'workspace\projects\.trash'
+            $trash = Join-Path $root 'workspace\.trash'
             if ($rel -eq 'api/project/trash/list') {
                 $items = @()
                 if (Test-Path -LiteralPath $trash -PathType Container) {
                     foreach ($d in Get-ChildItem -LiteralPath $trash -Directory) {
-                        $name = $d.Name
-                        try { $name = (Get-Content -LiteralPath (Join-Path $d.FullName 'project-config.json') -Raw | ConvertFrom-Json).name } catch {}
-                        $items += @{ id = $d.Name; name = $name; trashed = $d.LastWriteTimeUtc.ToString('o') }
+                        $name = $d.Name; $kind = 'project'
+                        $wsj = Join-Path $d.FullName 'workspace.json'
+                        if (Test-Path -LiteralPath $wsj) { $kind = 'workspace'; try { $name = (Get-Content -LiteralPath $wsj -Raw | ConvertFrom-Json).name } catch {} }
+                        else { try { $name = (Get-Content -LiteralPath (Join-Path $d.FullName 'project-config.json') -Raw | ConvertFrom-Json).name } catch {} }
+                        $items += @{ id = $d.Name; name = $name; kind = $kind; trashed = $d.LastWriteTimeUtc.ToString('o') }
                     }
                 }
                 Send-Json $res @{ ok = $true; items = @($items) }
@@ -1063,16 +1230,32 @@ function Handle-Site($req, $res, $rel, $ctx) {
                 }
                 else {
                     $id = [string]$req.QueryString['id']
-                    if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,120}$') { throw [FsError]::new(400, 'Invalid trash item.') }
+                    if ($id -match '^[a-z0-9][a-z0-9-]{0,120}$' -and (Test-Path -LiteralPath (Join-Path (Join-Path $trash $id) 'workspace.json'))) {
+                        # A workspace: back to workspace/<ws> (-restored if the name is taken again) and into workspaces.json.
+                        $src = Join-Path $trash $id
+                        $ws = [IO.File]::ReadAllText((Join-Path $src 'workspace.json')) | ConvertFrom-Json
+                        $f = $id -replace '-\d{8}-\d{6}$', ''; $dest = Join-Path $root "workspace\$f"; $k = 1
+                        while (Test-Path -LiteralPath $dest) { $f2 = "$f-restored" + $(if ($k -gt 1) { "-$k" } else { '' }); $dest = Join-Path $root "workspace\$f2"; $k++ }
+                        Move-Item -LiteralPath $src -Destination $dest
+                        $ws.folder = Split-Path $dest -Leaf
+                        [IO.File]::WriteAllText((Join-Path $dest 'workspace.json'), (ConvertTo-Json $ws), (New-Object Text.UTF8Encoding $false))
+                        Set-WorkspaceMap { param($list) @($list | Where-Object { $_.id -ne $ws.id }) + @($ws) }
+                        Add-Log 'sys' "Workspace restored from trash: workspace/$($ws.folder)"
+                        Send-Json $res @{ ok = $true; workspace = $ws.folder }
+                        $size = 0; return $false
+                    }
+                    if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,79}~[a-z0-9][a-z0-9-]{0,120}$') { throw [FsError]::new(400, 'Invalid trash item.') }
                     $src = Join-Path $trash $id
                     if (-not (Test-Path -LiteralPath $src -PathType Container)) { throw [FsError]::new(404, 'Not in the trash.') }
-                    # <folder>-yyyyMMdd-HHmmss -> <folder>; if that name is taken again, add -restored, -restored-2, ...
-                    $folder = $id -replace '-\d{8}-\d{6}$', ''
-                    $dest = Join-Path $root "workspace\projects\$folder"; $k = 1
-                    while (Test-Path -LiteralPath $dest) { $dest = Join-Path $root ("workspace\projects\$folder-restored" + $(if ($k -gt 1) { "-$k" } else { '' })); $k++ }
+                    # <ws>~<project>-yyyyMMdd-HHmmss -> workspace/<ws>/<project>; if that name is taken again, add -restored, -restored-2, ...
+                    $ws, $name = ($id -replace '-\d{8}-\d{6}$', '') -split '~', 2
+                    $wsDir = Join-Path $root "workspace\$ws"
+                    if (-not (Test-Path -LiteralPath (Join-Path $wsDir 'workspace.json'))) { throw [FsError]::new(404, "Workspace '$ws' no longer exists.") }
+                    $dest = Join-Path $wsDir $name; $k = 1
+                    while (Test-Path -LiteralPath $dest) { $dest = Join-Path $wsDir ("$name-restored" + $(if ($k -gt 1) { "-$k" } else { '' })); $k++ }
                     Move-Item -LiteralPath $src -Destination $dest
-                    Add-Log 'sys' "Project restored from trash: workspace/projects/$(Split-Path $dest -Leaf)"
-                    Send-Json $res @{ ok = $true; folder = (Split-Path $dest -Leaf) }
+                    Add-Log 'sys' "Project restored from trash: workspace/$ws/$(Split-Path $dest -Leaf)"
+                    Send-Json $res @{ ok = $true; folder = "$ws/$(Split-Path $dest -Leaf)" }
                 }
             }
         } catch {
@@ -1115,8 +1298,10 @@ function Handle-Site($req, $res, $rel, $ctx) {
         if ($size -lt 0) { $res.StatusCode = 404; $size = 0 }
     }
     $script:hits++
-    # File watchers (DNFS.stat(path, { quiet: true }), e.g. D3 Studio's live code file, about 1x a second): not logged.
-    if ($rel -eq 'api/fs/stat' -and $req.QueryString['quiet'] -and $res.StatusCode -eq 200) { return $false }
+    # Live polling is not logged unless it fails: file watchers (DNFS.stat(path, { quiet: true })), the Project Manager's
+    # change monitor (api/fs/changes, every 2 s) and the engine's worker lights / status / job progress.
+    if ($res.StatusCode -lt 400 -and (($rel.StartsWith('api/fs/') -and $req.QueryString['quiet']) -or $rel -eq 'api/fs/changes' -or
+        $rel -in 'api/data-engine/workers', 'api/data-engine/status', 'api/data-engine/job', 'api/data-engine/jobs')) { return $false }
     Add-Log 'req' ("/$rel" + $req.Url.Query) $res.StatusCode $req.HttpMethod $size $sw.ElapsedMilliseconds
     return $false
 }
@@ -1215,21 +1400,25 @@ $browser = (Find-Browser 'edge'), (Find-Browser 'chrome') | Where-Object { $_ } 
 $script:panelBeat = $null
 function Open-Panel {
     $dir = Join-Path $root 'temp\browser\.profile'
-    if ($script:panelBeat -and ((Get-Date) - $script:panelBeat).TotalSeconds -lt 5) { Raise-Window "$dir`"" }   # already open
-    elseif ($browser) { Open-App $browser $uiUrl '.profile' -Width 1200 -Height 800 | Out-Null }
+    if ($script:panelBeat -and ((Get-Date) - $script:panelBeat).TotalSeconds -lt 5) {   # already open
+        # Fast path: the panel's window by its title (no process scan, no waits); the slow search only if not found.
+        $p = Get-Process msedge, chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like 'Data Noodler Server*' } | Select-Object -First 1
+        if ($p) { [void][Win]::Raise($p.MainWindowHandle) } else { Raise-Window "$dir`"" }
+    }
+    elseif ($browser) { Open-App $browser $uiUrl '.profile' -Width 1500 -Height 900 | Out-Null }
     else { Start-Process $uiUrl }
 }
 
-# --- start the site and open the app (Project Manager) ---
+# --- start the site and open the server window (its Dev Actions open the old / new app) ---
 if (Test-Path (Join-Path $root $entryPage) -PathType Leaf) {
-    try { Start-Site; Open-Site | Out-Null } catch { Add-Log 'err' "Start failed: $($_.Exception.Message)" }
+    try { Start-Site } catch { Add-Log 'err' "Start failed: $($_.Exception.Message)" }
 } else { Add-Log 'err' "$entryPage not found." }
+Open-Panel
 
 # --- main loop ---
-# Closing the Project Manager stops the server (/api/bye). Heartbeats: the panel's log poll (1 s) and every app window's status poll (5 s). The server exits
+# Closing an app window never stops the server. Heartbeats: the panel's log poll (1 s) and every app window's status poll (5 s). The server exits
 # 120 s after the last one (all windows closed), or 60 s after start if none ever connects.
 $script:running = $true
-$script:byeAt = $null
 $lastBeat = $null
 $deadline = (Get-Date).AddSeconds(60)
 $pending = $listener.GetContextAsync()
@@ -1262,7 +1451,6 @@ try {
         Read-EngineLog
         if ($importJobs.Count) { Watch-ImportJobs }
         $now = Get-Date
-        if ($script:byeAt -and $now -gt $script:byeAt) { break }   # Project Manager closed
         if ($lastBeat -and ($now - $lastBeat).TotalSeconds -gt 120) { break }   # throttled/minimized tabs poll slowly
         if (-not $lastBeat -and $now -gt $deadline) { break }
     }

@@ -1,0 +1,12 @@
+{
+    "workspaces":  [
+                       {
+                           "schemaVersion":  1,
+                           "id":  "e37e9cae-d8ff-4b39-9d59-90e77e0f894c",
+                           "name":  "SMPG",
+                           "folder":  "smpg",
+                           "created":  "2026-10-15T16:09:56.0476660Z"
+                       }
+                   ],
+    "schemaVersion":  1
+}

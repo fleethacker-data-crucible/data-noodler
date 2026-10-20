@@ -33,3 +33,6 @@ version.txt
 
 # VS Code workspace (local only)
 *.code-workspace
+
+# User workspace (local only)
+workspace/smpg/

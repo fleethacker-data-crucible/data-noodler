@@ -61,20 +61,43 @@ namespace NativeDataEngine
         public override void Refs(HashSet<int> s) { l.Refs(s); r.Refs(s); }
 
         readonly string op; readonly BExpr l, r;
+        readonly int dateOp;   // 1 date + n, 2 date - n, 3 date - date (days)
         public BArith(string op, BExpr l, BExpr r)
         {
             this.op = op;
             DataType a = l.Type, c = r.Type;
             if (op == "||") { this.l = BCast.To(l, DataType.Varchar); this.r = BCast.To(r, DataType.Varchar); Type = DataType.Varchar; return; }
             if (a.Kind == Kind.Null) a = c; if (c.Kind == Kind.Null) c = a;
-            if ((a.Kind == Kind.Date || a.Kind == Kind.Timestamp) && (op == "+" || op == "-") && c.Kind == Kind.Int)
-            { this.l = l; this.r = r; Type = a; return; }
-            if (a.Kind == Kind.Date && c.Kind == Kind.Date && op == "-") { this.l = l; this.r = r; Type = DataType.BigInt; return; }
+            // Oracle date arithmetic: date +/- n days (a fraction of a day makes a date-time), n + date, date - date = days.
+            bool ad = a.Kind == Kind.Date || a.Kind == Kind.Timestamp, cd = c.Kind == Kind.Date || c.Kind == Kind.Timestamp;
+            if (ad && cd && op == "-")
+            {
+                this.l = l; this.r = r; dateOp = 3;
+                Type = a.Kind == Kind.Date && c.Kind == Kind.Date ? DataType.BigInt : DataType.Double; return;
+            }
+            if ((ad && c.IsNumeric && (op == "+" || op == "-")) || (cd && a.IsNumeric && op == "+"))
+            {
+                BExpr dx = ad ? l : r, nx = ad ? r : l; DataType dt = ad ? a : c, nt = ad ? c : a;
+                this.l = dx; this.r = nx; dateOp = op == "-" ? 2 : 1;
+                if (dt.Kind == Kind.Date && nt.Kind == Kind.Int) { Type = DataType.Date; this.r = BCast.To(nx, DataType.BigInt); }
+                else { Type = DataType.Timestamp; this.l = BCast.To(dx, DataType.Timestamp); this.r = BCast.To(nx, DataType.Double); }
+                return;
+            }
             if (a.Kind == Kind.String && c.IsNumeric) a = c.Kind == Kind.Int ? DataType.Double : c;
             if (c.Kind == Kind.String && a.IsNumeric) c = a.Kind == Kind.Int ? DataType.Double : a;
             if (!(a.IsNumeric && c.IsNumeric)) throw new EngineException("TYPE_MISMATCH", "Cannot apply '" + op + "' to " + l.Type.Name + " and " + r.Type.Name + ".");
             if (a.Kind == Kind.Int && c.Kind == Kind.Int && op != "/") { Type = DataType.BigInt; this.l = BCast.To(l, DataType.BigInt); this.r = BCast.To(r, DataType.BigInt); }
             else { Type = DataType.Double; this.l = BCast.To(l, DataType.Double); this.r = BCast.To(r, DataType.Double); }
+        }
+        // One side of || is NULL: the other side as text, with empty values made NULL (Oracle).
+        static Column Nullify(Column x, int n)
+        {
+            bool empty = false;
+            for (int i = 0; i < n && !empty; i++) if (!x.IsNull(i) && (x.IsLazyText ? x.Offs[i + 1] == x.Offs[i] : x.S[i].Length == 0)) empty = true;
+            if (!empty) return x;
+            Column o = new Column(DataType.Varchar, n);
+            for (int i = 0; i < n; i++) { string v = x.IsNull(i) ? null : Values.Text(x, i); if (string.IsNullOrEmpty(v)) o.SetNull(i); else o.S[i] = v; }
+            return o;
         }
         public override bool IsConst { get { return l.IsConst && r.IsConst; } }
         // a || b with either side held as UTF-8 bytes: the result is bytes too (a string side is encoded, nothing decoded).
@@ -100,10 +123,49 @@ namespace NativeDataEngine
             Column x = l.Eval(b), y = r.Eval(b);
             int n = b.Rows;
             Column o = new Column(Type, n);
+            if (op == "||")
+            {
+                // Oracle: NULL counts as '' ('a' || NULL = 'a'); NULL only when both are NULL (and '' is NULL).
+                bool xn = x.Type.Kind == Kind.Null, yn = y.Type.Kind == Kind.Null;
+                if (xn && yn) { for (int i = 0; i < n; i++) o.SetNull(i); return o; }
+                if (yn) return Nullify(x, n);
+                if (xn) return Nullify(y, n);
+                bool anyNull = false;
+                for (int i = 0; i < n; i++) if (x.IsNull(i) || y.IsNull(i)) { anyNull = true; break; }
+                if (!anyNull && (x.IsLazyText || y.IsLazyText)) return ConcatBytes(x, y, n, null);   // text as bytes: joined as bytes
+                for (int i = 0; i < n; i++)
+                {
+                    bool a = x.IsNull(i), c = y.IsNull(i);
+                    string s = a ? (c ? null : Values.Text(y, i)) : c ? Values.Text(x, i) : Values.Text(x, i) + Values.Text(y, i);
+                    if (string.IsNullOrEmpty(s)) o.SetNull(i); else o.S[i] = s;
+                }
+                return o;
+            }
             if (x.Type.Kind == Kind.Null || y.Type.Kind == Kind.Null) { for (int i = 0; i < n; i++) o.SetNull(i); return o; }
             for (int i = 0; i < n; i++) if (x.IsNull(i) || y.IsNull(i)) o.SetNull(i);
-            if (op == "||" && (x.IsLazyText || y.IsLazyText)) return ConcatBytes(x, y, n, o.Nulls);   // text as bytes: joined as bytes
-            if (op == "||") { for (int i = 0; i < n; i++) if (!o.IsNull(i)) o.S[i] = x.S[i] + y.S[i]; return o; }
+            if (dateOp == 3)
+            {
+                // date - date: days (whole days for two dates, fractional when a time is involved)
+                for (int i = 0; i < n; i++)
+                {
+                    if (o.IsNull(i)) continue;
+                    if (Type.Kind == Kind.Int) { o.I[i] = x.I[i] - y.I[i]; continue; }
+                    double xa = x.Type.Kind == Kind.Date ? x.I[i] * 86400e6 : x.I[i], ya = y.Type.Kind == Kind.Date ? y.I[i] * 86400e6 : y.I[i];
+                    o.F[i] = (xa - ya) / 86400e6;
+                }
+                return o;
+            }
+            if (dateOp > 0)
+            {
+                int sg = dateOp == 2 ? -1 : 1;
+                for (int i = 0; i < n; i++)
+                {
+                    if (o.IsNull(i)) continue;
+                    if (Type.Kind == Kind.Date) o.I[i] = x.I[i] + sg * y.I[i];
+                    else o.I[i] = x.I[i] + sg * (long)Math.Round(y.F[i] * 86400e6);
+                }
+                return o;
+            }
             if (Type.UsesI && x.I != null && y.I != null)
             {
                 long[] a = x.I, c = y.I, d = o.I;
@@ -375,18 +437,23 @@ namespace NativeDataEngine
     {
         public override void Refs(HashSet<int> s) { x.Refs(s); pat.Refs(s); }
 
-        readonly BExpr x, pat; readonly bool not, ci; Regex fixedRx; LikeMatch fast;
-        public BLike(BExpr x, BExpr pat, bool not, bool ci)
+        readonly BExpr x, pat; readonly bool not, ci; readonly char esc; Regex fixedRx; LikeMatch fast;
+        public BLike(BExpr x, BExpr pat, bool not, bool ci) : this(x, pat, not, ci, (char)0) { }
+        // esc: LIKE ... ESCAPE 'c' (0 = none): c% / c_ / cc match the character itself.
+        public BLike(BExpr x, BExpr pat, bool not, bool ci, char esc)
         {
-            this.x = BCast.To(x, DataType.Varchar); this.pat = BCast.To(pat, DataType.Varchar); this.not = not; this.ci = ci; Type = DataType.Bool;
+            this.x = BCast.To(x, DataType.Varchar); this.pat = BCast.To(pat, DataType.Varchar); this.not = not; this.ci = ci; this.esc = esc; Type = DataType.Bool;
             BLit l = this.pat as BLit;
-            if (l != null && l.Value != null) { fast = LikeMatch.Of((string)l.Value, ci); if (fast == null) fixedRx = Make((string)l.Value, ci); }
+            if (l != null && l.Value != null) { fast = esc == 0 ? LikeMatch.Of((string)l.Value, ci) : null; if (fast == null) fixedRx = Make((string)l.Value, ci, esc); }
         }
-        public static Regex Make(string p, bool ci)
+        public static Regex Make(string p, bool ci) { return Make(p, ci, (char)0); }
+        public static Regex Make(string p, bool ci, char esc)
         {
             StringBuilder sb = new StringBuilder("^");
-            foreach (char ch in p)
+            for (int k = 0; k < p.Length; k++)
             {
+                char ch = p[k];
+                if (esc != 0 && ch == esc && k + 1 < p.Length) { sb.Append(Regex.Escape(p[++k].ToString())); continue; }
                 if (ch == '%') sb.Append(".*"); else if (ch == '_') sb.Append('.'); else sb.Append(Regex.Escape(ch.ToString()));
             }
             sb.Append(@"\z");   // the very end (a plain $ would also match before a trailing newline)
@@ -414,7 +481,7 @@ namespace NativeDataEngine
             {
                 if (c.IsNull(i) || (pc != null && pc.IsNull(i))) { o.SetNull(i); continue; }
                 if (fast != null) { o.B[i] = fast.Match(s[i]) != not; continue; }
-                Regex rx = fixedRx ?? Make(pc.S[i], ci);
+                Regex rx = fixedRx ?? Make(pc.S[i], ci, esc);
                 o.B[i] = rx.IsMatch(s[i]) != not;
             }
             return o;

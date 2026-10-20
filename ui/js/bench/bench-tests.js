@@ -38,32 +38,32 @@ const BenchTests = (() => {
     ['q-distinct', 'COUNT DISTINCT (mostly unique text)', 'SELECT count(DISTINCT customer) FROM bench_m'],
     ['q-join', 'Join + GROUP BY', 'SELECT d.segment, sum(f.qty * f.price), count(*) FROM bench_m f JOIN bench_d d ON f.store_id = d.store_id GROUP BY d.segment'],
     ['q-join2', 'Join + filter both sides', "SELECT count(*), avg(f.price) FROM bench_m f JOIN bench_d d ON f.store_id = d.store_id WHERE d.tier = 'A' AND f.qty > 20"],
-    ['q-topn', 'ORDER BY ... LIMIT 100', 'SELECT id, price FROM bench_m ORDER BY price DESC, id LIMIT 100'],
+    ['q-topn', 'ORDER BY ... FETCH FIRST 100', 'SELECT id, price FROM bench_m ORDER BY price DESC, id FETCH FIRST 100 ROWS ONLY'],
     ['q-sort', 'Full sort (every row)', null],   // ORDER BY over all rows: built per size (OFFSET to the last rows)
     ['q-window', 'Window: rank per key', 'SELECT max(r) FROM (SELECT row_number() OVER (PARTITION BY store_key ORDER BY price DESC, id) AS r FROM bench_m) t'],
   ];
 
   // ---- test data ----
   const baseSql = n => `SELECT range AS id,
-    CAST(CAST('2021-01-01' AS DATE) + CAST(range % 1826 AS INTEGER) AS DATE) AS order_date,
-    add_seconds(CAST('2021-01-01 08:00:00' AS TIMESTAMP), range * 7 % 157680000) AS order_ts,
-    CAST(range % 10000 AS INTEGER) AS store_id,
-    'S' || CAST(range % 10000 AS VARCHAR) AS store_key,
-    'C' || CAST((range * 7919) % ${Math.max(1000, Math.floor(n / 4))} AS VARCHAR) AS customer,
-    CASE range % 8 WHEN 0 THEN 'Northeast' WHEN 1 THEN 'Southeast' WHEN 2 THEN 'Midwest' WHEN 3 THEN 'Southwest'
+    TRUNC(DATE '2021-01-01' + MOD(range, 1826)) AS order_date,
+    TIMESTAMP '2021-01-01 08:00:00' + MOD(range * 7, 157680000) / 86400 AS order_ts,
+    CAST(MOD(range, 10000) AS INTEGER) AS store_id,
+    'S' || TO_CHAR(MOD(range, 10000)) AS store_key,
+    'C' || TO_CHAR(MOD(range * 7919, ${Math.max(1000, Math.floor(n / 4))})) AS customer,
+    CASE MOD(range, 8) WHEN 0 THEN 'Northeast' WHEN 1 THEN 'Southeast' WHEN 2 THEN 'Midwest' WHEN 3 THEN 'Southwest'
       WHEN 4 THEN 'Mountain' WHEN 5 THEN 'Pacific' WHEN 6 THEN 'Northwest' ELSE 'Great Lakes' END AS region,
-    'Cat ' || CAST(range % 25 AS VARCHAR) AS category,
-    CAST((range * 31) % 100 + 1 AS INTEGER) AS qty,
-    ((range * 7) % 10000) / 100.0 AS price,
-    CASE WHEN range % 20 = 0 THEN NULL ELSE ((range * 13) % 30) / 100.0 END AS discount,
-    ((range * 11) % 6000) / 100.0 AS cost,
-    range % 3 = 0 AS is_online,
-    CASE WHEN range % 4 = 0 THEN NULL ELSE CAST(range % 5 + 1 AS INTEGER) END AS rating,
-    CASE WHEN range % 20 = 1 THEN NULL ELSE 'note ' || CAST(range % 100 AS VARCHAR) END AS note,
-    CAST(((range * 37) % 100000) / 100.0 AS DECIMAL(12,2)) AS amount
+    'Cat ' || TO_CHAR(MOD(range, 25)) AS category,
+    CAST(MOD(range * 31, 100) + 1 AS INTEGER) AS qty,
+    MOD(range * 7, 10000) / 100.0 AS price,
+    CASE WHEN MOD(range, 20) = 0 THEN NULL ELSE MOD(range * 13, 30) / 100.0 END AS discount,
+    MOD(range * 11, 6000) / 100.0 AS cost,
+    CASE WHEN MOD(range, 3) = 0 THEN TRUE ELSE FALSE END AS is_online,
+    CASE WHEN MOD(range, 4) = 0 THEN NULL ELSE CAST(MOD(range, 5) + 1 AS INTEGER) END AS rating,
+    CASE WHEN MOD(range, 20) = 1 THEN NULL ELSE 'note ' || TO_CHAR(MOD(range, 100)) END AS note,
+    CAST(MOD(range * 37, 100000) / 100.0 AS NUMBER(12,2)) AS amount
   FROM range(${n})`;
-  const dimSql = `SELECT range AS store_id, 'SEG' || CAST(range % 12 AS VARCHAR) AS segment,
-    CASE WHEN range % 3 = 0 THEN 'A' WHEN range % 3 = 1 THEN 'B' ELSE 'C' END AS tier FROM range(10000)`;
+  const dimSql = `SELECT range AS store_id, 'SEG' || TO_CHAR(MOD(range, 12)) AS segment,
+    CASE WHEN MOD(range, 3) = 0 THEN 'A' WHEN MOD(range, 3) = 1 THEN 'B' ELSE 'C' END AS tier FROM range(10000)`;
   const exists = async p => !!(await DNFS.stat(p, { quiet: true }).catch(() => ({}))).exists;
 
   // Is the base test table for n rows there?
@@ -183,7 +183,7 @@ const BenchTests = (() => {
         if (ctx.stopped()) break;
         part(qi / HEAVY.length, (qi + 1) / HEAVY.length, 0, n / (qid === 'q-sort' || qid === 'q-window' ? 2e6 : 15e6) * 1000);
         ctx.say(`${label} (${sizeLabel(n)} rows, ${workers} worker${workers > 1 ? 's' : ''})`);
-        const sql = sql0 || `SELECT id, customer FROM bench_m ORDER BY customer, id LIMIT 10 OFFSET ${Math.max(0, n - 10)}`;
+        const sql = sql0 || `SELECT id, customer FROM bench_m ORDER BY customer, id OFFSET ${Math.max(0, n - 10)} ROWS FETCH NEXT 10 ROWS ONLY`;
         act('query');
         try { out.push(m(qid, label, 'query', await timed(async () => (await aj('query', { sql, workers })).ms))); }
         catch (e) { out.push({ id: qid, label, kind: 'query', err: e.code === 'QUERY_OUT_OF_MEMORY' ? 'out of memory' : e.message.split('\n')[0] }); }

@@ -1,13 +1,19 @@
 // Project CRUD on top of DNFS. Global: Projects.
-// A project is a folder under workspace/projects/ with the standard layout and a project-config.json.
-//   await Projects.list()                       [config...]
-//   await Projects.create({ name, owner, ... }) config (folder made from the name)
+// Workspaces hold projects: workspace/<ws>/ (a workspace.json: UUID, name, folder) and workspace/workspaces.json maps them
+// all. A project is a folder workspace/<ws>/<project>/ with the standard layout and a project-config.json (id = its UUID,
+// workspaceId = its workspace's UUID). A project's "folder" id is "<ws>/<project>" (paths: workspace/<folder>/...).
+//   await Projects.workspaces()                 [{ id, name, folder, created }] A to Z
+//   await Projects.createWorkspace(name)        workspace (folder: the name in lower case, spaces -> dashes)
+//   await Projects.list(wsFolder?)              [config...] (one workspace, or all)
+//   await Projects.create({ name, owner, ..., workspace }) config (folder made from the name, in that workspace)
 //   await Projects.update(folder, patch)        config
-//   await Projects.rename(folder, newName)      config (folder renamed too)
-//   await Projects.trash(folder)                moves it to workspace/projects/.trash/
+//   await Projects.rename(folder, newName)      config (folder renamed too, same workspace)
+//   await Projects.trash(folder)                moves it to workspace/.trash/
 const Projects = (() => {
-  const ROOT = 'workspace/projects';
-  const LAYOUT = ['data/raw', 'data/source', 'data/imported', 'data/cache', 'pipeline', 'dashboard', 'publish', 'archives', 'logs'];
+  const ROOT = 'workspace';
+  const WS_MAP = `${ROOT}/workspaces.json`;
+  const RESERVED = ['projects', 'dashboard-studio', 'sample-data'];   // folders in workspace/ that are not workspaces
+  const LAYOUT = ['data/raw', 'data/clean', 'data/imported', 'data/cache', 'transform', 'dashboard', 'publish', 'archives', 'logs'];
   const MODULES = ['import', 'pipeline', 'dashboard', 'publish', 'update', 'archives'];
   // Option lists: [stored value, label]. The value is also the badge class.
   const PHASE = [['not-started', 'Not Started'], ['planning', 'Planning'], ['development', 'Development'], ['testing', 'Testing'], ['production', 'Production']];
@@ -35,15 +41,58 @@ const Projects = (() => {
     if (!slug(name)) return 'The name needs at least one letter or digit.';
     return '';
   };
-  const id = () => [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, '0')).join('');
+  const id = () => crypto.randomUUID();
+  const isUuid = v => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || ''));
 
-  async function list() {
-    let dirs = [];
-    try { dirs = (await DNFS.list(ROOT)).filter(e => e.dir); } catch (e) { if (e.status !== 404) throw e; await DNFS.mkdir(ROOT); }
+  // ---- workspaces ----
+  async function workspaces() {
+    const m = await DNFS.readJSONOr(WS_MAP, { workspaces: [] }).catch(() => ({ workspaces: [] }));
+    return (m.workspaces || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  }
+  async function createWorkspace(name) {
+    name = String(name || '').trim();
+    const folder = slug(name);
+    if (!folder) throw new Error('The name needs at least one letter or digit.');
+    if (RESERVED.includes(folder) || await DNFS.exists(`${ROOT}/${folder}`)) throw new Error(`A folder "${folder}" already exists in workspace/.`);
+    const all = await workspaces();
+    if (all.some(w => w.name.toLowerCase() === name.toLowerCase())) throw new Error(`A workspace named "${name}" already exists.`);
+    const ws = { schemaVersion: 1, id: id(), name, folder, created: new Date().toISOString() };
+    await DNFS.mkdir(`${ROOT}/${folder}`);
+    await DNFS.writeJSON(`${ROOT}/${folder}/workspace.json`, ws);
+    await DNFS.writeJSON(WS_MAP, { schemaVersion: 1, workspaces: [...all, ws] });
+    return ws;
+  }
+  // Delete a workspace (not SMPG, the built-in one): the server moves it, projects and all, to workspace/.trash and
+  // drops it from workspaces.json; the Trash dialog restores it.
+  const BUILTIN_WS = 'smpg';
+  async function deleteWorkspace(folder) {
+    if (folder === BUILTIN_WS) throw new Error('SMPG is built in and cannot be deleted.');
+    const r = await fetch(`/api/workspace/trash?folder=${encodeURIComponent(folder)}`, { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) throw new Error(j.error || `Delete failed (${r.status})`);
+    return j;
+  }
+  const wsOf = folder => String(folder).split('/')[0];
+
+  // Every project of one workspace (wsFolder) or of all of them. A project missing its UUID / workspace UUID / folder id
+  // (made before workspaces) gets them here, once.
+  async function list(wsFolder) {
     const out = [];
-    for (const d of dirs) {
-      try { out.push(migrate(await DNFS.readJSON(cfgPath(d.name)))); }
-      catch { out.push({ folder: d.name, name: d.name, broken: true, status: 'archived', modified: d.modified }); }
+    for (const ws of (await workspaces()).filter(w => !wsFolder || w.folder === wsFolder)) {
+      const dirs = (await DNFS.list(`${ROOT}/${ws.folder}`).catch(() => [])).filter(e => e.dir);
+      for (const d of dirs) {
+        const folder = `${ws.folder}/${d.name}`;
+        if (!await DNFS.exists(cfgPath(folder))) continue;
+        try {
+          const c = migrate(await DNFS.readJSON(cfgPath(folder)));
+          if (!isUuid(c.id) || c.workspaceId !== ws.id || c.folder !== folder) {
+            if (!isUuid(c.id)) { if (c.id) c.legacyId = c.id; c.id = id(); }
+            c.workspaceId = ws.id; c.folder = folder;
+            await DNFS.writeJSON(cfgPath(folder), c);
+          }
+          out.push(c);
+        } catch { out.push({ folder, name: d.name, workspaceId: ws.id, broken: true, status: 'archived', modified: d.modified }); }
+      }
     }
     return out;
   }
@@ -66,24 +115,65 @@ const Projects = (() => {
     await walk(`${ROOT}/${folder}`);
   }
   // A project renamed before paths were re-pointed: its datasets still name a folder that no longer exists. Fixed on load.
+  // Older projects kept the clean (Transform output) datasets in data/source: moved to data/clean once, and every path to
+  // them in the project's .json files (project-config.json, dataset.json, dashboard.json, ...) rewritten.
+  async function sourceToClean(folder) {
+    const src = `${ROOT}/${folder}/data/source`, dst = `${ROOT}/${folder}/data/clean`;
+    if (!await DNFS.exists(src)) return false;
+    if (!await DNFS.exists(dst)) await DNFS.move(src, dst);
+    else {   // both exist: move what is not in data/clean yet; data/source is removed only once it is empty (nothing is ever lost)
+      for (const e of await DNFS.list(src)) if (!await DNFS.exists(`${dst}/${e.name}`)) await DNFS.move(`${src}/${e.name}`, `${dst}/${e.name}`);
+      if (!(await DNFS.list(src)).length) await DNFS.remove(src, { recursive: true });
+    }
+    const a = `${src}/`, b = `${dst}/`;
+    const walk = async dir => {
+      for (const e of await DNFS.list(dir).catch(() => [])) {
+        const p = `${dir}/${e.name}`;
+        if (e.dir) { if (!/^(raw|archives|\.)/.test(e.name)) await walk(p); continue; }
+        if (!/\.json$/i.test(e.name)) continue;
+        const t = await DNFS.readText(p).catch(() => null);
+        if (t != null && t.includes(a)) await DNFS.writeText(p, t.split(a).join(b));
+      }
+    };
+    await walk(`${ROOT}/${folder}`);
+    return true;
+  }
+  // Older projects kept Transform's files in pipeline/ (pipeline.json): moved once to transform/ (transform.json).
+  async function pipelineToTransform(folder) {
+    const src = `${ROOT}/${folder}/pipeline`, dst = `${ROOT}/${folder}/transform`;
+    if (!await DNFS.exists(src)) return;
+    if (!await DNFS.exists(dst)) await DNFS.move(src, dst);
+    else {
+      for (const e of await DNFS.list(src)) if (!await DNFS.exists(`${dst}/${e.name}`)) await DNFS.move(`${src}/${e.name}`, `${dst}/${e.name}`);
+      if (!(await DNFS.list(src)).length) await DNFS.remove(src, { recursive: true });
+    }
+    if (await DNFS.exists(`${dst}/pipeline.json`) && !await DNFS.exists(`${dst}/transform.json`)) await DNFS.move(`${dst}/pipeline.json`, `${dst}/transform.json`);
+  }
   async function get(folder) {
+    await pipelineToTransform(folder).catch(e => console.warn('pipeline -> transform:', e.message));
+    if (await sourceToClean(folder).catch(() => false)) { /* paths rewritten: read the config below */ }
     let cfg = migrate(await DNFS.readJSON(cfgPath(folder)));
-    const stale = [...new Set((cfg.datasets || []).map(d => String(d.path || '').match(/^workspace\/projects\/([^/]+)\//)?.[1]).filter(f => f && f !== folder))];
+    // Paths that name another folder (a rename, or "workspace/projects/<p>/" from before workspaces): re-pointed here.
+    const stale = [...new Set((cfg.datasets || []).map(d => String(d.path || '').match(/^workspace\/([^/]+\/[^/]+)\//)?.[1]).filter(f => f && f !== folder))];
     let fixed = false;
     for (const old of stale) if (!await DNFS.exists(`${ROOT}/${old}`)) { await repath(folder, old); fixed = true; }
     if (fixed) cfg = migrate(await DNFS.readJSON(cfgPath(folder)));
     return cfg;
   }
+  // Polling (Project Manager change monitor): the config as saved, no one-time fixes, not written to the server log.
+  const peek = async folder => migrate(await DNFS.readJSON(cfgPath(folder), { quiet: true }));
   async function save(cfg) { cfg.modified = new Date().toISOString(); await DNFS.writeJSON(cfgPath(cfg.folder), cfg); return cfg; }
 
-  async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified', tags = [] }) {
+  async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified', tags = [], workspace }) {
     const err = validName(name); if (err) throw new Error(err);
-    const folder = slug(name);
+    const all = await workspaces(), ws = all.find(w => w.folder === workspace || w.id === workspace) || all[0];
+    if (!ws) throw new Error('Create a workspace first.');
+    const folder = `${ws.folder}/${slug(name)}`;
     if (await DNFS.exists(`${ROOT}/${folder}`)) throw new Error(`A project folder "${folder}" already exists.`);
     for (const d of LAYOUT) await DNFS.mkdir(`${ROOT}/${folder}/${d}`);
     const now = new Date().toISOString();
     const cfg = {
-      schemaVersion: 1, id: id(), name: name.trim(), folder, description, owner, developers, updaters, phase, status: +status || 0, classification, tags,
+      schemaVersion: 1, id: id(), workspaceId: ws.id, name: name.trim(), folder, description, owner, developers, updaters, phase, status: +status || 0, classification, tags,
       created: now, modified: now,
       modules: Object.fromEntries(MODULES.map(m => [m, { lastRun: null }])),
       datasets: [], settings: {},
@@ -102,7 +192,7 @@ const Projects = (() => {
   // Rename: new display name, and the folder follows the new name.
   async function rename(folder, name) {
     const err = validName(name); if (err) throw new Error(err);
-    const to = slug(name);
+    const to = `${wsOf(folder)}/${slug(name)}`;
     if (to !== folder) {
       if (await DNFS.exists(`${ROOT}/${to}`)) throw new Error(`A project folder "${to}" already exists.`);
       await DNFS.move(`${ROOT}/${folder}`, `${ROOT}/${to}`);
@@ -115,7 +205,7 @@ const Projects = (() => {
     return cfg;
   }
 
-  // Moves the project to workspace/projects/.trash/<folder>-<timestamp> (server call: dot-folders are off-limits to DNFS).
+  // Moves the project to workspace/.trash/<ws>~<project>-<timestamp> (server call: dot-folders are off-limits to DNFS).
   async function trash(folder) {
     const r = await fetch(`/api/project/trash?folder=${encodeURIComponent(folder)}`, { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } });
     const j = await r.json().catch(() => ({}));
@@ -123,7 +213,7 @@ const Projects = (() => {
     return j;
   }
 
-  // Trash (workspace/projects/.trash, closed to the file API): list, restore one, empty all.
+  // Trash (workspace/.trash, closed to the file API): list, restore one, empty all.
   async function trashApi(op, q = '') {
     const r = await fetch(`/api/project/trash/${op}${q}`, { method: op === 'list' ? 'GET' : 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } });
     const j = await r.json().catch(() => ({}));
@@ -182,7 +272,7 @@ const Projects = (() => {
 
   // Datasets (Arrow IPC parts; older ones Parquet): { name, path, parts?, stage, direct?, rows, columns: [{ name, type }], source, imported }
   //   stage 'imported' = data/imported (Import > Import; input for Pipeline)
-  //   stage 'source' = data/source (Import > Import Directly, or Pipeline output; ready for Dashboard)
+  //   stage 'source' = data/clean (Transform output, CLEAN_<name>; ready for Dashboard)
   //   path = dataset folder (part-NNNNNN.arrow + dataset.json, written by the engine); parts = its part files.
   //   version = dataset.json version (bumped on every rewrite). Older records may point at a single .parquet file.
   async function upsertDataset(folder, ds) {
@@ -193,12 +283,12 @@ const Projects = (() => {
     return save(cfg);
   }
   const dir = folder => `${ROOT}/${folder}`;
-  // The cleaned datasets that really exist: every folder in <project>/data/source with a dataset.json (read from disk, so a
+  // The cleaned datasets that really exist: every folder in <project>/data/clean with a dataset.json (read from disk, so a
   // dataset deleted or renamed outside the app is never offered). Columns / version / rows come from its dataset.json;
   // other fields from the project's record of it, if any. cfg = the project config (read when not given).
   async function sourceDatasets(folder, cfg) {
     cfg ||= await get(folder).catch(() => ({}));
-    const root = `${ROOT}/${folder}/data/source`, out = [];
+    const root = `${ROOT}/${folder}/data/clean`, out = [];
     for (const e of (await DNFS.list(root).catch(() => [])).filter(e => e.dir)) {
       const path = `${root}/${e.name}`, man = await DNFS.readJSON(`${path}/dataset.json`).catch(() => null);
       if (!man) continue;
@@ -210,5 +300,5 @@ const Projects = (() => {
   // 'imported' | 'source' (older records have no stage: taken from the path; pipeline outputs are 'source').
   const stageOf = d => (d.stage === 'staged' ? 'imported' : d.stage) || (d.source?.kind !== 'pipeline' && d.path.includes('/data/imported/') ? 'imported' : 'source');
 
-  return { ROOT, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, user, label, slug, validName, list, get, save, create, update, rename, trash, trashList, restore, emptyTrash, archives, snapshot, restoreSnapshot, deleteSnapshot, touchModule, upsertDataset, dir, stageOf, sourceDatasets };
+  return { ROOT, BUILTIN_WS, workspaces, createWorkspace, deleteWorkspace, wsOf, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, user, label, slug, validName, list, get, peek, save, create, update, rename, trash, trashList, restore, emptyTrash, archives, snapshot, restoreSnapshot, deleteSnapshot, touchModule, upsertDataset, dir, stageOf, sourceDatasets };
 })();

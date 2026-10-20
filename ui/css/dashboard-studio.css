@@ -11,7 +11,8 @@ html, body { height: 100%; margin: 0; overflow: hidden; }
 .stage { position: absolute; inset: 0; overflow: hidden; min-width: 0;
   background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px),
                     linear-gradient(to bottom, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px);
-  background-size: 24px 24px; background-position: var(--gx, 0px) 0; }
+  background-size: var(--gw, 24px) var(--gh, 24px); background-position: var(--gp, 0 0); }
+#frame { position: absolute; z-index: 0; border: 1px dashed var(--blue); box-sizing: border-box; pointer-events: none; }
 #cards { position: absolute; inset: 0; isolation: isolate; z-index: 1; }
 .hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; }
 .hint.err { color: var(--err); }
@@ -25,7 +26,6 @@ html, body { height: 100%; margin: 0; overflow: hidden; }
 .type:hover { border-color: var(--muted); }
 .type.off { opacity: .4; cursor: default; }
 .type.off:hover { border-color: var(--border); }
-.type.custom { border-color: var(--blue); color: var(--text); } .type.custom svg { color: var(--blue); }
 .type.glob svg { color: var(--c5); }
 .tsep { flex: none; width: 1px; margin: 4px 4px; background: var(--border); }
 .type[hidden] { display: none; }
@@ -153,8 +153,13 @@ aside.right.float[hidden] { display: none; }
 .dw-tw.on { transform: none; }
 .dw-g { margin: 2px 0 6px 20px; display: flex; flex-direction: column; gap: 3px; }
 .dw-gh { font-family: 'Exo 2', system-ui, sans-serif; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; display: flex; gap: 6px; margin-top: 4px; }
-.dw-f { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); cursor: grab; font-size: 12.5px; white-space: nowrap; overflow: hidden; }
-.dw-f:hover { border-color: var(--muted); }
+.dw-f { box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px; border: 1px solid transparent; border-radius: 4px; cursor: grab; font-size: 12.5px; white-space: nowrap; overflow: hidden; user-select: none; touch-action: none; }
+.dw-f:hover { border-color: var(--muted); background: var(--bg); }
+.dw-f.torn { opacity: .35; }
+/* A field being dragged: stuck to the mouse. */
+.dw-tear { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; will-change: transform; }
+.dw-tear .dw-f { margin: 0; border-color: var(--blue); background: var(--panel); cursor: grabbing; }
+body.tearing, body.tearing * { cursor: grabbing !important; }
 .dw-f span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .dw-f .t { flex: none; width: 20px; text-align: center; font-size: 11px; }
 .dw-f.num, .dw-f.num .t { color: var(--ok); }
@@ -230,8 +235,8 @@ body.barbottom .typebar { top: auto; bottom: 24px; }
 
 /* Settings search (top of every widget Settings window): matching settings only, no highlight. */
 .set-search { position: sticky; top: 0; z-index: 2; margin: -12px -14px 0; padding: 3px 14px 8px; background: var(--panel); }
-.set-search input { box-sizing: border-box; width: 100%; height: 24px; padding: 0 8px; font-size: 12px; background: color-mix(in srgb, var(--panel-2), #fff 6%); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); outline: none; }
-.set-search input:focus { border-color: var(--blue); }
+/* Both search boxes (Data window, Settings): the app's own input look, 24px tall. */
+.set-search input, .dw-q { box-sizing: border-box; width: 100%; height: 24px; }
 .set-root .srch-hide { display: none !important; }
 .set-root .optrow.srch-hide + .optrow { margin-top: 0; }
 
@@ -240,7 +245,7 @@ body.barbottom .typebar { top: auto; bottom: 24px; }
 .sec-data .sec-title { font-size: 13px; color: var(--text); font-weight: 600; padding: 2px 0; }
 .sec-data .slot-list { display: flex; flex-direction: column; gap: 6px; }
 .sec-data .slot { min-height: 18px; padding: 2px 4px 2px 8px; }
-.sec-data .slot b { min-width: 46px; }
+.sec-data .slot b { min-width: 46px; flex: none; }
 .sec-data .slot .f { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sec-data .slot select { height: 18px; }
 .sec-data .data-btns { display: flex; gap: 6px; }
@@ -263,3 +268,46 @@ body.barbottom .typebar { top: auto; bottom: 24px; }
 .slots .slot.slot-btns { gap: 6px; }
 .slots .slot.slot-btns button { height: 24px; padding: 0 10px; font-size: 12px; }
 .slots .slot.slot-btns button[data-add] { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+/* Loading: the stage stays hidden until everything has its final size. */
+body.dsload .stage { visibility: hidden; }
+
+/* A drop box with a field: green border. */
+.sec-data .slot.set { border-color: var(--ok); }
+/* The line under the Data drop boxes: as wide as the section lines, 14px (the side padding) above and below it. */
+#dOpts > .sec-data { padding-bottom: 14px; margin-bottom: 4px; }
+/* Data window: type icons in line with their type title; title + count one size, lighter. */
+.dw-f { margin-left: -9px; }
+.dw-f .t { text-align: left; }
+.dw-gh, .dw-gh small { font-size: 11px; color: color-mix(in srgb, var(--muted) 55%, var(--text)); }
+/* The Data and Settings windows: no drop shadow. */
+aside.right.float, .dwin { box-shadow: none; }
+/* Drop boxes: the spare one (a repeatable input's next copy) shows only while a field is dragged within 40px; red =
+   that field is already on the chart. */
+#dOpts .sec-data:not(.near) .slot.extra { display: none; }
+.sec-data .slot.dup { border-color: var(--err); background: color-mix(in srgb, var(--err) 22%, #000); }
+/* Data window: fields the selected chart already uses. */
+.dw-f.used { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 18%, #000); }
+/* A field in a drop box: the Data window's type mark and colour. */
+.slot .f { display: flex; align-items: center; gap: 8px; min-width: 0; font-family: var(--mono); font-size: 12.5px; }
+.slot .f .t { flex: none; width: 20px; font-size: 11px; }
+.slot .f .n { overflow: hidden; text-overflow: ellipsis; }
+.slot .f.num { color: var(--ok); } .slot .f.text { color: var(--c1); } .slot .f.date { color: var(--c5); }
+/* Containers: no selection frame, hover frame or corner handles (resize from the edges, like the floating windows). */
+.card:not(.sel):hover { border-color: transparent; }
+.card.sel { border-color: transparent; outline: 2px solid var(--blue); outline-offset: -1px; border-radius: 4px; }   /* selected: 2px blue */
+.card .rz { display: none; }
+body.rzcur, body.rzcur * { cursor: var(--rzc) !important; }   /* on a container border: the resize cursor everywhere */
+/* A setting whose toggle is off: greyed out, not hidden. */
+.optrow.dis { opacity: .4; pointer-events: none; }
+/* Settings rows: text left, control right (on any panel width); sliders as wide as the OFF | ON toggles; the options
+   indented under their category. */
+.optrow { grid-template-columns: minmax(0, 1fr) auto; }
+.optrow > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.optrow > :last-child, .optrow > :last-child:not(.slide), .optrow .seg, .optrow select.pick, .optrow .cp-sw, .optrow > input[type=number] { justify-self: end; }
+.slide { width: 74px; justify-self: end; }
+details.sec > .opts, details.sec > .swatches { padding-left: 12px; }
+/* Drop-downs: as wide as their longest choice (the browser's own sizing), right aligned, text to the right. */
+.optrow select, .optrow select.pick { width: auto; field-sizing: fixed; justify-self: end; text-align: right; text-align-last: right; }
+/* Colour rows: the swatch at the right edge (all in one column), its value right aligned just left of it. */
+.optrow .cp-sw { flex-direction: row-reverse; justify-self: end; text-align: right; }

@@ -25,15 +25,17 @@ const DNFS = (() => {
 
   return {
     // [{ name, path, dir, size, modified }]
-    list: async (path = '', { recursive = false } = {}) =>
-      (await json(call('list', { path, recursive: recursive ? 1 : undefined }))).entries,
+    list: async (path = '', { recursive = false, quiet = false } = {}) =>   // quiet: polling, not logged
+      (await json(call('list', { path, recursive: recursive ? 1 : undefined, quiet: quiet ? 1 : undefined }))).entries,
     // { exists, modified, size, ... }; quiet = not written to the server log (for files watched by polling).
+    // { area: last change (unix ms) } for a project folder, from server-side change notifications (cheap to poll).
+    changes: async path => (await json(call('changes', { path }))).areas,
     stat: (path, { quiet = false } = {}) => json(call('stat', { path, quiet: quiet ? 1 : undefined })),
     exists: async path => (await json(call('stat', { path }))).exists,
 
     read: path => call('read', { path }),                          // raw Response (stream it for big files)
     readText: async path => (await call('read', { path })).text(),
-    readJSON: async path => (await call('read', { path })).json(),
+    readJSON: async (path, { quiet = false } = {}) => (await call('read', { path, quiet: quiet ? 1 : undefined })).json(),   // quiet: polling, not logged
     readBuffer: async path => (await call('read', { path })).arrayBuffer(),
     // Optional file (may not exist yet, e.g. a new project): fallback instead of a 404 in the server log.
     readJSONOr: async (path, fallback) => (await DNFS.exists(path)) ? (await call('read', { path })).json() : fallback,

@@ -14,11 +14,14 @@ const SettingsPanel = (() => {
       return `<div class="chip" draggable="true" data-col="${esc(c.name)}" title="${esc(c.name)} (${esc(c.type)})"><span class="t ${k}">${k === 'num' ? '#' : k === 'date' ? 'D' : 'Aa'}</span><span>${esc(c.name)}</span></div>`; }).join('');
   }
   // One slot per input. links = { <key>: { col, agg } }.
-  function slots(inputs, links) {
+  // types (optional) = { <column>: <type> }: the field shows its type mark and colour, as in the Data window.
+  const MARK = { num: '#', text: 'Aa', date: 'D' };
+  function slots(inputs, links, types) {
     return inputs.map(i => {
       const l = links[i.key]?.col ? links[i.key] : null;
+      const k = l && types?.[l.col] ? kindOf(types[l.col]) : '';
       const agg = i.role === 'measure' ? `<select data-agg="${esc(i.key)}" title="How the values are combined">${Object.entries(AGG_TXT).map(([v, t]) => `<option value="${v}" ${(l?.agg || i.agg || 'sum') === v ? 'selected' : ''}>${t}</option>`).join('')}</select>` : '';
-      return `<div class="slot ${l ? 'set' : ''}" data-key="${esc(i.key)}"><b>${esc(i.label || i.key)}</b>${l ? `<span class="f">${esc(l.col)}</span>${agg}<button class="x" data-clear="${esc(i.key)}" title="Remove">×</button>` : '<span>drop a field</span>'}</div>`;
+      return `<div class="slot ${l ? 'set' : i.base ? 'extra' : ''}" data-key="${esc(i.key)}"><b>${esc(i.label || i.key)}</b>${l ? `<span class="f ${k}">${k ? `<span class="t">${MARK[k]}</span>` : ''}<span class="n">${esc(l.col)}</span></span>${agg}<button class="x" data-clear="${esc(i.key)}" title="Remove">×</button>` : '<span>drop a field</span>'}</div>`;
     }).join('');
   }
   // Slots around a chart box { left, top, w, h } (px in the slots' container): Y centred on its left, X centred under it,
@@ -60,22 +63,23 @@ const SettingsPanel = (() => {
   // kinds: { <input key>: 'number' | 'date' | 'text' } = what is on each input now; a format option (o.input) offers the
   // formats for that kind only, and a format of another kind switches to that kind's first one.
   function settings(el, options, get, set, kinds = {}) {
-    // Order: sub groups A to Z (settings without one last); in each, settings A to Z by label.
+    // Order (no sub groups): by kind of control - toggles, sliders, text boxes, drop-downs, formats - then A to Z by
+    // label; a setting of a sub group (X Axis ...) carries its name in its label, so related ones sit together.
     const by = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base', numeric: true });
     // o.when = { path, is } or { kind, is } (or a list of them, all must hold): shown only while that setting has that value (e.g. only in
     // Pop-out mode).
     // when: { kind: <input key>, is: 'date' } = only while that input holds that kind of data (numbers / text / dates).
-    const shown = o => [].concat(o.when || []).every(w => [].concat(w.is).includes(w.kind ? kinds[w.kind] : get(w.path)));
+    // A data-kind condition that fails hides the setting; a setting condition (a toggle that is off ...) only greys it out.
+    const holds = w => [].concat(w.is).includes(w.kind ? kinds[w.kind] : get(w.path));
+    const shown = o => [].concat(o.when || []).filter(w => w.kind).every(holds);
+    const live = o => [].concat(o.when || []).filter(w => !w.kind).every(holds);
+    const RANK = { boolean: 0, number: 1, text: 2, pick: 3, select: 3, format: 4 };
     const os = options.filter(o => o.type !== 'color' && o.show !== false && shown(o))
-      .sort((a, b) => (!a.sub - !b.sub) || by(a.sub || '', b.sub || '') || by(a.label, b.label));
-    // o.sub: settings of the same sub group (X-Axis, Y-Axis) sit in a collapsible block under its own heading; all start
-    // folded (on load / refresh). A redraw while open (a setting that shows / hides others) keeps the open ones open.
-    const was = new Set([...el.querySelectorAll('details.subsec[open]')].map(d => d.dataset.sub));
-    const folded = n => !was.has(n);
-    el.innerHTML = os.map((o, k) => {
-      const first = o.sub && o.sub !== os[k - 1]?.sub, last = o.sub && o.sub !== os[k + 1]?.sub;
-      return (first ? `<details class="subsec" data-sub="${esc(o.sub)}" ${folded(o.sub) ? '' : 'open'}><summary class="optsub">${esc(o.sub)}</summary>` : '') + row(o, k) + (last ? '</details>' : '');
-    }).join('') || '<div class="hintbox">This chart has no settings.</div>';
+      .map(o => o.sub && !String(o.label).startsWith(o.sub) ? { ...o, label: `${o.sub} ${o.label}` } : o)
+      .sort((a, b) => ((RANK[a.type] ?? 5) - (RANK[b.type] ?? 5)) || by(a.label, b.label));
+    el.innerHTML = os.map((o, k) => row(o, k)).join('') || '<div class="hintbox">This chart has no settings.</div>';
+    os.forEach((o, k) => { if (live(o)) return;
+      el.querySelectorAll(`[data-k="${k}"]`).forEach(c => { const r = c.closest('.optrow'); r?.classList.add('dis'); r?.querySelectorAll('input, select, button').forEach(x => { x.disabled = true; }); }); });
     el.onclick = e => {   // Show / Hide: sets the hidden checkbox and fires its change
       const b = e.target.closest('.seg button'); if (!b) return;
       const cb = b.parentElement.querySelector('input'), on = b.dataset.on === '1'; if (cb.checked === on) return;
@@ -128,8 +132,9 @@ const SettingsPanel = (() => {
   // Mouse wheel over a number box in the panel: up = one step more, down = one step less (min / max kept); over a toggle's row:
   // up = on, down = off. The page does not scroll.
   document.addEventListener('wheel', e => {
+    if (e.target.closest?.('.optrow.dis')) return;   // greyed out: no wheel changes
     // A drop-down: wheel up = the option above, wheel down = the one below, without opening it (Other… is skipped).
-    const sel = e.target.closest?.('aside select');
+    const sel = e.target.closest?.('aside select, .tmenu select');
     const isOpen = el => { try { return el.matches(':open'); } catch { return false; } };   // :open is new: older browsers have no open list here
     if (sel && e.deltaY && !isOpen(sel)) {
       e.preventDefault();
@@ -141,13 +146,13 @@ const SettingsPanel = (() => {
       return;
     }
     // A toggle: wheel up = on (knob right), wheel down = off (knob left).
-    const tg = e.target.closest?.('aside .optrow')?.querySelector('.seg');
+    const tg = e.target.closest?.('aside .optrow, .tmenu .optrow')?.querySelector('.seg');
     if (tg && e.deltaY) {
       e.preventDefault();
       tg.querySelector(`button[data-on="${e.deltaY < 0 ? 1 : 0}"]`).click();
       return;
     }
-    const inp = e.target.closest?.('aside .slide')?.querySelector('input[type=range]') || e.target.closest?.('aside input[type=number]'); if (!inp || !e.deltaY) return;
+    const inp = e.target.closest?.('aside .slide, .tmenu .slide')?.querySelector('input[type=range]') || e.target.closest?.('aside input[type=number], .tmenu input[type=number]'); if (!inp || !e.deltaY) return;
     e.preventDefault();
     const step = +inp.step || 1, min = inp.min === '' ? -Infinity : +inp.min, max = inp.max === '' ? Infinity : +inp.max;
     const v = Math.min(max, Math.max(min, Math.round(((+inp.value || 0) + (e.deltaY < 0 ? step : -step)) / step) * step));

@@ -5,7 +5,8 @@
 //     host = a window of the page with .dw-q + .dw-list inside (the combined Data / Settings window): the Data part lives
 //     there and that window is what opens / closes (the page places and moves it).
 //     a dragged field carries 'text/x-field' = the column and 'text/x-dataset' = the dataset key.
-//     onClose(): the window closed.
+//     used: a Set of '<dataset key>|<column>' already used (boxed green).
+//     onClose(): the window closed. managed: true = the page places / moves / sizes it (DataWindow.element()).
 const DataWindow = (() => {
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const by = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
@@ -31,7 +32,7 @@ const DataWindow = (() => {
     wire(el);
     // Move: drag the header.
     el.querySelector('.dw-head').addEventListener('pointerdown', e => {
-      if (e.button !== 0 || e.target.closest('button')) return;
+      if (e.button !== 0 || e.target.closest('button') || args?.managed) return;   // managed: the page moves it
       e.preventDefault();
       const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
       const mv = ev => { pos = { x: Math.max(0, Math.min(innerWidth - 60, ev.clientX - dx)), y: Math.max(0, Math.min(innerHeight - 30, ev.clientY - dy)) }; place(); };
@@ -49,12 +50,34 @@ const DataWindow = (() => {
       const h = e.target.closest('.dw-ds > .dw-dh'); if (!h) return;
       const k = h.parentElement.dataset.key, was = open.has(k); open.clear(); if (!was) open.add(k); draw(); remember();   // one table open at a time
     });
-    list.addEventListener('dragstart', e => {
-      const c = e.target.closest('.dw-f'); if (!c) return;
-      e.dataTransfer.setData('text/x-field', c.dataset.col); e.dataTransfer.setData('text/x-dataset', c.closest('.dw-ds').dataset.key);
-      e.dataTransfer.effectAllowed = 'copy'; document.body.classList.add('dragging');
-    });
-    list.addEventListener('dragend', () => document.body.classList.remove('dragging'));
+    list.addEventListener('pointerdown', e => { const c = e.target.closest('.dw-f'); if (c && e.button === 0) tear(e, c, w); });
+  }
+  // Drag a field: press = it comes off the list and sticks to the mouse. Targets get the usual dragover / dragleave / drop events (with 'text/x-field' and 'text/x-dataset').
+  function tear(e, c, win) {
+    e.preventDefault();
+    const r = c.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+    const dt = new DataTransfer(); dt.setData('text/x-field', c.dataset.col); dt.setData('text/x-dataset', c.closest('.dw-ds').dataset.key);
+    const g = document.createElement('div'); g.className = 'dw-tear';
+    const f = c.cloneNode(true); f.style.width = `${r.width}px`; g.append(f);
+    const at = (x, y) => { g.style.transform = `translate(${x - ox}px, ${y - oy}px)`; };
+    at(e.clientX, e.clientY); document.body.append(g); c.classList.add('torn'); document.body.classList.add('dragging', 'tearing');
+    let over = null;
+    const fire = (t, type, x, y) => t?.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: dt }));
+    const mv = ev => {
+      at(ev.clientX, ev.clientY);
+      const t = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (t !== over) { fire(over, 'dragleave', ev.clientX, ev.clientY); over = t; fire(t, 'dragenter', ev.clientX, ev.clientY); }
+      fire(t, 'dragover', ev.clientX, ev.clientY);
+    };
+    const up = ev => {
+      removeEventListener('pointermove', mv); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+      c.classList.remove('torn'); document.body.classList.remove('tearing');
+      const t = ev.type === 'pointerup' ? document.elementFromPoint(ev.clientX, ev.clientY) : null;
+      g.remove();
+      if (t && !win.contains(t)) fire(t, 'drop', ev.clientX, ev.clientY); else fire(over, 'dragleave', ev.clientX, ev.clientY);
+      document.body.classList.remove('dragging');
+    };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up); addEventListener('pointercancel', up);
   }
   addEventListener('keydown', e => { if (e.key === 'Escape' && el && !el.hidden && !document.querySelector('dialog[open]') && !e.target.closest?.('input, textarea')) close(); });
   function place() {
@@ -72,7 +95,7 @@ const DataWindow = (() => {
       const body = !shown ? '' : GROUPS.map(([k, label, mark]) => {
         const g = cols.filter(c => SettingsPanel.kindOf(c.type) === k).sort(by);
         return g.length ? `<div class="dw-g"><div class="dw-gh">${label}<small>${g.length}</small></div>${g.map(c =>
-          `<div class="dw-f ${k}" draggable="true" data-col="${esc(c.name)}" title="${esc(c.name)} (${esc(c.type)}): drag onto a slot"><span class="t">${mark}</span><span>${esc(c.name)}</span></div>`).join('')}</div>` : '';
+          `<div class="dw-f ${k}${args.used?.has?.(`${d.key}|${c.name}`) ? ' used' : ''}" data-col="${esc(c.name)}" title="${esc(c.name)} (${esc(c.type)}): drag onto a slot"><span class="t">${mark}</span><span>${esc(c.name)}</span></div>`).join('')}</div>` : '';
       }).join('');
       return `<div class="dw-ds ${d.key === args.current ? 'cur' : ''}" data-key="${esc(d.key)}"><div class="dw-dh ${esc(d.note || '')}" title="${esc(d.key)}"><span class="dw-tw ${shown ? 'on' : ''}">▾</span><span class="dw-dn">${esc(d.name)}</span>${d.note ? `<small>${esc(d.note)}</small>` : ''}</div>${body}</div>`;
     }).join('') || `<div class="dw-none">${ds.length ? 'No field matches.' : 'No datasets yet: run a Transform (CLEAN_), or add SAMPLE_ files to workspace/sample-data.'}</div>`;
@@ -82,11 +105,11 @@ const DataWindow = (() => {
     else if (!el || hosted) { hosted = false; build(); }
     args = a;
     open.clear();   // opens with every table collapsed
-    el.hidden = false; if (!hosted) place(); draw(); remember();
+    el.hidden = false; if (!hosted && !a.managed) place(); draw(); remember();
   }
   // Keep the open window in step with the page (another chart picked, a field linked).
   function update(a) { if (el && !el.hidden) { args = { ...args, ...a }; draw(); remember(); } }
   function close() { if (el && !el.hidden) { el.hidden = true; remember(); args?.onClose?.(); } }
   const isOpen = () => !!el && !el.hidden;
-  return { open: show, update, close, isOpen, wasOpen };
+  return { open: show, update, close, isOpen, wasOpen, element: () => el };
 })();

@@ -34,8 +34,51 @@
       "default": false
     },
     {
+      "path": "bb.data.labels.backgroundColors",
+      "label": "Data Labels Background Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.data.labels.border.stroke",
+      "label": "Data Labels Border Color",
+      "group": "Colors",
+      "type": "color",
+      "default": "#000000",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.fill",
+      "label": "Data Labels Border Fill",
+      "group": "Colors",
+      "type": "color",
+      "default": "",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "dn.labelColor",
+      "label": "Data Labels Text Color",
+      "group": "Colors",
+      "type": "color",
+      "default": "#ffffff"
+    },
+    {
       "path": "bb.color.onover",
       "label": "Hover Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.background.color",
+      "label": "Layout Background Color",
       "group": "Colors",
       "type": "color",
       "default": ""
@@ -218,18 +261,21 @@
       "step": 1
     },
     {
-      "path": "bb.data.labels.backgroundColors",
-      "label": "Background Color",
-      "group": "Data Labels",
-      "type": "color",
-      "default": ""
-    },
-    {
       "path": "bb.data.labels.centered",
       "label": "Centered (bars)",
       "group": "Data Labels",
       "type": "boolean",
       "default": false
+    },
+    {
+      "path": "dn.font.labels",
+      "label": "Font Size",
+      "group": "Data Labels",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "dn.labelsShow",
@@ -239,43 +285,12 @@
       "default": true
     },
     {
-      "path": "dn.labelColor",
-      "label": "Text Color",
-      "group": "Data Labels",
-      "type": "color",
-      "default": "#ffffff"
-    },
-    {
       "path": "dn.on.data_labels_border",
       "label": "Border",
       "group": "Data Labels",
       "sub": "Border",
       "type": "boolean",
       "default": false
-    },
-    {
-      "path": "bb.data.labels.border.stroke",
-      "label": "Border Color",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "#000000",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
-    },
-    {
-      "path": "bb.data.labels.border.fill",
-      "label": "Border Fill",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
     },
     {
       "path": "bb.data.labels.border.padding",
@@ -493,29 +508,6 @@
       "default": "Auto"
     },
     {
-      "path": "bb.svg.classname",
-      "label": "SVG Class Name",
-      "group": "Layout",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.class",
-      "label": "Background Class",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.color",
-      "label": "Background Color",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "color",
-      "default": ""
-    },
-    {
       "path": "bb.background.imgUrl",
       "label": "Background Image URL",
       "group": "Layout",
@@ -611,6 +603,16 @@
       "default": false
     },
     {
+      "path": "dn.font.legend",
+      "label": "Font Size",
+      "group": "Legend",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.legend.padding",
       "label": "Padding",
       "group": "Legend",
@@ -676,8 +678,29 @@
       "label": "Inset Step (rows)",
       "group": "Legend",
       "sub": "Inset",
-      "type": "text",
-      "default": "",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "when": [
+        {
+          "path": "bb.legend.position",
+          "is": "inset"
+        },
+        {
+          "path": "dn.auto.legend_inset_step",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.legend_inset_step",
+      "label": "Inset Step (rows) Auto",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "boolean",
+      "default": true,
       "when": {
         "path": "bb.legend.position",
         "is": "inset"
@@ -775,6 +798,16 @@
       "step": 1
     },
     {
+      "path": "dn.font.title",
+      "label": "Font Size",
+      "group": "Title",
+      "type": "number",
+      "default": 14,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.title.position",
       "label": "Position",
       "group": "Title",
@@ -835,6 +868,16 @@
       "default": 0,
       "min": 0,
       "max": 50,
+      "step": 1
+    },
+    {
+      "path": "dn.font.tooltip",
+      "label": "Font Size",
+      "group": "Tooltip",
+      "type": "number",
+      "default": 12,
+      "min": 6,
+      "max": 40,
       "step": 1
     },
     {

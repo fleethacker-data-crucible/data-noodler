@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Data Noodler</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<link rel="stylesheet" href="../css/dashboard-studio.css">
+<style>
+  :root { --sep: #2e2d2a; }   /* every separator line on this page: one colour, a little darker than --border */
+  body, .stage { background-color: #1a1a19; }   /* same as the server window (server.html --bg) */
+  /* New app home page: the 24px grid with a header area: 3 grid rows tall, full width, over the grid in the window colour. */
+  .harea { position: absolute; left: 0; right: 0; top: 0; height: 72px; box-sizing: border-box; z-index: 5; background: #1a1a19; border-bottom: 1px solid var(--sep); }
+  .hlogo { position: absolute; left: 22px; top: 50%; transform: translateY(calc(-50% - 2px)); width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 4px; background: var(--blue); color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .02em; }   /* top left: 30px square, 8px from the left, centred on the header */
+  .hsep { position: absolute; left: 66px; top: 50%; transform: translateY(calc(-50% - 2px)); width: 1px; height: 30px; background: var(--sep); }   /* 14px right of the DN square, same height and line */
+  .htext { position: absolute; left: 80px; top: 50%; transform: translateY(calc(-50% - 2px)); display: flex; flex-direction: column; justify-content: center; min-height: 30px; }   /* 14px right of the line */
+  .htitle { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1.1; white-space: nowrap; }
+  .hsub { margin-top: 2px; font-size: 11px; color: var(--muted); white-space: nowrap; }   /* the version */
+  /* Header buttons: centred on the page (none yet); Server (red) on the right. */
+  .hbtns { position: absolute; left: 50%; top: 50%; transform: translate(-50%, calc(-50% - 2px)); display: flex; gap: 8px; }
+  .hright { position: absolute; right: 22px; top: 50%; transform: translateY(calc(-50% - 2px)); display: flex; gap: 8px; }
+  .hright button { height: 30px; }
+  /* Side panel (left, under the header): sections with an icon per row; collapses to a tab on the left edge. */
+  .nav { position: absolute; left: 0; top: 72px; bottom: 0; width: 240px; z-index: 4; box-sizing: border-box; padding: 12px 8px; overflow: auto;
+    background: #1a1a19; border-right: 1px solid var(--sep); transition: transform .2s ease; font-size: 13px; color: var(--text); user-select: none; }
+  .nav.nclosed { transform: translateX(-100%); }
+  .nav .nhead { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 10px; }
+  .nav .nhead b { font-size: 20px; font-weight: 700; }
+  .nav .nico { width: 18px; height: 18px; color: var(--text-2); flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .nav .nrow { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .nav .nrow:hover { background: color-mix(in srgb, var(--panel) 80%, #fff); }
+  .nav .nrow.on { background: var(--blue); color: #fff; font-weight: 600; }
+  .nav .ngrp { margin-top: 18px; }
+  .nav .ngrp > .nrow { font-weight: 700; font-size: 14px; color: var(--text-2); }   /* category headings: light grey, a little larger */
+  .nav .ngrp > .nrow .ncar, .nav .ngrp > .nrow .nadd { display: grid; place-items: center; color: var(--muted); transition: transform .15s, color .15s; }   /* same look as the collapse chevron */
+  .nav .ngrp.nshut > .nrow .ncar { transform: rotate(-90deg); }
+  .nav .ngrp > .nrow .ncar .nico, .nav .ngrp > .nrow .nadd .nico { width: 16px; height: 16px; color: inherit; }
+  .nav .ngrp.nshut > .nitems { display: none; }
+  .nav .ngrp > .nrow .nadd { margin-left: auto; }
+  .nav .ngrp > .nrow .ncar:hover, .nav .ngrp > .nrow .nadd:hover { color: var(--text); }
+  .nav .nnone { padding: 4px 8px 4px 34px; font-size: 12px; color: var(--muted); }
+  .nav .nx { background: none; border: 0; padding: 2px; color: var(--muted); cursor: pointer; display: grid; }
+  .nav .nx:hover { color: var(--text); }
+  .navtab { position: absolute; left: 0; top: 84px; z-index: 6; width: 22px; height: 30px; display: none; place-items: center; cursor: pointer;
+    background: color-mix(in srgb, var(--panel) 80%, #fff); border: 1px solid var(--border); border-left: 0; border-radius: 0 4px 4px 0; color: var(--muted); }
+  .navtab:hover { color: var(--text); }
+  .nav.nclosed ~ .navtab { display: grid; }
+  body.navrz, body.navrz * { cursor: col-resize !important; }   /* within 8px of the side panel's right border */
+  body.navdrag { user-select: none; }
+  .nav .nrow.on .nico { color: #fff; }
+  .navtab .nico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  /* The panel's collapse button: the reopen tab's icon pointing left, no background. */
+  #sideX { width: 22px; height: 30px; display: grid; place-items: center; padding: 0; background: none; border: 0; color: var(--muted); }
+  #sideX:hover { color: var(--text); }
+  #sideX .nico { width: 16px; height: 16px; color: inherit; }
+  /* ---- Projects view (ui/js/home/projects-view.js): list right of the side panel, project pane sliding in from the right ---- */
+  .plist { position: absolute; top: 72px; bottom: 0; left: var(--navw, 0px); right: 0; z-index: 3; overflow: auto; padding: 16px 24px; box-sizing: border-box; transition: right .2s ease; background: #1a1a19; }   /* same as the side panel */
+  .stage.pane-open .plist { right: 680px; }
+  .pico { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--text-2); }
+  .pl-head { display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; font-size: 14px; color: var(--text-2); }
+  .pl-head b { font-weight: 700; }
+  .pl-n { font-size: 12px; color: var(--muted); }
+  .pl-add { margin-left: auto; display: grid; place-items: center; cursor: pointer; color: var(--muted); }
+  .pl-add:hover { color: var(--text); }
+  .pl-row, .pl-cols { display: grid; grid-template-columns: var(--plcols); align-items: center; column-gap: 12px; }
+  .pl-row { height: 42px; margin: 6px 0; padding: 0 14px; box-sizing: border-box; cursor: pointer; font-size: 13px;
+    border: 1px solid var(--sep); border-radius: 4px; background: color-mix(in srgb, var(--panel) 92%, #fff); transition: border-color .15s, background .15s; }
+  .pl-row:hover { border-color: var(--border); }
+  .pl-row.on { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, var(--panel)); }
+  .pl-name { flex: 1; min-width: 0; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-pct { font-weight: 600; }
+  .pl-row > span, .pl-cols > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pl-row .num, .pl-cols .num { text-align: right; }
+  /* Columns, lined up on every row: name, owner, classification, phase, status, datasets, created, modified, last updated; with a project pane open: name, classification, phase, status. */
+  .plist { --plcols: minmax(150px, 2fr) minmax(90px, 1.2fr) 120px 110px 48px 64px minmax(110px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr); }
+  .pl-cols { height: 26px; padding: 0 15px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .stage.pane-open .plist { --plcols: minmax(120px, 1fr) 120px 110px 48px; }
+  .stage.pane-open .plist .c-wide { display: none; }
+  .pl-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .pl-empty { padding: 30px 8px; color: var(--muted); }
+  .ppane { position: absolute; top: 72px; bottom: 0; right: 0; width: 680px; z-index: 4; box-sizing: border-box; display: flex; flex-direction: column;
+    background: #1a1a19; border-left: 1px solid var(--sep); transform: translateX(100%); transition: transform .2s ease; }
+  .ppane.open { transform: none; }
+  .pp-top { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--sep); flex: none; }
+  .pp-folder { font-size: 12px; color: var(--muted); }
+  .pp-x { background: none; border: 0; padding: 4px; cursor: pointer; display: grid; color: var(--muted); }
+  .pp-x:hover { color: var(--text); }
+  .pp-x .pico { color: inherit; width: 18px; height: 18px; }
+  .pp-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 24px 24px; }
+  .pp-name { margin: 0 0 14px; font-size: 22px; font-weight: 700; color: var(--text); text-transform: none; letter-spacing: 0; }
+  .pp-props { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 24px; padding-bottom: 14px; border-bottom: 1px solid var(--sep); }
+  .pp-prop { display: flex; align-items: center; gap: 10px; min-height: 30px; font-size: 13px; }
+  .pp-prop .k { color: var(--muted); width: 96px; flex: none; }
+  .pp-prop .v { color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pp-sec { padding: 14px 0; border-bottom: 1px solid var(--sep); }
+  .pp-h { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13px; color: var(--text); }
+  .pp-h button { margin-left: auto; }
+  .pp-desc { padding-left: 0; font-size: 13px; color: var(--text-2); white-space: pre-wrap; }
+  .pp-sec .wf { margin: 4px 0 0; }
+  .pp-sec .pcards { margin: 0; }
+  .pp-actions { display: flex; gap: 5px; padding: 14px 0; }
+  .pp-tabs { display: flex; border-bottom: 1px solid var(--sep); margin-top: 6px; }
+  .pp-tabs span { padding: 8px 20px; font-size: 13px; font-weight: 600; color: var(--blue); border-bottom: 2px solid var(--blue); }
+  .pp-body .log { margin-top: 10px; height: calc(10 * 1.6em); }
+  .trash-list { max-height: 50vh; overflow: auto; border: 1px solid var(--border); border-radius: 4px; }
+  .trash-list label { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; }
+  .trash-list label + label { border-top: 1px solid var(--border); }
+  .trash-list small { margin-left: auto; color: var(--muted); }
+  .arch-path { font-family: var(--mono, monospace); color: var(--muted); margin-bottom: 8px; word-break: break-all; }
+  .arch-list label small { white-space: nowrap; }
+  .arch-note { margin-top: 10px; }
+  dialog.flash { animation: flash .18s ease-in-out 8 alternate; }
+  @keyframes flash { from { box-shadow: 0 12px 40px #0009; border-color: var(--border); } to { box-shadow: 0 0 0 4px var(--err), 0 0 40px var(--err); border-color: var(--err); } }
+  .wfrow { display: flex; align-items: center; gap: 16px; margin-top: 25px; }
+  .wfrow .wf { margin-top: 0; }
+  .pcards { margin-left: auto; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }   /* every card as wide as the widest */
+  .pcard { height: 64px; min-width: 110px; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg);
+    display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+  .pcard .k { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .pcard .v { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1.2; white-space: nowrap; }
+  .pcard .s { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .wf { position: relative; --idle: var(--border); --gold: #e8a33d; --green: #4cc27f; --red: #ff6b6b; display: flex; align-items: flex-start; flex: none; margin-top: 25px; }
+  .wf .st { display: flex; flex-direction: column; align-items: center; width: 96px; flex: none; }
+  .wf .c { width: 40px; height: 40px; border-radius: 50%; box-sizing: border-box; border: 3px solid var(--idle); background: var(--bg);
+    display: grid; place-items: center; color: var(--muted); font-size: 21px; font-weight: 700; line-height: 1; transition: border-color .3s, background .3s; }
+  .wf .c { position: relative; }
+  .wf .c .ck { position: absolute; right: -12px; bottom: -2px; font-size: 13px; font-weight: 700; line-height: 1; color: var(--green); }   /* done: small check outside, bottom right */
+  .wf .c .pct { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }   /* progress / N/A in the circle */
+  .wf .st.done .c .pct { color: var(--green); }
+  .wf .st.running .c .pct { color: var(--gold); }
+  .wf .st.failed .c .pct { color: var(--red); }
+  .wf .c .ck.x { color: var(--red); }
+  .wf .st.stale .c .pct { color: #ff9e9e; }
+  .wf .note { font-size: 11px; color: var(--muted); }
+  .wf .c { cursor: pointer; }   /* a circle does what its button does */
+  .stepinfo { position: fixed; z-index: 50; max-width: 460px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel);
+    color: var(--text); font-size: 12px; box-shadow: 0 6px 18px #0008; pointer-events: none; }
+  .stepinfo b { display: block; font-size: 13px; margin-bottom: 2px; }
+  .stepinfo .who { color: var(--muted); margin-bottom: 6px; }
+  .stepinfo .h { margin-top: 6px; font-weight: 600; color: var(--muted); }
+  .stepinfo .i { padding-left: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stepinfo .i small { color: var(--muted); }
+  .stepinfo .err { color: var(--red, #ff6b6b); white-space: normal; }
+  .wf .lbl { font-size: 14px; font-weight: 600; color: var(--text); }   /* step name under its status */
+  /* Steps sit 5px apart (like the action buttons); each arrow runs from circle border to circle border: (96 - 40) / 2 = 28px into each step. */
+  .wf .ar { flex: none; width: 5px; height: 40px; position: relative; }
+  .wf .ar::before { content: ""; position: absolute; left: -28px; right: -28px; top: 18px; height: 3px; background: var(--idle); transition: background .3s; }
+  .wf .ar::after { content: ""; position: absolute; right: -28px; top: 11px; border: 8px solid transparent; border-left: 12px solid var(--idle); border-right: 0; transition: border-left-color .3s; }
+  .wf .ar.on::before { background: #5a5955; } .wf .ar.on::after { border-left-color: #5a5955; }   /* the line: dark grey */
+  .wf .ar.on:not(.head)::after { display: none; }   /* one arrowhead: the front of the line */
+  .wf .st.running .c { border-color: var(--gold); animation: wf-run 1s ease-in-out infinite; }
+  .wf .st.running .note { color: var(--gold); font-weight: 600; }
+  @keyframes wf-run { 0%, 100% { background: var(--bg); box-shadow: none; } 50% { background: color-mix(in srgb, var(--gold) 45%, var(--bg)); box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 70%, transparent); } }
+  .wf .st.done .c { border-color: var(--green); color: var(--green); background: color-mix(in srgb, var(--green) 14%, var(--bg)); }
+  .wf .st.done .note { color: var(--green); }
+  .wf .st.done.flash .c { animation: wf-done .3s ease-in-out 6 alternate; }
+  @keyframes wf-done { from { background: color-mix(in srgb, var(--green) 14%, var(--bg)); box-shadow: none; } to { background: color-mix(in srgb, var(--green) 65%, var(--bg)); box-shadow: 0 0 14px var(--green); } }
+  .wf .st.failed .c { border-color: var(--red); color: var(--red); } .wf .st.failed .note { color: var(--red); }
+  .wf .st.stale .c { border-color: #ff9e9e; border-style: solid; color: #ff9e9e; background: color-mix(in srgb, #ff9e9e 14%, var(--bg)); }
+  .wf .st.stale .note { color: #ff9e9e; font-weight: 600; }
+  .wf .ar.hid { visibility: hidden; }
+  .wf .st.same .c, .wf .st.skipped.nochg .c { border-color: #b5b5b0; border-style: solid; color: #b5b5b0; }   /* No Changes: light grey, solid */
+  .wf .st.same .note, .wf .st.nochg .note { color: #b5b5b0; }
+  .wf .st.skipped .c, .wf .st.idle .c { border-style: dashed; }   /* idle = never run (Not Run) */
+  /* Status %: light red (0) to green (100). */
+  .pct.p0 { color: #ff8a8a; } .pct.p25 { color: #f5a35c; } .pct.p50 { color: #e8c547; } .pct.p75 { color: #a6cf3f; } .pct.p100 { color: #4cc27f; }
+  .nav .nrow.nws { padding-left: 36px; position: relative; }
+  .nav .nwdel { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); display: none; cursor: pointer; }   /* hover: bright red trash, in the icon column */
+  .nav .nrow.nws:hover .nwdel { display: grid; }
+  .nav .nwdel .nico { width: 18px; height: 18px; color: var(--err) !important; stroke: var(--err); }   /* workspaces: no icon, indented under the heading text */
+  .pl-bar { display: flex; gap: 5px; margin-bottom: 12px; }   /* New Project, Trash: left aligned above the column headers */
+  /* Project pane: in-place edits. */
+  .pp-name { cursor: text; }
+  .pp-title-in { width: 100%; box-sizing: border-box; height: 34px; font-size: 20px; font-weight: 700; padding: 0 8px; }
+  .pp-ids { display: flex; gap: 16px; margin: -8px 0 14px; font-size: 11px; color: var(--muted); font-family: var(--mono, monospace); }
+  /* Every value starts at the same x (names, %, badges); the green + sits in the gap to its left. Lists: one name per line. */
+  .pp-prop { align-items: flex-start; }
+  .pp-prop > .pico, .pp-prop .k { margin-top: 7px; }
+  .pp-prop .v { position: relative; padding: 6px 0 6px 24px; white-space: normal; overflow: visible; line-height: 18px; }
+  .pp-prop .v > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pp-plus { position: absolute; left: 0; top: 7px; display: grid; place-items: center; cursor: pointer; }
+  .pp-plus .pico { width: 16px; height: 16px; color: var(--ok); stroke-width: 2.5; }
+  .pp-plus:hover .pico { color: color-mix(in srgb, var(--ok) 70%, #fff); }
+  .pp-pick { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .pp-pick:hover { filter: brightness(1.2); }
+  .pp-car { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--muted); }
+  .ppmenu { position: fixed; z-index: 70; min-width: 120px; max-height: 280px; overflow: auto; padding: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 10px 30px #0008; }
+  .ppmenu > div { padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .ppmenu > div:hover { background: color-mix(in srgb, var(--panel) 80%, #fff); }
+  .ppmenu > div.on { outline: 1px solid var(--blue); }
+  .pp-desc { cursor: text; }
+  .pp-desc-in { width: 100%; box-sizing: border-box; min-height: 64px; resize: vertical; font: inherit; font-size: 13px; padding: 6px 8px; }
+</style>
+</head>
+<body>
+<div class="ds">
+  <main class="stage" id="stage">
+    <header class="harea" id="harea"><span class="hlogo">DN</span><span class="hsep"></span><div class="htext"><div class="htitle">Data Noodler (SMPG)</div><div class="hsub"><span id="hver">v.26_1014_0724</span></div></div><div class="hbtns" id="hbtns"></div></header>
+    <aside class="nav" id="side"></aside><section class="plist" id="plist"></section><section class="ppane" id="ppane"></section><div class="navtab" id="sidetab" title="Open the side panel"></div>
+  </main>
+</div>
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/user-picker.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/windows.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/import/external-source.js"></script>
+<script src="../js/pipeline/steps.js"></script>
+<script src="../js/pipeline/runner.js"></script>
+<script src="../js/publish/publisher.js"></script>
+<script src="../js/update/project-update.js"></script>
+<script src="../js/home/projects-view.js"></script>
+<script>
+(() => {
+  const { $ } = UI;
+  const G = 24;   // grid cell (px), as in Dashboard Studio
+  // ---- Side panel: My Projects, Bookmarks, Teams, Workspace (+ creates one), Help ----
+  const I = {
+    proj: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+    mark: '<path d="M6 3h12v18l-6-4-6 4z"/>',
+    team: '<circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M2 20c.6-3 3-5 6-5s5.4 2 6 5M14 15c3 0 5.4 2 6 5"/>',
+    ws: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5V14M12 17.5v.01"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>', server: '<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
+    trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+    close: '<path d="M15 6l-6 6 6 6"/>', down: '<path d="M6 9l6 6 6-6"/>', plus: '<path d="M12 5v14M5 12h14"/>',
+  };
+  const svg = k => `<svg class="nico" viewBox="0 0 24 24">${I[k]}</svg>`;
+  let workspaces = [], wsSel = null;   // [{ id, name, folder }] from workspace/workspaces.json; wsSel = the selected one's folder
+  const loadWs = async () => { workspaces = await Projects.workspaces(); renderSide(); };
+  const sec = (id, icon, label, add, items) => `<div class="ngrp" data-sec="${id}"><div class="nrow" data-tog="${id}">${svg(icon)}<span>${label}</span><span class="ncar">${svg('down')}</span>${add ? `<span class="nadd" data-add="${id}" title="New ${label.toLowerCase()}">${svg('plus')}</span>` : ''}</div><div class="nitems">${items}</div></div>`;
+  function renderSide() {
+    $('side').innerHTML = `<div class="nhead"><b>Menu</b><button class="nx" id="sideX" title="Close the side panel">${svg('close')}</button></div>
+      <div class="nrow${wsSel ? '' : ' on'}" data-go="projects">${svg('proj')}<span>Projects</span></div>
+      <div class="nrow" data-go="bookmarks">${svg('mark')}<span>Bookmarks</span></div>
+      <div class="nrow" data-go="trash">${svg('trash')}<span>Trash</span></div>`
+      + sec('teams', 'team', 'Teams', true, '<div class="nnone">No teams yet</div>')
+      + sec('workspace', 'ws', 'Workspace', true, workspaces.map(w => `<div class="nrow nws${wsSel === w.folder ? ' on' : ''}" data-go="ws:${UI.esc(w.folder)}" title="${UI.esc(w.name)} (workspace/${UI.esc(w.folder)})">${w.folder === Projects.BUILTIN_WS ? '' : `<span class="nwdel" data-wsdel="${UI.esc(w.folder)}" title="Delete ${UI.esc(w.name)}">${svg('trash')}</span>`}<span>${UI.esc(w.name)}</span></div>`).join('') || '<div class="nnone">No workspaces yet</div>')
+      + sec('help', 'help', 'Help', false, `<div class="nrow" data-go="server">${svg('server')}<span>Server Control</span></div><div class="nrow" data-go="gethelp">${svg('info')}<span>Get Help</span></div>`);
+  }
+  renderSide();
+  $('side').onclick = async e => {
+    if (e.target.closest('#sideX')) return $('side').classList.add('nclosed');
+    const add = e.target.closest('[data-add]');
+    if (add) {
+      e.stopPropagation();
+      if (add.dataset.add === 'workspace') {   // a folder workspace/<name in lower case, spaces -> dashes> with its workspace.json (UUID)
+        const v = await UI.form('New workspace', [{ name: 'name', label: 'Name', required: true }], { ok: 'Create' });
+        const n = String(v?.name ?? v?.values?.name ?? '').trim(); if (!n) return;
+        try { const w = await Projects.createWorkspace(n); wsSel = w.folder; await loadWs(); ProjectsView.setWorkspace(w.folder); UI.toast(`Workspace ${w.name} created (workspace/${w.folder})`, 'ok'); }
+        catch (err) { UI.toast(err.message, 'err'); }
+      }
+      return;
+    }
+    const del = e.target.closest('[data-wsdel]');
+    if (del) {
+      e.stopPropagation();
+      const w = workspaces.find(x => x.folder === del.dataset.wsdel); if (!w) return;
+      const ask = UI.dialog('Delete workspace', `<div class="err">Are you sure you want to delete the <b>${UI.esc(w.name)}</b> workspace?</div>
+        <div class="muted">Deleting an entire workspace will move the workspace to the trash. You can restore it by clicking Trash and restoring it.</div>`,
+        [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: 'Delete', value: true, kind: 'danger' }]);
+      [...document.querySelectorAll('dialog')].pop()?.classList.add('flash');   // flashes red
+      if (!await ask) return;
+      try { await Projects.deleteWorkspace(w.folder); UI.toast(`Workspace ${w.name} moved to the trash`, 'ok'); if (wsSel === w.folder) { wsSel = null; ProjectsView.setWorkspace(null); } await loadWs(); }
+      catch (err) { UI.toast(err.message, 'err'); }
+      return;
+    }
+    const tog = e.target.closest('[data-tog]');
+    if (tog) return tog.parentElement.classList.toggle('nshut');
+    const go = e.target.closest('[data-go]');
+    if (!go) return;
+    if (go.dataset.go === 'trash') return openTrash();
+    if (go.dataset.go === 'server') return fetch('/api/panel', { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN || '' } }).catch(() => {});   // the server control window
+    $('side').querySelectorAll('.nrow.on').forEach(x => x.classList.remove('on')); go.classList.add('on');
+    // Projects = every workspace; a workspace = only its projects (new projects go there).
+    if (go.dataset.go === 'projects') { wsSel = null; ProjectsView.setWorkspace(null); }
+    else if (go.dataset.go.startsWith('ws:')) { wsSel = go.dataset.go.slice(3); ProjectsView.setWorkspace(wsSel); }
+  };
+  // Resize: within 8px of the panel's right border (either side) the cursor switches; drag to set the width (160 - 600px, on the grid).
+  const side = $('side'), near = x => !side.classList.contains('nclosed') && Math.abs(x - side.getBoundingClientRect().right) <= 8;
+  // Widths snap so the right border sits on a vertical grid line (the grid is locked to the window's centre line).
+  const snapW = w => { const off = ($('stage').clientWidth / 2) % G; let s = Math.round((w - off) / G) * G + off; while (s < 160) s += G; while (s > 600) s -= G; return Math.round(s); };   // whole pixels: a 1px border never blurs to 2
+  side.style.width = snapW(side.offsetWidth) + 'px';
+  let drag = null;
+  addEventListener('pointermove', e => {
+    if (drag) { side.style.width = snapW(drag.w + e.clientX - drag.x) + 'px'; return; }
+    document.body.classList.toggle('navrz', near(e.clientX) && e.clientY > 72);
+  });
+  addEventListener('pointerdown', e => {
+    if (e.button || !near(e.clientX) || e.clientY <= 72) return;
+    e.preventDefault(); drag = { x: e.clientX, w: side.offsetWidth }; document.body.classList.add('navdrag');
+  }, true);
+  addEventListener('pointerup', () => { if (drag) { drag = null; document.body.classList.remove('navdrag'); } });
+  // Trash: projects and workspaces moved to workspace/.trash; restore the ticked ones, or empty it (typed acknowledgement).
+  async function openTrash() {
+    for (;;) {
+      const items = (await Projects.trashList()).sort((a, b) => b.trashed.localeCompare(a.trashed));
+      const body = items.length
+        ? `<div class="trash-list">${items.map(t => `<label><input type="checkbox" name="pick" value="${UI.esc(t.id)}"> ${UI.esc(t.name)} <span class="muted">(${t.kind === 'workspace' ? 'workspace' : 'project'})</span><small>trashed ${UI.date(t.trashed)}</small></label>`).join('')}</div>`
+        : '<div class="muted">The trash is empty.</div>';
+      const picked = f => [...f.querySelectorAll('input[name=pick]:checked')].map(c => c.value);
+      const act = await UI.dialog('Trash', body, items.length
+        ? [{ label: 'Close', value: null, kind: 'ghost' }, { label: 'Empty Trash', value: 'empty', kind: 'danger' }, { label: 'Restore Selected', value: f => ({ restore: picked(f) }) }]
+        : [{ label: 'Close', value: null }]);
+      if (!act) return;
+      if (act === 'empty') {
+        const p = UI.dialog('Empty trash', `<div>Are you sure you want to empty the trash?</div>
+          <div class="err"><b>WARNING:</b> This will permanently delete all ${items.length} item(s) in the trash. This cannot be undone.</div>
+          <label class="field">Type I Acknowledge to continue<input type="text" class="ack" autocomplete="off" spellcheck="false"></label>`,
+          [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: 'Empty', value: true, kind: 'danger' }]);
+        const d = [...document.querySelectorAll('dialog')].pop(), ok = d.querySelector('footer button.danger'), ack = d.querySelector('.ack');
+        ok.disabled = true; ack.oninput = () => { ok.disabled = ack.value.trim().toLowerCase() !== 'i acknowledge'; };
+        d.classList.add('flash');
+        if (!await p) continue;
+        const r = await Projects.emptyTrash(); UI.toast(`Trash emptied: ${r.deleted} item(s) permanently deleted`, 'ok'); return;
+      }
+      if (!act.restore.length) { UI.toast('Tick at least one item to restore.', 'err'); continue; }
+      for (const id of act.restore) {
+        try { const r = await Projects.restore(id); UI.toast(r.workspace ? `Workspace restored (workspace/${r.workspace})` : `Project restored (workspace/${r.folder})`, 'ok'); }
+        catch (err) { UI.toast(err.message, 'err'); }
+      }
+      await loadWs(); ProjectsView.reload();
+    }
+  }
+  $('sidetab').innerHTML = `<svg class="nico" viewBox="0 0 24 24" style="transform: scaleX(-1)">${I.close}</svg>`;   // the panel's collapse icon, mirrored to point out
+  $('sidetab').onclick = () => $('side').classList.remove('nclosed');
+  // Projects view: the list starts at the side panel's right edge; it narrows while a project pane is open.
+  const navW = () => $('stage').style.setProperty('--navw', side.classList.contains('nclosed') ? '0px' : side.offsetWidth + 'px');
+  new MutationObserver(navW).observe(side, { attributes: true, attributeFilter: ['class', 'style'] });
+  new MutationObserver(() => $('stage').classList.toggle('pane-open', $('ppane').classList.contains('open'))).observe($('ppane'), { attributes: true, attributeFilter: ['class'] });
+  navW();
+  ProjectsView.onTrash = () => openTrash();
+  ProjectsView.init($('plist'), $('ppane'));
+  loadWs();
+  // Grid: 24px cells with a line locked to the centre of the window.
+  const fit = () => { const st = $('stage'); st.style.setProperty('--gp', `${(st.clientWidth / 2) % G}px 0`); side.style.width = snapW(side.offsetWidth) + 'px'; };   // the grid moves with the window: keep the panel's edge on it
+  new ResizeObserver(fit).observe($('stage')); fit();
+})();
+</script>
+</body>
+</html>

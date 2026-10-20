@@ -300,7 +300,7 @@
   function markdown() {
     const rows = Object.values(results).sort((a, b) => a.n - b.n || a.batch - b.batch || testOrder(a.id) - testOrder(b.id)), ts = threadCols();
     const m = status || {};
-    const lines = [`# Data Noodler benchmark`, '', `${new Date().toLocaleString()} · engine ${m.version || ''} · ${m.workers} workers on ${m.cores} logical cores · memory budget ${UI.bytes(m.memory?.budget || 0)} of ${UI.bytes(m.memory?.totalPhys || 0)} RAM · .NET ${m.clr || ''}`, '',
+    const lines = [`# Data Noodler benchmark`, '', `${new Date().toLocaleString(undefined, { hourCycle: 'h23' })} · engine ${m.version || ''} · ${m.workers} workers on ${m.cores} logical cores · memory budget ${UI.bytes(m.memory?.budget || 0)} of ${UI.bytes(m.memory?.totalPhys || 0)} RAM · .NET ${m.clr || ''}`, '',
       'Times are the engine\'s own (no HTTP). Rows/s = rows the step works through / time. Read = into memory or into a dataset, Write = to a file or table, Query = in-memory queries.', ''];
     for (const unit of ['rps', 'ms']) {
       lines.push(`## ${unit === 'rps' ? 'Rows per second (higher is better)' : 'Time (lower is better)'}`, '');

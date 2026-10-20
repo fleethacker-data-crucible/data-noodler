@@ -7,7 +7,7 @@
 //   widget = the folder in <project>/dashboard/widgets/ (null = an empty Custom Widget container). Read by Publish.
 (() => {
   const { $, esc } = UI;
-  const COLS = 48, G = 24, SIZE = [16, 10], MIN = [4, 3], TOP = 5;   // TOP: rows kept free under the bar
+  const COLS = 48, G = 24, SIZE = [16, 10], MIN = [4, 3], TOP = 0;   // TOP: rows kept free at the top (none: drag anywhere)
   // The category buttons: billboard.js chart families (ui/widgets/<Category>/<id>/) + Table (the app's Data Grid).
   const PLACEHOLDERS = [
     ['Line', '<polyline points="3,18 8,11 13,14 21,5" fill="none" stroke="currentColor" stroke-width="2"/>'],
@@ -26,16 +26,17 @@
     ['Combination', '<rect x="3" y="12" width="4" height="9" opacity=".6"/><rect x="10" y="8" width="4" height="13" opacity=".6"/><rect x="17" y="14" width="4" height="7" opacity=".6"/><polyline points="3,10 10,5 17,9 21,4" fill="none" stroke="currentColor" stroke-width="2"/>'],
     ['Table', '<rect x="3" y="4" width="18" height="16" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 9 H21 M3 14 H21 M9 4 V20 M15 4 V20" stroke="currentColor" stroke-width="1.2"/>'],
   ];
-  const ICON_CUSTOM = '<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2"/>';
+  const ICON_CUSTOM = '<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2"/>';
   const ICON_GEAR = '<path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
   // Dashboard Studio settings (this browser): grid shown, containers snap to it.
   const PREFS = 'dn-studio-prefs';
-  let prefs = { grid: true, snap: true, barPos: 'Top', autoHide: false };
+  let prefs = { grid: true, snap: true, barPos: 'Top', autoHide: false, aspect: '16:9', frame: false };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS) || '{}') }; } catch {}
   const savePrefs = () => { try { localStorage.setItem(PREFS, JSON.stringify(prefs)); } catch {} };
   const applyPrefs = () => {
     document.body.classList.toggle('nogrid', !prefs.grid);
     document.body.classList.toggle('barbottom', prefs.barPos === 'Bottom');
+    if (typeof refit === 'function') refit();
     hideSoon();
   };
   // Auto Hide: the icon bar fades out (0.5s) once the mouse has been off it for 2s; back as soon as the mouse is over it.
@@ -48,7 +49,7 @@
   const R = v => prefs.snap ? Math.round(v) : Math.round(v * 24) / 24;   // grid cells, or single pixels with snap off
   const ICON_WIDGET = '<rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 16l3-4 3 2 4-6" fill="none" stroke="currentColor" stroke-width="2"/>';
 
-  let ctx, dash = { version: 4, widgets: [] }, selId = null, OX = 0;
+  let ctx, dash = { version: 4, widgets: [] }, selId = null, OX = 0, OY = 0, GX = 24, GY = 24;
   let pkgs = new Map(), globals = [], packaged = {}, clean = [];
   const PACKAGED = 'ui/widgets';   // shipped with the app: ui/widgets/<Category>/<id>/ (the folder name = the button)
   const results = new Map();   // container id -> rows (redraw on resize without a query)
@@ -73,6 +74,8 @@
       ...PLACEHOLDERS.map(([c]) => Widgets.list(`${PACKAGED}/${c}`))]);
     pkgs = new Map(mine.map(p => [p.id, p])); globals = glob;
     packaged = Object.fromEntries(PLACEHOLDERS.map(([c], i) => [c, cats[i]]));
+    // Copies of built-in charts (this project's, the global library's) pick up the charts' current settings.
+    await Widgets.syncBuiltins([...mine, ...glob], cats.flat());
   }
   const loadClean = async () => { clean = (await Projects.sourceDatasets(ctx.folder, ctx.cfg)).filter(d => /^CLEAN_/i.test(d.name)); };
 
@@ -127,8 +130,8 @@
     const pick = (k, label, choices) => `<div class="optrow"><span>${label}</span><select class="pick" data-k="${k}">${choices.map(c => `<option ${prefs[k] === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>`;
     const row = (k, label) => `<div class="optrow"><span>${label}</span><span class="seg"><button type="button" data-k="${k}" data-on="0" class="${prefs[k] ? '' : 'on'}">OFF</button><button type="button" data-k="${k}" data-on="1" class="${prefs[k] ? 'on' : ''}">ON</button></span></div>`;
     menu = document.createElement('div'); menu.className = 'tmenu prefs';
-    menu.innerHTML = `<div class="tm-h">Dashboard Studio</div>${row('autoHide', 'Auto Hide')}${pick('barPos', 'Icon Bar Position', ['Top', 'Bottom'])}${row('grid', 'Show Grid')}${row('snap', 'Snap to Grid')}`;
-    menu.onchange = e => { const k = e.target.dataset?.k; if (!k) return; prefs[k] = e.target.value; savePrefs(); applyPrefs(); closeMenu(); };
+    menu.innerHTML = `<div class="tm-h">Dashboard Studio</div>${row('frame', 'Aspect Boundary')}${pick('aspect', 'Aspect Ratio', ['16:9', '4:3'])}${row('autoHide', 'Auto Hide')}${pick('barPos', 'Icon Bar Position', ['Top', 'Bottom'])}${row('grid', 'Show Grid')}${row('snap', 'Snap to Grid')}`;
+    menu.onchange = e => { const k = e.target.dataset?.k; if (!k) return; prefs[k] = e.target.value; savePrefs(); applyPrefs(); };
     document.body.append(menu);
     const r = btn.getBoundingClientRect();
     menu.style.top = (prefs.barPos === 'Bottom' ? r.top - 6 - menu.offsetHeight : r.bottom + 6) + 'px'; menu.style.left = Math.max(8, Math.min(r.left + r.width / 2 - menu.offsetWidth / 2, innerWidth - menu.offsetWidth - 8)) + 'px';   // centred on its button
@@ -210,16 +213,40 @@
   const repaintSoon = w => { rpSet.add(w); if (!rpFrame) rpFrame = requestAnimationFrame(() => { rpFrame = 0; const s = [...rpSet]; rpSet.clear(); s.forEach(paint); }); };
 
   // ---- the stage: a grid line locked to the centre; containers keep their columns counted from it ----
+  // Aspect Boundary on: a box of the chosen aspect, as big as fits, centred horizontally, its top 25px under the icon
+  // bar (bottom bar: 25px above it); widgets stay inside it. Off: the box is the whole stage.
+  let BOX = { x: 0, y: 0, w: 0, h: 0, cols: 0, rows: 0 };
   function fitGrid() {
-    const st = $('stage'), dp = devicePixelRatio || 1, c = Math.floor(st.clientWidth * dp / 2) / dp;
-    st.style.setProperty('--gx', `${((c % G) + G) % G}px`);
-    const ox = c - (COLS / 2) * G; if (ox === OX) return false;
-    OX = ox; return true;
+    const st = $('stage'), W = st.clientWidth, H = st.clientHeight;
+    let b = { x: 0, y: 0, w: W, h: H };
+    if (prefs.frame) {
+      const sr = st.getBoundingClientRect(), tr = $('types')?.getBoundingClientRect(), M = 25;
+      const top = prefs.barPos === 'Bottom' ? M : (tr ? tr.bottom - sr.top : 0) + M;
+      const bottom = prefs.barPos === 'Bottom' ? (tr ? tr.top - sr.top : H) - M : H - M;
+      const [ax, ay] = prefs.aspect === '4:3' ? [4, 3] : [16, 9], aw = W - 2 * M, ah = Math.max(40, bottom - top);
+      const s = Math.min(aw / ax, ah / ay); b = { w: ax * s, h: ay * s }; b.x = (W - b.w) / 2; b.y = top;
+    }
+    // Cells as close to G px as possible, a whole (even) number of columns / rows filling the box exactly.
+    const cols = Math.max(2, 2 * Math.round(b.w / (2 * G))), rows = Math.max(1, Math.round(b.h / G)), gx = b.w / cols, gy = b.h / rows;
+    st.style.setProperty('--gw', `${gx}px`); st.style.setProperty('--gh', `${gy}px`); st.style.setProperty('--gp', `${b.x}px ${b.y}px`);
+    const fr = $('frame'); fr.hidden = !prefs.frame; Object.assign(fr.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w + 1}px`, height: `${b.h + 1}px` });
+    const ox = b.x + b.w / 2 - (COLS / 2) * gx;
+    BOX = { ...b, cols, rows, x0: COLS / 2 - cols / 2 };
+    if (ox === OX && b.y === OY && gx === GX && gy === GY) return false;
+    OX = ox; OY = b.y; GX = gx; GY = gy; return true;
   }
+  // Inside the boundary (only while it is on).
+  function inBox(w) {
+    if (!prefs.frame) return w;
+    w.w = Math.min(w.w, BOX.cols); w.h = Math.min(w.h, BOX.rows);
+    w.x = Math.min(Math.max(w.x, BOX.x0), BOX.x0 + BOX.cols - w.w); w.y = Math.min(Math.max(w.y, 0), BOX.rows - w.h);
+    return w;
+  }
+  function refit() { if (fitGrid()) dash.widgets.forEach(w => { const e = cardOf(w); if (e) { place(e, w); repaintSoon(w); } }); }
   function place(el, w) {
     el.style.zIndex = w.z || 1;
-    Object.assign(el.style, { left: `${OX + w.x * G}px`, top: `${w.y * G}px`, width: `${w.w * G + 1}px`, height: `${w.h * G + 1}px` });
-    const sz = el.querySelector?.('.sz'); if (sz) sz.textContent = `${w.w * G} x ${w.h * G} px`;
+    Object.assign(el.style, { left: `${OX + w.x * GX}px`, top: `${OY + w.y * GY}px`, width: `${w.w * GX + 1}px`, height: `${w.h * GY + 1}px` });
+    const sz = el.querySelector?.('.sz'); if (sz) sz.textContent = `${Math.round(w.w * GX)} x ${Math.round(w.h * GY)} px`;
     if (w.id === qId && DataWindow.isOpen()) qSlots();
   }
   const RZ = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(d => `<div class="rz ${d}" data-dir="${d}"></div>`).join('');
@@ -241,25 +268,48 @@
     fitHint();
     for (const w of dash.widgets) draw(w);
   }
-  new ResizeObserver(() => { if (fitGrid()) dash.widgets.forEach(w => { const e = cardOf(w); if (e) place(e, w); }); }).observe($('stage'));
+  { const ro = new ResizeObserver(refit); ro.observe($('stage')); if ($('types')) ro.observe($('types')); }   // the bar too: the boundary sits under it
 
-  // Move (drag) / resize (handles of the selected container), snapped to the grid. A press without movement selects.
-  $('cards').addEventListener('pointerdown', ev => {
-    const el = ev.target.closest('.card'); if (!el || ev.button !== 0) return;
-    if (ev.target.closest('input, select, button, textarea, a')) return;   // a widget's own controls
-    const w = byId(el.dataset.id), dir = ev.target.closest('.rz')?.dataset.dir;
+  // Resize: within EDGE px (as the Settings / Data windows) of a container's edge or corner; the cursor shows it.
+  // Resize zone: 5px either side of a container's border (the blue line); the selected one first, then the top-most.
+  const RZB = 5;
+  function edgeHit(e) {
+    if (e.target.closest?.('.typebar, .tmenu, aside, .dwin')) return null;
+    const els = [...$('cards').querySelectorAll('.card')].sort((a, b) => b.classList.contains('sel') - a.classList.contains('sel') || (+b.style.zIndex || 0) - (+a.style.zIndex || 0));
+    for (const el of els) {
+      const r = el.getBoundingClientRect(), x = e.clientX, y = e.clientY;
+      if (x < r.left - RZB || x > r.right + RZB || y < r.top - RZB || y > r.bottom + RZB) continue;
+      const dir = (Math.abs(y - r.top) <= RZB ? 'n' : Math.abs(y - r.bottom) <= RZB ? 's' : '') + (Math.abs(x - r.left) <= RZB ? 'w' : Math.abs(x - r.right) <= RZB ? 'e' : '');
+      if (dir) return { el, dir };
+      return null;   // inside a container, away from its border
+    }
+    return null;
+  }
+  $('stage').addEventListener('pointermove', e => {
+    if (e.buttons) return; const c = CUR[edgeHit(e)?.dir];
+    document.body.classList.toggle('rzcur', !!c); if (c) document.body.style.setProperty('--rzc', c);
+  });
+  $('stage').addEventListener('pointerleave', () => document.body.classList.remove('rzcur'));
+  // Move (drag) / resize (edges), snapped to the grid. A press selects.
+  $('stage').addEventListener('pointerdown', ev => {
+    const hit = ev.button === 0 ? edgeHit(ev) : null;
+    const el = hit?.el || ev.target.closest('#cards .card'); if (!el || ev.button !== 0) return;
+    if (!hit && ev.target.closest('input, select, button, textarea, a')) return;   // a widget's own controls
+    ev.stopImmediatePropagation();
+    const w = byId(el.dataset.id), dir = hit?.dir || null;   // on the border (5px either side): resize
     ev.preventDefault();
+    if (selId !== w.id) select(w.id);   // selected on the press itself (no wait for the release)
     const sx = ev.clientX, sy = ev.clientY, start = { ...w }, ghost = Object.assign(document.createElement('div'), { className: 'ghostbox' });
     let moved = false;
     const onMove = e => {
       if (!moved && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 4) return;
-      if (!moved) { moved = true; select(w.id); el.classList.add('moving'); }
-      const dx = R((e.clientX - sx) / G), dy = R((e.clientY - sy) / G);
+      if (!moved) { moved = true; el.classList.add('moving'); }
+      const dx = R((e.clientX - sx) / GX), dy = R((e.clientY - sy) / GY);
       if (!dir) {
         // The chart itself moves: its top-left corner snaps to the top-left of the grid cell it is over (Snap to Grid off:
         // every pixel).
-        const fx = start.x + (e.clientX - sx) / G, fy = start.y + (e.clientY - sy) / G, S = v => prefs.snap ? Math.floor(v) : Math.round(v * G) / G;
-        w.x = S(fx); w.y = Math.max(TOP, S(fy));
+        const fx = start.x + (e.clientX - sx) / GX, fy = start.y + (e.clientY - sy) / GY, S = (v, g) => prefs.snap ? Math.floor(v) : Math.round(v * g) / g;
+        w.x = S(fx, GX); w.y = Math.max(TOP, S(fy, GY)); inBox(w);
         place(el, w);
       } else {
         const right = start.x + start.w, bottom = start.y + start.h;
@@ -268,6 +318,7 @@
         if (dir.includes('w')) x = Math.min(right - MIN[0], start.x + dx);
         if (dir.includes('s')) y2 = Math.max(start.y + MIN[1], bottom + dy);
         if (dir.includes('n')) y = Math.max(TOP, Math.min(bottom - MIN[1], start.y + dy));
+        if (prefs.frame) { x = Math.max(x, BOX.x0); y = Math.max(y, 0); x2 = Math.min(x2, BOX.x0 + BOX.cols); y2 = Math.min(y2, BOX.rows); }
         Object.assign(w, { x, y, w: x2 - x, h: y2 - y });
         place(el, w); repaintSoon(w);
       }
@@ -275,7 +326,7 @@
     const onUp = () => {
       removeEventListener('pointermove', onMove); removeEventListener('pointerup', onUp);
       ghost.remove(); el.classList.remove('moving'); place(el, w);
-      if (!moved) return select(w.id);
+      if (!moved) return;
       save();
     };
     addEventListener('pointermove', onMove); addEventListener('pointerup', onUp);
@@ -289,12 +340,13 @@
   function select(id) {
     selId = id; toFront(byId(id));
     $('cards').querySelectorAll('.card').forEach(e => e.classList.toggle('sel', e.dataset.id === id));
+    if (!id) { $('dSet').hidden = true; DataWindow.close(); }   // no chart selected: Settings and Data go
   }
 
   // ---- add / delete ----
   // builtin: placed from a category button (a chart shipped with the app): only its settings can change, never its code.
   const addContainer = UI.guard(async (widget, builtin) => {
-    const w = clamp({ id: crypto.randomUUID().slice(0, 8), widget, x: (COLS - SIZE[0]) / 2, y: Math.max(TOP, Math.floor(($('stage').clientHeight / G - SIZE[1]) / 2)), w: SIZE[0], h: SIZE[1], dataset: '', inputs: {}, ...(builtin ? { builtin: true } : {}) });
+    const w = inBox(clamp({ id: crypto.randomUUID().slice(0, 8), widget, x: (COLS - SIZE[0]) / 2, y: Math.max(TOP, Math.floor(((prefs.frame ? BOX.rows : $('stage').clientHeight / GY) - SIZE[1]) / 2)), w: SIZE[0], h: SIZE[1], dataset: '', inputs: {}, ...(builtin ? { builtin: true } : {}) }));
     const used = dash.widgets.filter(o => o.x === w.x && o.y === w.y).length; w.x += used * 2; w.y += used * 2;   // not exactly on top of another
     dash.widgets.push(w); await saveNow();
     $('cards').append(cardEl(w)); fitHint(); select(w.id); draw(w);
@@ -327,7 +379,7 @@
     const act = ev.target.closest('[data-act]')?.dataset.act, w = byId(ctxId); if (!act || !w) return;
     $('ctxmenu').classList.remove('open');
     if (act === 'edit') { if (w.builtin) return UI.toast('A built-in chart: only its Settings can change.', 'warn'); edit(w); } else if (act === 'delete') delContainer(w);
-    else if (act === 'data') quickData(w); else if (act === 'settings') quickSettings(w);
+    else if (act === 'settings') quickSettings(w);
     else if (act === 'link') linkMode(w);
   };
 
@@ -339,7 +391,7 @@
   function linkMode(fw) {
     linkEnd?.();
     const stage = $('stage'), svg = d3.select($('cards')).append('svg').attr('class', 'linkov');
-    const mid = x => ({ x: OX + (x.x + x.w / 2) * G, y: (x.y + x.h / 2) * G });
+    const mid = x => ({ x: OX + (x.x + x.w / 2) * GX, y: OY + (x.y + x.h / 2) * GY });
     const col = () => fw.inputs?.value?.col || Object.values(fw.inputs || {})[0]?.col;
     const fits = x => !col() || !x.dataset || !fw.dataset || x.dataset === fw.dataset || hasCol(x, col());
     const cross = (g, c, size = LINK.r) => {
@@ -419,12 +471,34 @@
   let qId = null;   // the container they work on
   const qW = () => byId(qId);
   const setOpen = () => !$('dSet').hidden;
+  let setWanted = false;
+  // The fields a chart already uses ('<dataset>|<column>'): marked in the Data window, refused on its drop boxes.
+  const usedOf = w => new Set(Object.values(w?.inputs || {}).filter(v => v?.col).map(v => `${w.dataset}|${v.col}`));   // Settings was open when its chart was let go: clicking a chart brings it back
   function quickData(w) {
     qId = w.id; quickSettings(w);   // the Data section (slots) is in the Settings window
-    DataWindow.open({ datasets: clean.map(d => ({ key: d.name, name: d.name.replace(/^CLEAN_/i, ''), note: 'clean', columns: d.columns || [] })), current: w.dataset || null,
-      onClose: () => qSlots() });
-    qSlots();
+    DataWindow.open({ datasets: clean.map(d => ({ key: d.name, name: d.name.replace(/^CLEAN_/i, ''), note: 'clean', columns: d.columns || [] })), current: w.dataset || null, used: usedOf(w),
+      onClose: () => { pruneSlots(qW()); qSlots(); }, managed: true });
+    const de = DataWindow.element();
+    if (de && dataPanel?.el !== de) dataPanel = floatPanel(de, de.querySelector('.dw-head'), 'dn-dashdata', () => ({ x: 24, y: 96 }));
+    dataPanel?.place();
+    restack(w, true); qSlots();
   }
+  // Repeatable inputs (Line ...): fields packed to the top (base, _1, _2 ...); pad = one empty box below them (while the
+  // Data window is open), else none. Returns true when something changed.
+  function restack(w, pad) {
+    const p = pkgs.get(w?.widget); if (!p) return false;
+    const ins = w.inputs || (w.inputs = {}), before = JSON.stringify(ins);
+    for (const bi of Widgets.parse(p.settings).inputs || []) {
+      if (!bi.repeat) continue;
+      const keys = [bi.key, ...Widgets.copies(bi, ins)], filled = keys.map(k => ins[k]).filter(v => v?.col);
+      keys.forEach(k => delete ins[k]);
+      filled.forEach((v, n) => { ins[n ? `${bi.key}_${n}` : bi.key] = v; });
+      if (pad && filled.length) ins[`${bi.key}_${filled.length}`] = {};
+    }
+    return JSON.stringify(ins) !== before;
+  }
+  // The Data window closed: no blank drop boxes left.
+  function pruneSlots(w) { if (restack(w, false)) saveNow(); }
   // The widget's slots (X, Y, Line 1 ...) are in the Settings window's Data section: drop a field on one, change how a
   // measure is combined, x to remove it. This redraws that section.
   function qSlots() {
@@ -441,25 +515,51 @@
     const i = key ? all.find(x => x.key === key) : all.find(x => !inputs[x.key]?.col && fits(x)) || all.find(x => !inputs[x.key]?.col) || all.find(fits);
     if (!i) return;
     inputs[i.key] = { col, ...(i.role === 'measure' ? { agg: i.agg === 'none' ? 'none' : num ? i.agg || 'sum' : 'count' } : {}) };
-    qId = w.id; select(w.id); DataWindow.update({ current: ds }); qSlots();
+    // A repeatable input (Line ...): once every copy has a field, an empty one opens below for the next.
+    const base = i.base || (i.repeat ? i.key : null), bi = base && st.inputs.find(x => x.key === base);
+    if (bi && inputs[base]?.col && Widgets.copies(bi, inputs).every(k => inputs[k]?.col)) {
+      const n = Widgets.copies(bi, inputs).map(k => +k.slice(base.length + 1)); inputs[`${base}_${Math.max(0, ...n) + 1}`] = {};
+    }
+    qId = w.id; select(w.id); DataWindow.close(); qSlots();   // a field added: the Data window goes (a drop box opens it)
     await saveNow(); await draw(w);
     if (setOpen()) quickSettings(w);
   }
   let dOptsWired = false;
+  // A click on the canvas or in the Settings window (not on a drop box) closes the Data window.
+  addEventListener('pointerdown', e => {
+    if (!DataWindow.isOpen() || e.target.closest?.('.dwin, #dOpts .slot')) return;
+    if (e.target.closest?.('#stage, #dSet')) DataWindow.close();
+  }, true);
+  addEventListener('pointermove', e => {
+    const box = $('dOpts')?.querySelector(':scope > .sec-data'); if (!box) return;
+    if (!document.body.classList.contains('dragging')) { box.classList.remove('near'); return; }
+    const r = box.getBoundingClientRect(), dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right), dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
+    box.classList.toggle('near', Math.hypot(dx, dy) <= 40);
+  });
   function wireSlots(el) {
-    el.addEventListener('dragover', e => { const sl = e.target.closest('.slot'); if (!sl || !e.dataTransfer.types.includes('text/x-field')) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy'; sl.classList.add('over'); });
-    el.addEventListener('dragleave', e => e.target.closest('.slot')?.classList.remove('over'));
+    // Refused: the field is already on this chart on the same axis (x / y; measures default to y). Another axis is fine
+    // (e.g. a date grouped on x and counted on y).
+    const axisOf = i => i?.axis || (i?.role === 'measure' ? 'y' : 'x');
+    const dup = (e, key) => {
+      const w = qW(), p = pkgs.get(w?.widget); if (!w || !p || w.dataset !== e.dataTransfer.getData('text/x-dataset')) return false;
+      const col = e.dataTransfer.getData('text/x-field'), all = Widgets.expand(Widgets.parse(p.settings).inputs, w.inputs || {}, true), ax = axisOf(all.find(i => i.key === key));
+      return all.some(i => i.key !== key && w.inputs?.[i.key]?.col === col && axisOf(i) === ax);
+    };
+    el.addEventListener('dragover', e => { const sl = e.target.closest('.slot'); if (!sl || !e.dataTransfer.types.includes('text/x-field')) return; e.preventDefault(); e.stopPropagation();
+      const d = dup(e, sl.dataset.key); e.dataTransfer.dropEffect = d ? 'none' : 'copy'; sl.classList.toggle('dup', d); sl.classList.toggle('over', !d); });
+    el.addEventListener('dragleave', e => e.target.closest('.slot')?.classList.remove('over', 'dup'));
     el.addEventListener('drop', UI.guard(async e => {
       const sl = e.target.closest('.slot'), col = e.dataTransfer.getData('text/x-field'); if (!sl || !col) return;
-      e.preventDefault(); e.stopPropagation(); document.body.classList.remove('dragging');
+      e.preventDefault(); e.stopPropagation(); document.body.classList.remove('dragging'); sl.classList.remove('over', 'dup');
+      if (dup(e, sl.dataset.key)) return UI.toast(`${col} is already on this axis.`, 'warn');
       await linkField(qW(), sl.dataset.key, col, e.dataTransfer.getData('text/x-dataset'));
     }));
     el.addEventListener('change', UI.guard(async e => { const k = e.target.dataset.agg, w = qW(); if (!k || !w?.inputs?.[k]) return; w.inputs[k].agg = e.target.value; qSlots(); await saveNow(); await draw(w); }));
     el.addEventListener('click', UI.guard(async e => {
-      const w = qW(), b = e.target.closest('[data-clear], [data-add], [data-del]'); if (!w || !b) return;
+      const w = qW(), b = e.target.closest('[data-clear], [data-add], [data-del]'); if (!w) return;
+      if (!b) { if (e.target.closest('.slot') && !e.target.closest('select, button, input')) quickData(w); return; }   // a click in a drop box: the Data window
       const ins = w.inputs || (w.inputs = {}), k = b.dataset.clear;
-      if (k) { const p = pkgs.get(w.widget), i = p && Widgets.expand(Widgets.parse(p.settings).inputs, ins, true).find(x => x.key === k);
-        if (i?.base) ins[k] = {}; else delete ins[k]; }   // a cleared copy (Line 1 ...) stays, empty; Delete removes it
+      if (k) { delete ins[k]; restack(w, true); DataWindow.update({ used: usedOf(w) }); }   // the rest move up, an empty box below
       else if (b.dataset.add) { const base = b.dataset.add, n = Widgets.copies({ key: base }, ins).map(x => +x.slice(base.length + 1)); ins[`${base}_${Math.max(0, ...n) + 1}`] = {}; }
       else { const base = b.dataset.del, last = Widgets.copies({ key: base }, ins).pop(); if (last) delete ins[last]; }
       qSlots(); await saveNow(); await draw(w);
@@ -470,7 +570,7 @@
   function quickSettings(w) {
     if (!dOptsWired) { dOptsWired = true; wireSlots($('dOpts')); }
     qId = w.id; const p = pkgs.get(w.widget);
-    $('dSet').hidden = false; dsetPlace();
+    $('dSet').hidden = false; setWanted = true; dsetPlace();
     if (!p) { $('dOpts').innerHTML = '<div class="hintbox">Custom Widget: no settings yet (right-click > Edit).</div>'; return; }
     let s; try { s = Widgets.parse(p.settings); } catch (e) { $('dOpts').innerHTML = `<div class="hintbox">${Widgets.FILES.settings}: ${esc(e.message)}</div>`; return; }
     s.values = s.values || {};
@@ -487,30 +587,87 @@
       box.className = 'sec-data';
       box.innerHTML = '<div class="sec-title">Data</div>' + s.inputs.map(i => {
         const list = Widgets.expand([i], links, true);
-        return `<div class="slot-list">${SettingsPanel.slots(list, links)}</div>` + (i.repeat ? `<div class="data-btns"><button type="button" data-add="${esc(i.key)}">Add</button>${list.length > 1 ? `<button type="button" data-del="${esc(i.key)}">Delete</button>` : ''}</div>` : '');
+        return `<div class="slot-list">${SettingsPanel.slots(list, links, Object.fromEntries((dsOf(w.dataset)?.columns || []).map(c => [c.name, c.type])))}</div>` + '';
       }).join('');
       const search = $('dOpts').querySelector(':scope > .set-search');
-      search ? search.after(box) : $('dOpts').prepend(box);
+      $('dOpts').prepend(box); if (search) box.after(search);   // Data, then the search box, then the settings
+      // Field names in one column: every label as wide as the longest (hidden spare boxes included).
+      const labs = [...box.querySelectorAll('.slot > b')]; labs.forEach(b => { b.style.minWidth = ''; });
+      const was = box.classList.contains('near'); box.classList.add('near');
+      const lw = Math.ceil(Math.max(0, ...labs.map(b => b.getBoundingClientRect().width)));
+      box.classList.toggle('near', was); labs.forEach(b => { b.style.minWidth = `${lw}px`; b.style.boxSizing = 'border-box'; });
     }
   }
-  const DSET_KEY = 'dn-dashsettings';
-  let dsetPos = null; try { dsetPos = JSON.parse(sessionStorage.getItem(DSET_KEY) || 'null'); } catch {}
-  function dsetPlace() { const el = $('dSet'), p = dsetPos || { x: Math.max(0, innerWidth - 300 - 24), y: 96 }; Object.assign(el.style, { left: `${Math.max(0, Math.min(innerWidth - 60, p.x))}px`, top: `${Math.max(0, Math.min(innerHeight - 30, p.y))}px` }); }
-  $('dSetX').onclick = () => { $('dSet').hidden = true; };
-  $('dSetHead').addEventListener('pointerdown', e => {
-    if (e.button !== 0 || e.target.closest('button')) return;
-    e.preventDefault();
-    const r = $('dSet').getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
-    const mv = ev => { dsetPos = { x: ev.clientX - dx, y: ev.clientY - dy }; dsetPlace(); };
-    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); try { sessionStorage.setItem(DSET_KEY, JSON.stringify(dsetPos)); } catch {} };
-    addEventListener('pointermove', mv); addEventListener('pointerup', up);
-  });
+  // Floating panels (Settings, Data): drag the header to move; within SNAP px of a window edge or of the other panel's
+  // edges it snaps to it; drag any edge or corner (10px band, resize cursors) to resize. Place, size and window-edge snaps
+  // are remembered (this browser).
+  const SNAP = 16, EDGE = 10, PMIN = [220, 120], panels = [];
+  const CUR = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize' };
+  function floatPanel(el, head, key, def) {
+    let pos = null; try { pos = JSON.parse(localStorage.getItem(key) || 'null'); } catch {}
+    const save = () => { try { localStorage.setItem(key, JSON.stringify(pos)); } catch {} };
+    const others = () => panels.filter(q => q.el !== el && !q.el.hidden).map(q => q.el.getBoundingClientRect());
+    function place() {
+      const p = pos || def();
+      const w = Math.min(innerWidth, Math.max(PMIN[0], p.w || 300)), h = p.h ? Math.min(innerHeight, Math.max(PMIN[1], p.h)) : 0;
+      const sn = p.snap || '', x = sn.includes('l') ? 0 : sn.includes('r') ? innerWidth - w : p.x;
+      const y = sn.includes('t') ? 0 : sn.includes('b') ? innerHeight - (h || el.offsetHeight) : p.y;
+      Object.assign(el.style, { left: `${Math.max(0, Math.min(innerWidth - 60, x))}px`, top: `${Math.max(0, Math.min(innerHeight - 30, y))}px`,
+        width: `${w}px`, maxWidth: 'none', height: h ? `${h}px` : '', maxHeight: h ? 'none' : '' });
+    }
+    const zoneOf = (e, r) => (e.clientY - r.top < EDGE ? 'n' : r.bottom - e.clientY < EDGE ? 's' : '') + (e.clientX - r.left < EDGE ? 'w' : r.right - e.clientX < EDGE ? 'e' : '');
+    el.addEventListener('pointermove', e => { if (e.buttons) return; el.style.cursor = CUR[zoneOf(e, el.getBoundingClientRect())] || ''; });
+    el.addEventListener('pointerleave', () => { el.style.cursor = ''; });
+    // Resize: an edge snaps to a window edge or to the other panel's edges.
+    el.addEventListener('pointerdown', e => {
+      const r = el.getBoundingClientRect(), z = zoneOf(e, r); if (e.button !== 0 || !z) return;
+      e.preventDefault(); e.stopPropagation();
+      const sx = e.clientX, sy = e.clientY, os = others(), xs = [0, innerWidth, ...os.flatMap(o => [o.left, o.right])], ys = [0, innerHeight, ...os.flatMap(o => [o.top, o.bottom])];
+      const near = (v, list) => list.find(t => Math.abs(v - t) < SNAP) ?? v;
+      document.body.style.cursor = CUR[z];
+      const mv = ev => {
+        const dx = ev.clientX - sx, dy = ev.clientY - sy; let { left: x, top: y, right: x2, bottom: y2 } = r;
+        if (z.includes('w')) x = Math.max(0, Math.min(r.right - PMIN[0], near(r.left + dx, xs)));
+        if (z.includes('e')) x2 = Math.min(innerWidth, Math.max(r.left + PMIN[0], near(r.right + dx, xs)));
+        if (z.includes('n')) y = Math.max(0, Math.min(r.bottom - PMIN[1], near(r.top + dy, ys)));
+        if (z.includes('s')) y2 = Math.min(innerHeight, Math.max(r.top + PMIN[1], near(r.bottom + dy, ys)));
+        const snap = (x <= 0 ? 'l' : x2 >= innerWidth ? 'r' : '') + (y <= 0 ? 't' : y2 >= innerHeight ? 'b' : '');
+        pos = { x, y, w: x2 - x, h: y2 - y, snap }; place();
+      };
+      const up = () => { document.body.style.cursor = ''; removeEventListener('pointermove', mv); removeEventListener('pointerup', up); save(); };
+      addEventListener('pointermove', mv); addEventListener('pointerup', up);
+    }, true);
+    // Move: snaps to the window edges, and side by side with / lined up on the other panel.
+    head.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      e.preventDefault(); e.stopPropagation();
+      const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top, os = others(), W = r.width, H = r.height;
+      const pick = (v, cands) => { let best = null; for (const t of cands) if (Math.abs(v - t) < SNAP && (best == null || Math.abs(v - t) < Math.abs(v - best))) best = t; return best; };
+      const mv = ev => {
+        let x = ev.clientX - dx, y = ev.clientY - dy, snap = '';
+        const sx = pick(x, os.flatMap(o => [o.right, o.left, o.right - W, o.left - W])), sy = pick(y, os.flatMap(o => [o.bottom, o.top, o.bottom - H, o.top - H]));
+        if (sx != null) x = sx; if (sy != null) y = sy;
+        if (x < SNAP) { x = 0; snap += 'l'; } else if (innerWidth - (x + W) < SNAP) { x = innerWidth - W; snap += 'r'; }
+        if (y < SNAP) { y = 0; snap += 't'; } else if (innerHeight - (y + H) < SNAP) { y = innerHeight - H; snap += 'b'; }
+        pos = { ...pos, x, y, w: W, snap }; place();
+      };
+      const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); save(); };
+      addEventListener('pointermove', mv); addEventListener('pointerup', up);
+    }, true);
+    addEventListener('resize', () => { if (!el.hidden) place(); });
+    const q = { el, place }; panels.push(q); return q;
+  }
+  const dsetPanel = floatPanel($('dSet'), $('dSetHead'), 'dn-dashsettings', () => ({ x: Math.max(0, innerWidth - 300 - 24), y: 96 }));
+  const dsetPlace = () => dsetPanel.place();
+  let dataPanel = null;   // the Data window: made by DataWindow on its first open
+  $('dSetX').onclick = () => { $('dSet').hidden = true; setWanted = false; DataWindow.close(); };   // closed until right-click > Settings
   // Selecting another container while they are open: they switch to it.
   $('cards').addEventListener('pointerdown', e => {
-    const id = e.target.closest('.card')?.dataset.id; if (!id || id === qId || !$('wed').hidden) return;
+    const id = e.target.closest('.card')?.dataset.id; if (!id || !$('wed').hidden) return;
     const w = byId(id); if (!w) return;
-    if (setOpen()) quickSettings(w);
-    if (DataWindow.isOpen()) { qId = id; DataWindow.update({ current: w.dataset || null }); qSlots(); }
+    if (setWanted && (!setOpen() || id !== qId)) quickSettings(w);
+    if (id === qId) return;
+    if (DataWindow.isOpen()) { qId = id; DataWindow.update({ current: w.dataset || null, used: usedOf(w) }); qSlots(); }
   });
   // A field dropped on a container: that dataset + the field on the first free slot that fits (numbers -> measures).
   $('cards').addEventListener('dragover', e => { if (!e.dataTransfer.types.includes('text/x-field') || !e.target.closest('.card')) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
@@ -571,6 +728,8 @@
       dash.widgets = (dash.widgets || []).map(clamp);
       renderAll();
       restoreView();
-    } catch (e) { UI.toast(e.message, 'err'); $('cards').innerHTML = `<div class="hint err">${esc(e.message)}</div>`; }
+      // Shown only once the grid, boundary and widgets have their final sizes (no jump on load / refresh).
+      requestAnimationFrame(() => { refit(); requestAnimationFrame(() => document.body.classList.remove('dsload')); });
+    } catch (e) { document.body.classList.remove('dsload'); UI.toast(e.message, 'err'); $('cards').innerHTML = `<div class="hint err">${esc(e.message)}</div>`; }
   })();
 })();

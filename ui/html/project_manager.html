@@ -25,14 +25,29 @@
   .detail .log-more-row { margin-top: 10px; }
   .detail .log-more-row + .log { margin-top: 2px; }   /* Show More sits just above the log */
   /* Update workflow (compact): one circle per step joined by arrows; running = gold flashing, done = green check. */
-  .wf { --idle: var(--border); --gold: #e8a33d; --green: #4cc27f; --red: #ff6b6b; display: flex; align-items: flex-start; flex: none; margin-top: 25px; }
+  /* Workflow on the left, project stat cards right aligned, centred on it and no taller than it (circles to step names). */
+  .wfrow { display: flex; align-items: center; gap: 16px; margin-top: 25px; }
+  .wfrow .wf { margin-top: 0; }
+  .pcards { margin-left: auto; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }   /* every card as wide as the widest */
+  .pcard { height: 64px; min-width: 110px; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg);
+    display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+  .pcard .k { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .pcard .v { font-size: 18px; font-weight: 700; color: var(--text); line-height: 1.2; white-space: nowrap; }
+  .pcard .s { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  /* Server Control: in the global header, right aligned, 8px above its bottom border. */
+  header.gh #srvctl { align-self: flex-end; margin-bottom: -8px; }
+  .wf { position: relative; --idle: var(--border); --gold: #e8a33d; --green: #4cc27f; --red: #ff6b6b; display: flex; align-items: flex-start; flex: none; margin-top: 25px; }
   .wf .st { display: flex; flex-direction: column; align-items: center; width: 96px; flex: none; }
   .wf .c { width: 40px; height: 40px; border-radius: 50%; box-sizing: border-box; border: 3px solid var(--idle); background: var(--bg);
     display: grid; place-items: center; color: var(--muted); font-size: 21px; font-weight: 700; line-height: 1; transition: border-color .3s, background .3s; }
   .wf .c { position: relative; }
-  .wf .c .num { color: var(--muted); font-size: 16px; }   /* step number, always shown (grey) */
-  .wf .st.done .c .num { color: var(--border); }   /* dimmed under the checkmark */
-  .wf .c .ic { position: absolute; inset: 0; display: grid; place-items: center; }   /* ✓ / ✕ over the number */
+  .wf .c .ck { position: absolute; right: -12px; bottom: -2px; font-size: 13px; font-weight: 700; line-height: 1; color: var(--green); }   /* done: small check outside, bottom right */
+  .wf .c .pct { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }   /* progress / N/A in the circle */
+  .wf .st.done .c .pct { color: var(--green); }
+  .wf .st.running .c .pct { color: var(--gold); }
+  .wf .st.failed .c .pct { color: var(--red); }
+  .wf .c .ck.x { color: var(--red); }
+  .wf .st.stale .c .pct { color: #ff9e9e; }
   .wf .note { font-size: 11px; color: var(--muted); }
   .wf .c { cursor: pointer; }   /* a circle does what its button does */
   /* Step details: follows the mouse while it is over a circle. */
@@ -49,7 +64,8 @@
   .wf .ar { flex: none; width: 5px; height: 40px; position: relative; }
   .wf .ar::before { content: ""; position: absolute; left: -28px; right: -28px; top: 18px; height: 3px; background: var(--idle); transition: background .3s; }
   .wf .ar::after { content: ""; position: absolute; right: -28px; top: 11px; border: 8px solid transparent; border-left: 12px solid var(--idle); border-right: 0; transition: border-left-color .3s; }
-  .wf .ar.on::before { background: var(--green); } .wf .ar.on::after { border-left-color: var(--green); }
+  .wf .ar.on::before { background: #5a5955; } .wf .ar.on::after { border-left-color: #5a5955; }   /* the line: dark grey */
+  .wf .ar.on:not(.head)::after { display: none; }   /* one arrowhead: the front of the line */
   .wf .st.running .c { border-color: var(--gold); animation: wf-run 1s ease-in-out infinite; }
   .wf .st.running .note { color: var(--gold); font-weight: 600; }
   @keyframes wf-run { 0%, 100% { background: var(--bg); box-shadow: none; } 50% { background: color-mix(in srgb, var(--gold) 45%, var(--bg)); box-shadow: 0 0 12px color-mix(in srgb, var(--gold) 70%, transparent); } }
@@ -58,6 +74,11 @@
   .wf .st.done.flash .c { animation: wf-done .3s ease-in-out 6 alternate; }
   @keyframes wf-done { from { background: color-mix(in srgb, var(--green) 14%, var(--bg)); box-shadow: none; } to { background: color-mix(in srgb, var(--green) 65%, var(--bg)); box-shadow: 0 0 14px var(--green); } }
   .wf .st.failed .c { border-color: var(--red); color: var(--red); } .wf .st.failed .note { color: var(--red); }
+  .wf .st.stale .c { border-color: #ff9e9e; border-style: solid; color: #ff9e9e; background: color-mix(in srgb, #ff9e9e 14%, var(--bg)); }
+  .wf .st.stale .note { color: #ff9e9e; font-weight: 600; }
+  .wf .ar.hid { visibility: hidden; }
+  .wf .st.same .c, .wf .st.skipped.nochg .c { border-color: #b5b5b0; border-style: solid; color: #b5b5b0; }   /* No Changes: light grey, solid */
+  .wf .st.same .note, .wf .st.nochg .note { color: #b5b5b0; }
   .wf .st.skipped .c, .wf .st.idle .c { border-style: dashed; }   /* idle = never run (Not Run) */
   /* Status %: light red (0) to green (100). */
   #tbl tbody tr:not(.detail) td:not(:first-child) { font-weight: 400; }
@@ -81,8 +102,7 @@
     </div>
   </header>
   <div class="main">
-    <div class="row" style="align-items:flex-end;margin-bottom:8px"><h2 style="margin:0">Projects</h2><div class="spacer" style="flex:1"></div>
-      <button id="srvctl" class="danger" title="Open the server control panel">Server Control</button></div>
+    <div class="row" style="align-items:flex-end;margin-bottom:8px"><h2 style="margin:0">Projects</h2></div>
     <div class="row" style="margin-bottom:12px">
       <input id="q" class="search" type="search" placeholder="Search name, owner, description, tags">
       <select id="fPhase"><option value="">All Phases</option></select>
@@ -91,7 +111,7 @@
       <div class="spacer" style="flex:1"></div>
       <button id="new">New project</button>
       <button id="refresh" class="ghost">Refresh</button>
-      <button id="trash" class="ghost" title="Recover or permanently delete projects in workspace/projects/.trash">Trash</button>
+      <button id="trash" class="ghost" title="Recover or permanently delete projects in workspace/.trash">Trash</button>
       <span class="dd-wrap"><button id="utils" class="ghost" title="Global tools (hold Shift for descriptions)">Utilities ▾</button>
         <div class="dd-menu right" id="utilmenu">
           <div data-act="benchmark">Benchmark<small>Engine speed tests: imports, exports, reads / writes in every format and heavy queries, by data size, rows per batch and number of workers. Results stay on the page; Save Report writes a Markdown report.</small></div>
@@ -155,7 +175,7 @@ function render() {
       <td>${badge(P.CLASSIFICATION, p.classification)}</td>
       <td class="num">${p.datasets?.length || 0}</td><td>${UI.date(p.created)}</td><td>${UI.date(p.modified)}</td><td>${updated(p) ? UI.date(updated(p)) : '-'}</td>
     </tr>${open === p.folder ? detail(p) : ''}`).join('');
-  if (open) loadLog(open);
+  if (open) { loadLog(open); loadCards(projects.find(p => p.folder === open)); }
 }
 
 // "Staggs, Christopher C. CIV" -> "Staggs C."; several joined with "; ".
@@ -168,7 +188,7 @@ function detail(p) {
   return `<tr class="detail"><td colspan="${COLS}">
     <div class="desc">${p.description ? esc(p.description) : '<span class="muted">No description.</span>'}</div>
     <div class="meta"><span>Developers: ${shortNames(p.developers)}</span><span>Updaters: ${shortNames(p.updaters)}</span><span>Tags: ${(p.tags || []).map(esc).join(', ') || '-'}</span><span>Last Updated: ${lastUpdated(p)}</span><span>Datasets: ${(p.datasets || []).length}</span></div>
-    <div class="wf" id="wf">${workflow(p)}</div>
+    <div class="wfrow"><div class="wf" id="wf">${workflow(p)}</div><div class="pcards" id="pcards"></div></div>
     <div class="actions"><button class="ghost" data-act="edit">Edit details</button><button class="ghost" data-act="archives"${p.broken ? ' disabled' : ''} title="Project snapshots (zipped): take, restore, delete">Archives</button><button class="danger" data-act="delete">Delete</button></div>
     <div class="log" id="plog"></div>
   </td></tr>`;
@@ -179,15 +199,54 @@ const runs = new Map();   // folder -> { steps, running } for updates started in
 const stepsOf = p => runs.get(p.folder)?.steps || p.modules?.update?.steps || {};
 // Clicking a step circle: opens its module, or runs Update (the Archive step).
 const STEP_MOD = { import: 'import', transform: 'pipeline', dashboard: 'dashboard', publish: 'publish' };
+const STEP_W = 101;   // step 96 + arrow 5
 function workflow(p) {
-  const st = stepsOf(p);
-  return ProjectUpdate.STEPS.map((s, i) => {
-    const x = st[s.id] || {}, state = x.state || 'idle', prev = i && st[ProjectUpdate.STEPS[i - 1].id]?.state;
-    const icon = { done: '✓', failed: '✕' }[state] || '';   // drawn over the step number
-    const note = state === 'running' ? 'Running' : state === 'failed' ? 'Failed' : state === 'skipped' ? 'Skipped' : state === 'idle' ? 'Not Run' : state === 'done' ? 'Finished' : '';
-    return `${i ? `<div class="ar${prev === 'done' ? ' on' : ''}"></div>` : ''}<div class="st ${state}" data-s="${s.id}"><div class="c"><span class="num">${i + 1}</span>${icon ? `<span class="ic">${icon}</span>` : ''}</div><div class="note">${note}</div><div class="lbl">${s.id === 'archive' ? 'Update' : s.label}</div></div>`;
+  const st = stepsOf(p), ids = ProjectUpdate.STEPS.map(s => s.id), live = !runs.get(p.folder)?.running;
+  // Shown state: ran with nothing to do = "same" (grey solid); stale = changed since the last Update.
+  const shown = ids.map(id => { const x = st[id] || {}; return live && stale.folder === p.folder && stale.ids.has(id) ? 'stale' : x.state === 'done' && x.note === 'No Changes' ? 'same' : x.state || 'idle'; });
+  const ok = i => shown[i] === 'done' || shown[i] === 'same';
+  const never = id => !p.modules?.[id === 'archive' ? 'archives' : STEP_MOD[id] || id]?.lastRun;
+  // The line grows step by step through the middle of the circles: a segment shows once the step before it has
+  // finished and this one has started; only its front has an arrowhead (Update's, once the whole update is done).
+  const fin = i => ['done', 'same', 'skipped', 'failed', 'stale'].includes(shown[i]);
+  const on = ids.map((id, i) => i > 0 && fin(i - 1) && shown[i] !== 'idle' && !(id === 'update' && shown[i] === 'running'));
+  const tip = Math.max(-1, ...on.map((v, i) => v ? i : -1));
+  const html = ProjectUpdate.STEPS.map((s, i) => {
+    const x = st[s.id] || {}, state = shown[i];
+    // Centre of the circle: the step's progress (0% when changes are waiting, live while it runs, 100% green when
+    // done), N/A when it had nothing to do, ✕ when it failed; empty while checking or never run.
+    const pct = runs.get(p.folder)?.pct?.[s.id];
+    const mid = String(i + 1);
+    const working = state === 'running' && pct != null;
+    const note = { running: s.id === 'update' || working ? 'Running' : 'Checking', failed: 'Failed', idle: 'Not Run', done: s.id === 'update' ? 'Finished' : 'Updated', same: 'No Changes', stale: 'Changed' }[state]
+      || (x.note === 'No Changes' ? 'No Changes' : never(s.id) ? 'Not Started' : 'Skipped');
+    return `${i ? `<div class="ar${on[i] ? ' on' : ' hid'}${on[i] && i === tip ? ' head' : ''}"></div>` : ''}<div class="st ${state}${working ? ' working' : ''}${state === 'skipped' && x.note === 'No Changes' ? ' nochg' : ''}" data-s="${s.id}"><div class="c">${mid ? `<span class="pct">${mid}</span>` : ''}${state === 'done' ? '<span class="ck">✓</span>' : state === 'failed' ? '<span class="ck x">✕</span>' : ''}</div><div class="note">${note}</div><div class="lbl">${s.label}</div></div>`;
   }).join('');
+  return html;
 }
+// ---- change monitor: every 2 s (open project, page visible, no update running) asks the server for the last change per
+// area; the server keeps those from OS change notifications, so a poll reads no files. A change after the last Update
+// turns that step light red (Changed), and every later step and Update light red too (Needs Update). ----
+const AREA_STEP = { 'data/raw': 'import', 'data/imported': 'transform', transform: 'transform', 'data/clean': 'dashboard', dashboard: 'dashboard', publish: 'publish' };
+let stale = { folder: null, ids: new Set(), direct: new Set(), key: '' }, polling = false;
+async function monitor() {
+  const p = projects.find(x => x.folder === open);
+  if (polling || !p || p.broken || document.hidden || runs.get(p.folder)?.running) return;
+  const since = Date.parse(p.modules?.update?.lastRun || ''); if (!since) return;   // never updated: Not Run already says so
+  polling = true;
+  try {
+    const areas = await DNFS.changes(Projects.dir(p.folder)), ids = ProjectUpdate.STEPS.map(s => s.id);
+    const direct = new Set(Object.entries(areas).filter(([a, t]) => t > since && AREA_STEP[a]).map(([a]) => AREA_STEP[a]));
+    // Import settings changed since the last Update (a renamed export table ...): Import changed too.
+    const cfg = await Projects.peek(p.folder).catch(() => null);
+    if (cfg && ProjectUpdate.importSig(cfg) !== p.modules?.update?.importCfg) direct.add('import');   // none saved yet (older Update): changed once
+    const first = Math.min(...[...direct].map(id => ids.indexOf(id)));
+    const next = new Set(first < ids.length ? ids.slice(first) : []);
+    const key = [...next].join() + '|' + [...direct].join();
+    if (stale.folder !== p.folder || key !== stale.key) { stale = { folder: p.folder, ids: next, direct, key }; paintWf(p); }
+  } catch {} finally { polling = false; }
+}
+setInterval(monitor, 2000);
 // Repaint the open workflow in place (a flash keeps going); flash = the step that just finished.
 function paintWf(p, flash) {
   const wf = $('wf'); if (!wf || open !== p.folder) return;
@@ -202,15 +261,17 @@ function paintWf(p, flash) {
 }
 async function runUpdate(p) {
   if (runs.get(p.folder)?.running) return;
-  const r = { steps: {}, running: true }; runs.set(p.folder, r);
+  const r = { steps: {}, running: true, pct: {} }; runs.set(p.folder, r);
   paintWf(p);   // in place: a full re-render would reload the log over the first live lines
   try {
     await ProjectUpdate.run(p.folder, {
       step(id, state, note) { const was = r.steps[id]?.state; r.steps[id] = { state, note }; paintWf(p, state === 'done' && was === 'running' ? id : null);
       },
+      progress(id, pct) { if (r.pct[id] === pct) return; r.pct[id] = pct; paintWf(p); },   // live % in the circle
       // Each line goes to the open project's activity log as it happens (ProjectUpdate also saves it to the project log).
       log(msg, level) { if (open !== p.folder) return; $('plog')?.insertAdjacentHTML('afterbegin', `<div class="${level === 'error' ? 'err' : level === 'warn' ? 'warn' : ''}"><span class="t">${UI.stamp()}</span>  update: ${esc(msg)}</div>`); },
       // A finished step flashes green 3 times before the next one starts (while its row is open).
+      minStep: 700,   // each step stays gold (Checking) long enough to see
       after: () => open === p.folder && !document.hidden ? new Promise(res => setTimeout(res, 1800)) : null,
     });
   } finally {
@@ -228,7 +289,7 @@ const stepCache = new Map();   // folder -> { at, data }: project files read for
 async function stepFiles(p) {
   const c = stepCache.get(p.folder); if (c && Date.now() - c.at < 10000) return c.data;
   const dir = Projects.dir(p.folder), json = f => DNFS.readJSONOr(`${dir}/${f}`, null).catch(() => null);
-  const [pipe, runs, dash, man] = await Promise.all([json('pipeline/pipeline.json'), json('pipeline/runs.json'), json('dashboard/dashboard.json'), json('publish/published.json')]);
+  const [pipe, runs, dash, man] = await Promise.all([json('transform/transform.json'), json('transform/runs.json'), json('dashboard/dashboard.json'), json('publish/published.json')]);
   const exports = (await DNFS.list(`${dir}/publish`).catch(() => [])).filter(e => e.dir && /^data-/.test(e.name)).map(e => e.name).sort().reverse();
   const data = { pipe, runs: runs || [], dash, man: man || {}, exports };
   stepCache.set(p.folder, { at: Date.now(), data });
@@ -263,6 +324,10 @@ function stepInfo(p, id, f) {
     title = 'Publish'; run = m.publish;
     body = `<div class="h">Last publish</div><div class="i">${run?.files != null ? `${UI.num(run.files)} file(s)` : '<small>No record</small>'}</div>`
       + list('Published to', (run?.dirs || []).map(d => esc(d))) + err(updErr);
+  } else if (id === 'archive') {
+    title = 'Archive'; run = m.update;
+    body = `<div class="h">Each Update ends with a zipped snapshot of the project in archives/</div><div class="i">${esc(m.update?.steps?.archive?.note || 'No snapshot yet')}</div>`
+      + `<div class="i"><small>Click to open the project's snapshots (take, restore or delete one).</small></div>` + err(updErr);
   } else {
     title = 'Update'; run = m.update;
     const steps = run?.steps || {};
@@ -292,6 +357,34 @@ document.addEventListener('mousemove', async ev => {
   }
   placeStep(ev.clientX, ev.clientY);
 });
+
+// ---- project cards: disk used, rows, datasets, snapshots, last update ----
+const sizeCache = new Map();   // folder -> { at, bytes, by: { area: bytes } }: one recursive listing, kept 30 s
+async function diskOf(folder) {
+  const c = sizeCache.get(folder); if (c && Date.now() - c.at < 30000) return c;
+  const dir = Projects.dir(folder), files = (await DNFS.list(dir, { recursive: true }).catch(() => [])).filter(e => !e.dir);
+  const by = {}; let bytes = 0;
+  for (const f of files) { const a = f.path.slice(dir.length + 1).split('/')[0]; by[a] = (by[a] || 0) + f.size; bytes += f.size; }
+  const r = { at: Date.now(), bytes, by }; sizeCache.set(folder, r); return r;
+}
+async function loadCards(p) {
+  const el = $('pcards'); if (!el || !p || p.broken) return;
+  const ds = p.datasets || [], imp = ds.filter(d => Projects.stageOf(d) === 'imported'), clean = ds.filter(d => Projects.stageOf(d) === 'source');
+  const rows = l => l.reduce((n, d) => n + (+d.rows || 0), 0), u = p.modules?.update;
+  const card = (k, v, sub = '') => `<div class="pcard"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
+  const paint = (disk, arch) => {
+    if (open !== p.folder || !$('pcards')) return;
+    $('pcards').innerHTML =
+      card('Disk Used', disk ? UI.bytes(disk.bytes) : '...', disk ? `data ${UI.bytes(disk.by.data || 0)}` : '')
+      + card('Rows', UI.num(rows(ds)), `${UI.num(rows(clean))} clean`)
+      + card('Datasets', ds.length, `${imp.length} imported · ${clean.length} clean`)
+      + card('Snapshots', arch ? arch.items.length : '...', arch ? UI.bytes(arch.items.reduce((n, a) => n + (a.bytes || a.size || 0), 0)) : '')
+      + card('Last Update', u?.ms != null ? UI.ms(u.ms) : '-', u?.lastRun ? UI.date(u.lastRun) : 'never');
+  };
+  paint(null, null);
+  const [disk, arch] = await Promise.all([diskOf(p.folder), P.archives(p.folder).catch(() => null)]);
+  paint(disk, arch);
+}
 
 async function loadLog(folder) {
   const lines = await ProjectLog.read(folder).catch(() => []);
@@ -329,7 +422,7 @@ $('trash').onclick = UI.guard(async () => {
       return;
     }
     if (!act.recover.length) { UI.toast('Tick at least one project to recover.', 'err'); continue; }
-    for (const id of act.recover) { const r = await P.restore(id); UI.toast(`Recovered to workspace/projects/${r.folder}`, 'ok'); }
+    for (const id of act.recover) { const r = await P.restore(id); UI.toast(`Recovered to workspace/${r.folder}`, 'ok'); }
     await load();
   }
 });
@@ -361,7 +454,8 @@ $('tbl').onclick = UI.guard(async ev => {
   if (circle) {
     const p = projects.find(x => x.folder === open), id = circle.closest('.st').dataset.s;
     if (!p || p.broken) return;
-    if (id === 'archive') return runUpdate(p);
+    if (id === 'update') return runUpdate(p);
+    if (id === 'archive') return actions.archives(p);
     if (Windows.MODULES.find(m => m.id === STEP_MOD[id])?.enabled) Windows.open(STEP_MOD[id], open);
     return;
   }
@@ -395,18 +489,14 @@ document.addEventListener('input', ev => {
 const clean = async v => ({ ...v, name: capWords(v.name || ''), status: +v.status || 0, developers: UserPicker.parse(v.developers), updaters: UserPicker.parse(v.updaters), tags: tagsOf(v.tags) });
 const tagsOf = s => (s || '').split(',').map(t => t.trim()).filter(Boolean);
 
-// This window owns the server: closing it stops the server (a reload says hello within 4 s and cancels that).
-const srv = op => fetch(`/api/${op}`, { method: 'POST', keepalive: true, headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});
-srv('hello'); addEventListener('pagehide', () => srv('bye'));
 // Utilities: global tools (no project).
 Menus.sort($('utilmenu'));
 Menus.bind($('utils'), $('utilmenu'), act => { if (act === 'benchmark') Windows.open(act); });
-$('srvctl').onclick = () => fetch('/api/panel', { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN } }).catch(() => {});
 $('new').onclick = UI.guard(async () => {
   await UserPicker.load();
   const v = await UI.form('New project', fields(), { ok: 'Create' }); if (!v) return;
   const cfg = await P.create(await clean(v));
-  UI.toast(`Created ${cfg.name} (workspace/projects/${cfg.folder})`, 'ok');
+  UI.toast(`Created ${cfg.name} (workspace/${cfg.folder})`, 'ok');
   open = cfg.folder; await load();
 });
 const actions = {
@@ -457,7 +547,7 @@ const actions = {
   },
   async delete(p) {
     if (!await UI.dialog('Delete project', `<div>Are you sure you want to delete <b>${esc(p.name)}</b>?</div>
-      <div class="muted"><b>NOTE:</b> This only removes the project from the list and moves it to the trash (workspace/projects/.trash). If the trash is emptied, the project is permanently deleted.</div>`,
+      <div class="muted"><b>NOTE:</b> This only removes the project from the list and moves it to the trash (workspace/.trash). If the trash is emptied, the project is permanently deleted.</div>`,
       [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: 'Delete', value: true, kind: 'danger' }])) return;
     const r = await P.trash(p.folder);
     UI.toast(`Moved to ${r.trashed}`, 'ok'); open = null; await load();

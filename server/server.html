@@ -45,6 +45,7 @@ h1 { font-size: 20px; font-weight: 600; margin: 0; }
 h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
 a { color: var(--blue); }
 
+.hcards { display: flex; gap: 28px; text-align: right; }
 header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .brand { display: flex; align-items: center; gap: 12px; }
 .logo {
@@ -66,6 +67,15 @@ aside { display: flex; flex-direction: column; gap: 40px; overflow: auto; paddin
 .stat { background: none; border: 0; padding: 0; margin: 0; min-width: 0; }
 .stat label { display: block; font-size: 12px; color: var(--muted); }
 .stat.wide { grid-column: 1 / -1; }
+#s-workers.off { color: var(--err); } #s-workers[hidden] { display: none; }
+#wlights { display: grid; grid-template-rows: repeat(2, 20px); grid-auto-flow: column; grid-auto-columns: 20px; justify-content: start; gap: 4px; margin-top: 6px; }
+#wlights:empty { display: none; }
+#wlights i { display: grid; place-items: center; padding-bottom: 2px; box-sizing: border-box; border-radius: 4px; background: var(--border); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; font-style: normal; transition: background .1s; }
+#wlights i.l0 { background: #6b7280; } #wlights i.l1 { background: var(--ok); } #wlights i.l2 { background: var(--err); }
+.wkey { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 12px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.wkey span { display: inline-flex; align-items: center; gap: 4px; }
+.wkey i { width: 9px; height: 9px; border-radius: 2px; }
+.wkey i.l0 { background: #6b7280; } .wkey i.l1 { background: var(--ok); } .wkey i.l2 { background: var(--err); }
 .stat b { display: block; font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .field { display: block; color: var(--text-2); margin-bottom: 12px; }
@@ -88,6 +98,7 @@ input:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
 .pages div small.def { color: var(--ok); opacity: 1; margin-left: 6px; }
 
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 8px; }
+#toggle small { display: block; font-size: 11px; font-weight: 400; opacity: .85; }
 #toggle { grid-column: 1 / -1; height: 55px; font-size: 16px; }   /* two button rows tall */
 .actions-title { margin: 24px 0 10px; color: var(--blue); }
 .dev-title { color: #d9822b; }
@@ -95,7 +106,7 @@ input:focus { outline: 2px solid var(--blue); outline-offset: -1px; }
 .panel > .row:last-child { margin-bottom: 0; }
 #actions:not(:has(> :not([hidden]))) { display: none; }
 .panel > .row:has(+ #actions:not(:has(> :not([hidden])))) { margin-bottom: 0; }
-button.dev { background: #d9822b; }
+button.dev, #toggle.dev:disabled { background: #d9822b; color: #fff; }
 .portrow { display: flex; align-items: center; gap: 10px; }
 .portrow[hidden] { display: none; }
 #port { width: 9ch; flex: none; }
@@ -121,6 +132,7 @@ button {
 button:not(:disabled):hover { filter: brightness(1.15); }
 :root[data-theme="light"] button:not(:disabled):hover { filter: brightness(0.9); }   /* light mode: hover darkens the button's own colour */
 button.danger { background: var(--err); }
+button.blue { background: var(--blue); }
 button.go { background: var(--save); }   /* green = Save buttons only */
 button:disabled, button:disabled:hover { background: var(--sel); color: var(--muted); cursor: default; filter: none; }
 button[hidden] { display: none; }
@@ -139,13 +151,14 @@ button[hidden] { display: none; }
 .log .err { color: var(--lerr); grid-column: 2 / -1; }
 .log .engine { color: var(--engine); grid-column: 2 / -1; }
 .log .warn { color: #d9822b; grid-column: 2 / -1; }
-.log .r.start, .log .r.stop { color: #fff; border-radius: 4px; margin: 0 -6px; padding: 0 6px; }
+.log .r.restart { background: #d9822b; }
+.log .r.start, .log .r.stop, .log .r.restart { color: #fff; border-radius: 4px; margin: 0 -6px; padding: 0 6px; }
 .log .r.start { background: var(--ok); }
 .log .r.c4xx { background: #d9822b; color: #fff; border-radius: 4px; margin: 0 -6px; padding: 0 6px; }
 .log .r.c4xx span { color: #fff; }
 .log .r.stop { background: var(--err); }
-.log .r.start .t, .log .r.stop .t { color: #fff; opacity: .85; }
-.log .start, .log .stop { grid-column: 2 / -1; }
+.log .r.start .t, .log .r.stop .t, .log .r.restart .t { color: #fff; opacity: .85; }
+.log .start, .log .stop, .log .restart { grid-column: 2 / -1; }
 .log .client { color: var(--text-2); grid-column: 2 / -1; }
 .notes { position: absolute; top: 24px; left: 50%; transform: translateX(-50%); width: min(520px, 90%); z-index: 11; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .note { pointer-events: auto; position: relative; color: #fff; font-weight: 600; padding: 10px 34px 10px 14px; border-radius: 4px; box-shadow: 0 4px 14px #0006; animation: drop .25s ease-out; }
@@ -212,6 +225,12 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
         <div class="sub" id="root"></div>
       </div>
     </div>
+    <div class="hcards">
+      <div class="stat"><label>Total Disk Usage</label><b id="u-disk">-</b></div>
+      <div class="stat"><label>Total Memory Usage</label><b id="u-mem">-</b></div>
+      <div class="stat"><label>Total Projects</label><b id="u-proj">-</b></div>
+      <div class="stat"><label>Total Datasets</label><b id="u-ds">-</b></div>
+    </div>
   </header>
 
   <main>
@@ -223,24 +242,28 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
         <div class="stat"><label>Port</label><b id="s-port">-</b></div>
         <div class="stat"><label>Web Server (PowerShell)</label><b id="s-status">CONNECTING</b></div>
         <div class="stat"><label>Data Engine (C#)</label><b id="s-engine" title="Click to re-run the test">TESTING</b></div>
+        <div class="stat wide" title="Engine worker threads: grey = idle, green = reading or computing, red = writing"><label>Workers (Logical CPU Threads)</label><div class="wkey"><span><i class="l0"></i>Idle</span><span><i class="l1"></i>Reading</span><span><i class="l2"></i>Writing</span></div><b id="s-workers" class="off">OFFLINE</b><div id="wlights"></div></div>
       </div>
       </section>
 
       <section class="panel">
-        <div class="row"><button id="toggle" class="danger">Stop server</button></div>
+        <div class="row"><button id="toggle" class="danger">Stop Server</button></div>
         <h2 class="actions-title" style="margin-top: 37px">Server Actions</h2>
         <div id="actions" class="row sorted">
           <button id="clear" hidden>Clear log</button>
           <button id="users">Manage Users</button>
+          <button id="bench" class="blue" title="Open the Benchmark page (engine speed tests)">Benchmark</button>
           <button id="settings">Settings</button>
           <button id="purgeTemp" title="Delete the app's temporary data (temp folder: spills, write staging, Benchmark data, caches). Files in use are skipped. Projects are never touched.">Purge Temp Data</button>
-          <button id="purgeTrash" title="Permanently delete every project in the project trash (workspace/projects/.trash)">Purge Project Trash</button>
+          <button id="purgeMem" title="Free engine memory: cached tables, loaded datasets, garbage collection">Purge Memory</button>
+          <button id="purgeTrash" title="Permanently delete every project in the project trash (workspace/.trash)">Purge Project Trash</button>
         </div>
         <!-- Developer shortcuts (orange): this section goes away in production. -->
         <h2 class="actions-title dev-title">Dev Actions</h2>
         <div id="dev-actions" class="row sorted">
           <button id="modules" class="dev">Modules</button>
-          <button id="bench" class="dev" title="Open the Benchmark page (engine speed tests)">Benchmark</button>
+          <button id="oldApp" class="dev" title="Open the Project Manager (ui/html/project_manager.html)">Open Old App</button>
+          <button id="newApp" class="dev" title="Open the new home page (ui/html/new_app.html)">Open New App</button>
         </div>
       </section>
     </aside>
@@ -327,7 +350,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
   <script>
 // Control panel for server/server.ps1. The server writes every log entry to
 // server/logs/ as it happens; this panel mirrors the same entries.
-const W = 1200, H = 800;   // control panel window size (capped to the screen below)
+const W = 1500, H = 900;   // control panel window size (capped to the screen below)
 const $ = id => document.getElementById(id);
 let state = null, selPage = null, since = 0, live = false;
 
@@ -343,7 +366,7 @@ center();
 addEventListener('load', center);
 
 async function api(path, body) {
-  const r = await fetch('/api/' + path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
+  const r = await fetch('api/' + path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
   return r.json();
 }
 
@@ -383,8 +406,7 @@ async function loadState(resetForm) {
   const ready = state.up && state.engine;
   $('s-status').textContent = ready ? 'ONLINE' : 'OFFLINE';
   $('s-status').className = ready ? 'on' : 'off';
-  $('toggle').textContent = state.up ? 'Stop server' : 'Start server';
-  $('toggle').className = state.up ? 'danger' : '';
+  paintToggle();
   $('s-user').textContent = state.user || '-';
   $('s-port').textContent = state.port;
   $('s-uptime').textContent = fmtTime(state.uptime);
@@ -419,7 +441,7 @@ function addLines(lines) {
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
   for (const l of lines) {
     const r = document.createElement('div');
-    r.className = 'r' + (l.k === 'start' || l.k === 'stop' ? ' ' + l.k : '');
+    r.className = 'r' + (l.k === 'start' || l.k === 'stop' || l.k === 'restart' ? ' ' + l.k : '');
     if (l.k === 'req' && l.c >= 400 && l.c < 500) r.classList.add('c4xx');
     fitCols(l.k === 'req' ? [l.t, l.m, l.c, fmtSize(l.s), `${l.ms} ms`] : [l.t]);
     if (l.k === 'req') {
@@ -524,7 +546,23 @@ async function purge(what, title, text, warn) {
 $('purgeTemp').onclick = () => purge('temp', 'Purge temp data', 'Delete all temporary data in the temp folder (Benchmark data and results, spills, caches)? Projects are not touched.', 'Everything in the temp folder is permanently deleted.');
 $('purgeTrash').onclick = () => purge('trash', 'Purge project trash', 'Permanently delete every project in the project trash?', 'Every project in the trash is permanently deleted. This cannot be undone.');
 
+$('purgeMem').onclick = async () => {
+  const r = await api('memory-purge', {});
+  msg(r.ok ? `Memory purged: ${r.tables} table(s), ${r.datasets} dataset(s) freed; engine holds ${fmtGB(r.managed)}.` : r.error, r.ok);
+  usage();
+};
+
 // Benchmark page (also in the Project Manager's Utilities menu).
+$('oldApp').onclick = async () => {
+  if (!state?.up) return msg('Start the site first.', false);
+  const r = await api('open', { page: 'ui/html/project_manager.html' });
+  if (!r.ok) msg(r.error, false);
+};
+$('newApp').onclick = async () => {
+  if (!state?.up) return msg('Start the site first.', false);
+  const r = await api('open', { page: 'ui/html/new_app.html' });
+  if (!r.ok) msg(r.error, false);
+};
 $('bench').onclick = async () => {
   if (!state?.up) return msg('Start the site first.', false);
   const r = await api('open', { page: 'ui/html/benchmark.html' });
@@ -583,7 +621,34 @@ $('s-save').onclick = async () => {
 };
 
 $('clear').onclick = async () => { await api('clear', {}); $('log').innerHTML = ''; syncClear(); note('Live logs cleared.', 'sys'); };
-$('toggle').onclick = async () => {
+// Start (green) / Stop (red); Shift held while up = Restart (orange): stop, wait 5 s (live timer), start.
+let shiftDown = false, restarting = false;
+function paintToggle() {
+  if (restarting || !state) return;
+  const t = $('toggle'), re = state.up && shiftDown;
+  t.innerHTML = re ? 'Restart Server' : `${state.up ? 'Stop Server' : 'Start Server'}<small>(Hold Shift for Restart)</small>`;
+  t.className = re ? 'dev' : state.up ? 'go' : 'danger';
+}
+const onShift = e => { if (shiftDown !== e.shiftKey) { shiftDown = e.shiftKey; paintToggle(); } };
+addEventListener('keydown', onShift); addEventListener('keyup', onShift); addEventListener('mousemove', onShift);
+addEventListener('blur', () => { shiftDown = false; paintToggle(); });
+$('toggle').onclick = async e => {
+  if (restarting) return;
+  const t = $('toggle');
+  if (state.up && e.shiftKey) {
+    restarting = true; t.disabled = true;
+    try {
+      const r = await api('site', { on: false }); if (!r.ok) msg(r.error, false);
+      const t0 = performance.now();
+      await new Promise(done => { const iv = setInterval(() => {
+        const left = Math.max(0, 5 - (performance.now() - t0) / 1000);
+        t.textContent = `Waiting (${Math.ceil(left)} sec)`;
+        if (!left) { clearInterval(iv); done(); }
+      }, 100); });
+      const r2 = await api('site', { on: true, restart: true }); if (!r2.ok) msg(r2.error, false);
+    } finally { restarting = false; t.disabled = false; shiftDown = false; await loadState(false); }
+    return;
+  }
   const r = await api('site', { on: !state.up });
   if (!r.ok) msg(r.error, false);
   await loadState(false);
@@ -607,7 +672,7 @@ function readUser(first, mid, last, type) {
 }
 async function saveUsers(text) {
   users.sort((a, b) => a.display.localeCompare(b.display));
-  const r = await fetch('/api/users', { method: 'POST', body: JSON.stringify(users, null, 2) })
+  const r = await fetch('api/users', { method: 'POST', body: JSON.stringify(users, null, 2) })
     .then(r => r.ok ? r.json() : { ok: false, error: `Saving users failed (HTTP ${r.status}). Restart the server to load the users API.` })
     .catch(e => ({ ok: false, error: `Saving users failed: ${e.message}` }));
   r.ok ? msg(text, true) : msg(r.error, false);
@@ -625,7 +690,7 @@ function renderUsers() {
   </div>`).join('') || '<div class="uempty">No users yet.</div>';
 }
 $('users').onclick = async () => {
-  users = await fetch('/api/users').then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+  users = await fetch('api/users').then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
     .catch(e => { msg(`Could not load users (${e.message}). Restart the server to load the users API.`, false); return []; });
   users.forEach((u, i) => { u.id ||= Date.now().toString(36) + i; u.display = displayName(u); });
   uOpen = uEdit = null; renderUsers();
@@ -681,6 +746,36 @@ async function engineTest() {
   }
 }
 $('s-engine').onclick = engineTest;
+// Header cards: disk (app folder) and memory (server + engine), live only while this window is visible.
+const fmtGB = n => n >= 1073741824 ? (n / 1073741824).toFixed(2) + ' GB' : Math.ceil(n / 1048576) + ' MB';
+let uBusy = false, ramGB = 0;
+async function usage() {
+  if (uBusy || document.hidden) return;
+  uBusy = true;
+  try {
+    const u = await api('usage');
+    $('u-proj').textContent = u.projects; $('u-ds').textContent = u.datasets;
+    $('u-disk').textContent = fmtGB(u.disk);
+    $('u-mem').textContent = fmtGB(u.mem);
+    $('u-mem').title = u.ram ? `of ${fmtGB(u.ram)} RAM` : '';
+  } catch {} finally { uBusy = false; }
+}
+usage(); setInterval(usage, 2000); document.addEventListener('visibilitychange', usage);
+// Threaded Workers card: polled every 300 ms while visible; writers outside the pool light idle slots red.
+let wBusy = false;
+setInterval(async () => {
+  if (wBusy || document.hidden) return;
+  wBusy = true;
+  const host = $('wlights');
+  try {
+    const r = await api('workers'); if (!r.ok) throw 0;
+    const st = r.states.slice(); let extra = r.writers || 0;
+    for (let i = 0; i < st.length && extra > 0; i++) if (st[i] === 0) { st[i] = 2; extra--; }
+    if (host.children.length !== st.length) host.innerHTML = st.map((_, i) => `<i>${i + 1}</i>`).join('');
+    st.forEach((v, i) => { const c = `l${v}`; if (host.children[i].className !== c) host.children[i].className = c; });
+  } catch { host.innerHTML = ''; }
+  finally { wBusy = false; $('s-workers').hidden = !!host.children.length; }
+}, 300);
 
 loadState(true).then(poll);
 engineTest();

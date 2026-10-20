@@ -11,7 +11,7 @@ const PipelineSteps = (() => {
   const TYPES = {
     filter: {
       label: 'Filter rows', fields: [['input', 'Input', 'source'], ['where', 'Keep rows where (SQL condition)', 'text', "e.g. status = 'Delivered' AND total > 100"]],
-      sql: c => `SELECT * FROM ${q(c.input)} WHERE ${c.where || 'true'}`,
+      sql: c => `SELECT * FROM ${q(c.input)} WHERE ${c.where || '1 = 1'}`,
     },
     derive: {
       label: 'Add columns', fields: [['input', 'Input', 'source'], ['exprs', 'New columns, one per line: name = expression', 'area', 'margin_pct = margin / total\norder_year = year(order_date)']],
@@ -35,7 +35,7 @@ const PipelineSteps = (() => {
     },
     sort: {
       label: 'Sort / limit', fields: [['input', 'Input', 'source'], ['order', 'Order by', 'text', 'total DESC'], ['limit', 'Limit (blank = all rows)', 'text', '']],
-      sql: c => `SELECT * FROM ${q(c.input)}${c.order ? ` ORDER BY ${c.order}` : ''}${+c.limit > 0 ? ` LIMIT ${+c.limit}` : ''}`,
+      sql: c => `SELECT * FROM ${q(c.input)}${c.order ? ` ORDER BY ${c.order}` : ''}${+c.limit > 0 ? ` FETCH FIRST ${+c.limit} ROWS ONLY` : ''}`,
     },
     sql: {
       label: 'SQL', fields: [['query', 'SQL (use dataset and step names as tables)', 'area', 'SELECT * FROM my_dataset']],

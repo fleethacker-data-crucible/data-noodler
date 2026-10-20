@@ -13,7 +13,7 @@ const ModulePage = {
     let cfg;
     try { cfg = await Projects.get(folder); }
     catch { set('sub', `Project "${folder}" not found.`); throw new Error(`Project "${folder}" not found.`); }
-    set('sub', `${cfg.name} · workspace/projects/${folder}`);
+    set('sub', `${cfg.name} · workspace/${folder}`);
     window.GlobalHeader?.setInfo(title, cfg.name);
     const ctx = {
       folder, cfg, module, dir: Projects.dir(folder),
@@ -46,7 +46,7 @@ const ModulePage = {
       },
       async reload() { ctx.cfg = await Projects.get(folder); return ctx.cfg; },
     };
-    // The project's datasets (imported + data/source) start loading into engine memory now, in the background, so the
+    // The project's datasets (imported + data/clean) start loading into engine memory now, in the background, so the
     // module's queries read RAM. Shared by every window; the engine refreshes a dataset when it changes on disk.
     if (typeof Engine !== 'undefined') Projects.sourceDatasets(folder, cfg).catch(() => [])
       .then(src => Engine.memory.preload([...new Set([...(cfg.datasets || []).map(d => d.path), ...src.map(d => d.path)])]))

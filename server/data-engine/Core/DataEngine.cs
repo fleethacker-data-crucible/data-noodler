@@ -724,7 +724,7 @@ namespace NativeDataEngine
             {
                 string name = Json.Str(n, "name");
                 QueryStmt q;
-                try { q = Parser.ParseQuery(views[name]); }
+                try { q = Parser.ParseQuery(views[name], true); }
                 catch (EngineException e) { throw new EngineException(e.Code, "Step \"" + name + "\": " + e.Message); }
                 HashSet<string> refs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 Refs.Collect(q, refs);

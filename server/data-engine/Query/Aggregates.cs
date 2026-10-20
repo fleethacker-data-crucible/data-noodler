@@ -175,6 +175,7 @@ namespace NativeDataEngine
     public sealed class AggSpec
     {
         public string Fn; public BExpr Arg, Arg2; public bool Distinct; public BExpr Filter; public DataType Out; public double Param;
+        public BExpr Order; public bool OrderDesc;   // LISTAGG ... WITHIN GROUP (ORDER BY ...)
         public static DataType OutType(string fn, DataType arg)
         {
             switch (fn)
@@ -200,7 +201,7 @@ namespace NativeDataEngine
         public abstract Column Result(int groups);
         public static AggState Create(AggSpec s)
         {
-            if (s.Distinct && s.Fn != "min" && s.Fn != "max") return new DistinctState(s);
+            if (s.Distinct && s.Fn != "min" && s.Fn != "max" && s.Fn != "listagg") return new DistinctState(s);   // LISTAGG(DISTINCT): ListState drops repeats
             switch (s.Fn)
             {
                 case "count": return new CountState(s.Arg == null);
@@ -469,18 +470,21 @@ namespace NativeDataEngine
     sealed class ListState : AggState
     {
         public enum Mode { Concat, QuantCont, QuantDisc, Mode }
-        readonly AggSpec s; readonly Mode mode; List<object>[] vals = new List<object>[16]; string sep = ",";
-        public ListState(AggSpec s, Mode m) { this.s = s; mode = m; }
+        readonly AggSpec s; readonly Mode mode; List<object>[] vals = new List<object>[16]; List<object>[] keys; string sep;
+        public Column OrderKeys;   // set by AggTable before Update when s.Order is set: the sort key per row
+        public ListState(AggSpec s, Mode m) { this.s = s; mode = m; sep = s.Fn == "listagg" ? "" : ","; if (s.Order != null) keys = new List<object>[16]; }
         public override void Update(int[] g, int n, Column a, Column a2, bool[] mask)
         {
             int max = 0; for (int i = 0; i < n; i++) if (g[i] > max) max = g[i]; Fit(ref vals, max + 1);
             if (mode == Mode.Concat && a2 != null && n > 0 && !a2.IsNull(0)) sep = Values.Text(a2, 0);
+            if (keys != null) Fit(ref keys, max + 1);
             if (mode == Mode.QuantCont && a.F == null && a.I == null) a = Cast.To(a, DataType.Double, true);
             for (int i = 0; i < n; i++)
             {
                 if (Skip(a, mask, i)) continue;
                 List<object> l = vals[g[i]] ?? (vals[g[i]] = new List<object>());
                 l.Add(mode == Mode.Concat ? (object)Values.Text(a, i) : a.Get(i));
+                if (keys != null) (keys[g[i]] ?? (keys[g[i]] = new List<object>())).Add(OrderKeys == null || OrderKeys.IsNull(i) ? null : OrderKeys.Get(i));
             }
         }
         public override void Merge(AggState o, int[] map, int og)
@@ -492,6 +496,7 @@ namespace NativeDataEngine
                 int m = map[k]; Fit(ref vals, m + 1);
                 if (vals[m] == null) vals[m] = new List<object>();
                 vals[m].AddRange(x.vals[k]);
+                if (keys != null) { Fit(ref keys, m + 1); if (keys[m] == null) keys[m] = new List<object>(); keys[m].AddRange(x.keys != null && k < x.keys.Length && x.keys[k] != null ? x.keys[k] : new List<object>()); }
             }
         }
         public override Column Result(int groups)
@@ -503,7 +508,20 @@ namespace NativeDataEngine
             {
                 List<object> l = vals[k];
                 if (l == null || l.Count == 0) { b.AddNull(); continue; }
-                if (mode == Mode.Concat) { string[] parts = new string[l.Count]; for (int j = 0; j < l.Count; j++) parts[j] = (string)l[j]; b.AddString(string.Join(sep, parts)); continue; }
+                if (mode == Mode.Concat)
+                {
+                    string[] parts = new string[l.Count]; for (int j = 0; j < l.Count; j++) parts[j] = (string)l[j];
+                    if (keys != null && keys[k] != null && keys[k].Count == l.Count)
+                    {
+                        // WITHIN GROUP (ORDER BY key [DESC]): stable sort, NULL keys last
+                        object[] ks = keys[k].ToArray(); int[] idx = new int[parts.Length]; for (int j = 0; j < idx.Length; j++) idx[j] = j;
+                        bool desc = s.OrderDesc;
+                        Array.Sort(idx, (x, y) => { object kx = ks[x], ky = ks[y]; int cc = kx == null ? (ky == null ? 0 : 1) : ky == null ? -1 : (desc ? -1 : 1) * Comparer<object>.Default.Compare(kx, ky); return cc != 0 ? cc : x.CompareTo(y); });
+                        string[] ordered = new string[parts.Length]; for (int j = 0; j < idx.Length; j++) ordered[j] = parts[idx[j]]; parts = ordered;
+                    }
+                    if (s.Distinct) { List<string> u = new List<string>(); HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal); foreach (string x in parts) if (seen.Add(x)) u.Add(x); parts = u.ToArray(); }
+                    string res = string.Join(sep, parts); if (res.Length == 0) b.AddNull(); else b.AddString(res); continue;
+                }
                 if (mode == Mode.Mode)
                 {
                     Dictionary<object, int> cnt = new Dictionary<object, int>(); object best = null; int bc = 0;
@@ -643,6 +661,7 @@ namespace NativeDataEngine
                     Column f = s.Filter.Eval(b); mask = new bool[b.Rows];
                     for (int i = 0; i < b.Rows; i++) mask[i] = !f.IsNull(i) && f.B[i];
                 }
+                if (s.Order != null) { ListState ls = states[k] as ListState; if (ls != null) ls.OrderKeys = s.Order.Eval(b); }
                 states[k].Update(g, b.Rows, a, a2, mask);
             }
             Account();

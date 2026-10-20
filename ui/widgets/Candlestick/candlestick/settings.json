@@ -170,11 +170,28 @@
     },
     {
       "path": "bb.axis.x.height",
-      "label": "Height (blank = auto)",
+      "label": "Height",
       "group": "Axis",
       "sub": "X Axis",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 30,
+      "min": 10,
+      "max": 200,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.axis_x_height",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.axis_x_height",
+      "label": "Height Auto",
+      "group": "Axis",
+      "sub": "X Axis",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "bb.axis.x.tick.text.inner",
@@ -207,6 +224,17 @@
       "sub": "X Axis",
       "type": "text",
       "default": ""
+    },
+    {
+      "path": "dn.font.xLabel",
+      "label": "Label Font Size",
+      "group": "Axis",
+      "sub": "X Axis",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "bb.axis.x.label.position",
@@ -303,11 +331,28 @@
     },
     {
       "path": "bb.axis.x.tick.count",
-      "label": "Tick Count (blank = auto)",
+      "label": "Tick Count",
       "group": "Axis",
       "sub": "X Axis",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.axis_x_tick_count",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.axis_x_tick_count",
+      "label": "Tick Count Auto",
+      "group": "Axis",
+      "sub": "X Axis",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "dn.xCulling",
@@ -316,6 +361,17 @@
       "sub": "X Axis",
       "type": "boolean",
       "default": true
+    },
+    {
+      "path": "dn.font.xTick",
+      "label": "Tick Font Size",
+      "group": "Axis",
+      "sub": "X Axis",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "bb.axis.x.tick.show",
@@ -384,11 +440,28 @@
     },
     {
       "path": "bb.axis.x.tick.width",
-      "label": "Tick Width (blank = auto)",
+      "label": "Tick Width",
       "group": "Axis",
       "sub": "X Axis",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 60,
+      "min": 10,
+      "max": 300,
+      "step": 5,
+      "when": [
+        {
+          "path": "dn.auto.axis_x_tick_width",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.axis_x_tick_width",
+      "label": "Tick Width Auto",
+      "group": "Axis",
+      "sub": "X Axis",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "dn.xType",
@@ -493,6 +566,17 @@
       "default": ""
     },
     {
+      "path": "dn.font.yLabel",
+      "label": "Label Font Size",
+      "group": "Axis",
+      "sub": "Y Axis",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.axis.y.label.position",
       "label": "Label Position",
       "group": "Axis",
@@ -571,11 +655,28 @@
     },
     {
       "path": "bb.axis.y.tick.count",
-      "label": "Tick Count (blank = auto)",
+      "label": "Tick Count",
       "group": "Axis",
       "sub": "Y Axis",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.axis_y_tick_count",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.axis_y_tick_count",
+      "label": "Tick Count Auto",
+      "group": "Axis",
+      "sub": "Y Axis",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "dn.yCulling",
@@ -584,6 +685,17 @@
       "sub": "Y Axis",
       "type": "boolean",
       "default": false
+    },
+    {
+      "path": "dn.font.yTick",
+      "label": "Tick Font Size",
+      "group": "Axis",
+      "sub": "Y Axis",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "bb.axis.y.tick.show",
@@ -738,6 +850,17 @@
       "default": ""
     },
     {
+      "path": "dn.font.y2Label",
+      "label": "Label Font Size",
+      "group": "Axis",
+      "sub": "Y2 Axis",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.axis.y2.label.position",
       "label": "Label Position",
       "group": "Axis",
@@ -816,11 +939,28 @@
     },
     {
       "path": "bb.axis.y2.tick.count",
-      "label": "Tick Count (blank = auto)",
+      "label": "Tick Count",
       "group": "Axis",
       "sub": "Y2 Axis",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.axis_y2_tick_count",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.axis_y2_tick_count",
+      "label": "Tick Count Auto",
+      "group": "Axis",
+      "sub": "Y2 Axis",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "dn.y2Culling",
@@ -829,6 +969,17 @@
       "sub": "Y2 Axis",
       "type": "boolean",
       "default": false
+    },
+    {
+      "path": "dn.font.y2Tick",
+      "label": "Tick Font Size",
+      "group": "Axis",
+      "sub": "Y2 Axis",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "bb.axis.y2.tick.show",
@@ -888,18 +1039,27 @@
       "step": 1
     },
     {
-      "path": "bb.candlestick.color.down",
-      "label": "Down Color",
-      "group": "Candlestick",
-      "type": "color",
-      "default": "#ff0000"
-    },
-    {
       "path": "bb.candlestick.width.max",
       "label": "Max Width (px)",
       "group": "Candlestick",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 50,
+      "min": 1,
+      "max": 200,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.candlestick_width_max",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.candlestick_width_max",
+      "label": "Max Width (px) Auto",
+      "group": "Candlestick",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "bb.candlestick.width.ratio",
@@ -912,8 +1072,58 @@
       "step": 0.05
     },
     {
+      "path": "bb.candlestick.color.down",
+      "label": "Candlestick Down Color",
+      "group": "Colors",
+      "type": "color",
+      "default": "#ff0000"
+    },
+    {
+      "path": "bb.data.labels.backgroundColors",
+      "label": "Data Labels Background Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.data.labels.border.stroke",
+      "label": "Data Labels Border Color",
+      "group": "Colors",
+      "type": "color",
+      "default": "#000000",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "bb.data.labels.border.fill",
+      "label": "Data Labels Border Fill",
+      "group": "Colors",
+      "type": "color",
+      "default": "",
+      "when": {
+        "path": "dn.on.data_labels_border",
+        "is": true
+      }
+    },
+    {
+      "path": "dn.labelColor",
+      "label": "Data Labels Text Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
       "path": "bb.color.onover",
       "label": "Hover Color",
+      "group": "Colors",
+      "type": "color",
+      "default": ""
+    },
+    {
+      "path": "bb.background.color",
+      "label": "Layout Background Color",
       "group": "Colors",
       "type": "color",
       "default": ""
@@ -1086,11 +1296,14 @@
       "default": "positive"
     },
     {
-      "path": "bb.data.labels.backgroundColors",
-      "label": "Background Color",
+      "path": "dn.font.labels",
+      "label": "Font Size",
       "group": "Data Labels",
-      "type": "color",
-      "default": ""
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
     },
     {
       "path": "dn.labelsShow",
@@ -1100,43 +1313,12 @@
       "default": true
     },
     {
-      "path": "dn.labelColor",
-      "label": "Text Color",
-      "group": "Data Labels",
-      "type": "color",
-      "default": ""
-    },
-    {
       "path": "dn.on.data_labels_border",
       "label": "Border",
       "group": "Data Labels",
       "sub": "Border",
       "type": "boolean",
       "default": false
-    },
-    {
-      "path": "bb.data.labels.border.stroke",
-      "label": "Border Color",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "#000000",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
-    },
-    {
-      "path": "bb.data.labels.border.fill",
-      "label": "Border Fill",
-      "group": "Data Labels",
-      "sub": "Border",
-      "type": "color",
-      "default": "",
-      "when": {
-        "path": "dn.on.data_labels_border",
-        "is": true
-      }
     },
     {
       "path": "bb.data.labels.border.padding",
@@ -1315,10 +1497,26 @@
     },
     {
       "path": "bb.grid.y.ticks",
-      "label": "Y Grid Count (blank = ticks)",
+      "label": "Y Grid Count",
       "group": "Grid",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.grid_y_ticks",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.grid_y_ticks",
+      "label": "Y Grid Count Auto",
+      "group": "Grid",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "bb.grid.y.show",
@@ -1475,29 +1673,6 @@
       "default": "Auto"
     },
     {
-      "path": "bb.svg.classname",
-      "label": "SVG Class Name",
-      "group": "Layout",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.class",
-      "label": "Background Class",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "text",
-      "default": ""
-    },
-    {
-      "path": "bb.background.color",
-      "label": "Background Color",
-      "group": "Layout",
-      "sub": "Background",
-      "type": "color",
-      "default": ""
-    },
-    {
       "path": "bb.background.imgUrl",
       "label": "Background Image URL",
       "group": "Layout",
@@ -1593,6 +1768,16 @@
       "default": false
     },
     {
+      "path": "dn.font.legend",
+      "label": "Font Size",
+      "group": "Legend",
+      "type": "number",
+      "default": 11,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.legend.padding",
       "label": "Padding",
       "group": "Legend",
@@ -1658,8 +1843,29 @@
       "label": "Inset Step (rows)",
       "group": "Legend",
       "sub": "Inset",
-      "type": "text",
-      "default": "",
+      "type": "number",
+      "default": 1,
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "when": [
+        {
+          "path": "bb.legend.position",
+          "is": "inset"
+        },
+        {
+          "path": "dn.auto.legend_inset_step",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.legend_inset_step",
+      "label": "Inset Step (rows) Auto",
+      "group": "Legend",
+      "sub": "Inset",
+      "type": "boolean",
+      "default": true,
       "when": {
         "path": "bb.legend.position",
         "is": "inset"
@@ -1758,10 +1964,26 @@
     },
     {
       "path": "bb.point.opacity",
-      "label": "Opacity (0 - 1, blank = auto)",
+      "label": "Opacity",
       "group": "Points",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "when": [
+        {
+          "path": "dn.auto.point_opacity",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.point_opacity",
+      "label": "Opacity Auto",
+      "group": "Points",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "dn.on.point_radialGradient",
@@ -1782,17 +2004,36 @@
     },
     {
       "path": "bb.point.select.r",
-      "label": "Selected Radius (blank = r x 4)",
+      "label": "Selected Radius",
       "group": "Points",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.point_select_r",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.point_select_r",
+      "label": "Selected Radius Auto",
+      "group": "Points",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "bb.point.sensitivity",
-      "label": "Sensitivity (px or radius)",
+      "label": "Sensitivity (px)",
       "group": "Points",
-      "type": "text",
-      "default": "10"
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 50,
+      "step": 1
     },
     {
       "path": "bb.point.type",
@@ -1814,11 +2055,28 @@
     },
     {
       "path": "bb.point.focus.expand.r",
-      "label": "Focus Radius (blank = r x 1.75)",
+      "label": "Focus Radius",
       "group": "Points",
       "sub": "Focus",
-      "type": "text",
-      "default": ""
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "when": [
+        {
+          "path": "dn.auto.point_focus_expand_r",
+          "is": false
+        }
+      ]
+    },
+    {
+      "path": "dn.auto.point_focus_expand_r",
+      "label": "Focus Radius Auto",
+      "group": "Points",
+      "sub": "Focus",
+      "type": "boolean",
+      "default": true
     },
     {
       "path": "bb.point.focus.expand.enabled",
@@ -1975,6 +2233,16 @@
       "default": false
     },
     {
+      "path": "dn.font.title",
+      "label": "Font Size",
+      "group": "Title",
+      "type": "number",
+      "default": 14,
+      "min": 6,
+      "max": 40,
+      "step": 1
+    },
+    {
       "path": "bb.title.position",
       "label": "Position",
       "group": "Title",
@@ -2035,6 +2303,16 @@
       "default": 0,
       "min": 0,
       "max": 50,
+      "step": 1
+    },
+    {
+      "path": "dn.font.tooltip",
+      "label": "Font Size",
+      "group": "Tooltip",
+      "type": "number",
+      "default": 12,
+      "min": 6,
+      "max": 40,
       "step": 1
     },
     {

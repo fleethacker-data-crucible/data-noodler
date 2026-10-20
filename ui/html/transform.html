@@ -14,8 +14,16 @@
   *::-webkit-scrollbar { display: none; }
   .lst, .log { overscroll-behavior: contain; }
   /* Column separator: full height of .main (header line to page bottom), 20px either side of it, matching the page padding. */
-  .split { column-gap: 40px; }
-  .main { background: linear-gradient(var(--border), var(--border)) no-repeat 340px 0 / 1px 100%; }
+  /* Imported Tables / Queries panel on the right: the editor column first, the panel second. */
+  /* Side panel width: 400px on every open / refresh; drag the separator line to resize (not saved). */
+  .main { --side: 400px; }
+  .split { column-gap: 40px; grid-template-columns: minmax(0, 1fr) var(--side); }
+  .split > aside { order: 2; position: relative; }
+  .main { background: linear-gradient(var(--border), var(--border)) no-repeat calc(100% - var(--side) - 40px) 0 / 1px 100%; }
+  #sideGrip { position: absolute; top: 0; bottom: 0; left: -26px; width: 12px; cursor: col-resize; z-index: 5; }
+  body.resizing, body.resizing * { cursor: col-resize !important; user-select: none; }
+  @media (max-width: 800px) { #sideGrip { display: none; } }
+  @media (max-width: 800px) { .split { grid-template-columns: 1fr; } .split > aside { order: 0; } }
   @media (max-width: 800px) { .main { background-image: none; } }
   /* Section headings: 25px above each, none above the first one in each column. */
   .split h2 { margin: 25px 0 10px; }
@@ -25,7 +33,7 @@
   #editor { margin-top: 0; }
   aside { display: flex; flex-direction: column; }
   .lst { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 300px; overflow: auto; }
-  .lst > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 25px; box-sizing: border-box; padding: 0 8px; cursor: pointer; }   /* rows as tall as a text box */
+  .lst > div { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 30px; box-sizing: border-box; padding: 0 8px; cursor: pointer; }   /* table, field and query rows: 30px, text centred */
   .lst > div + div { border-top: 1px solid var(--border); }
   .lst > div:hover { background: var(--panel); }
   .lst > div.sel { background: var(--sel); font-weight: 600; }
@@ -55,17 +63,27 @@
   @keyframes busy { from { margin-left: -30%; } to { margin-left: 100%; } }
   #result .pgrid { height: 480px; }
   #sql.tall { height: 680px; }   /* preview popped out: twice the editor (theme.css .sqled: 340px) */
-  #qName.bad, #qName.bad:focus { border-color: var(--err); outline: 1px solid var(--err); }
-  #qName::placeholder { color: var(--muted); }
-  #qName { min-width: 260px; font-family: var(--mono); }
   #editor .synrow { margin: 0; padding: 0; height: auto; }
-  #editor .synrow > #synLib { margin-top: 5px; }   /* Syntax Library: 5px below the SQL editor */
+  #editor .synrow { justify-content: flex-end; }   /* Syntax Library + Run: right-aligned, 5px below the SQL editor */
+  #editor .synrow > button { margin-top: 5px; }
+  #runSql { background: #2e9e5b; border-color: #2e9e5b; color: #fff; display: inline-flex; align-items: center; gap: 6px; }
+  #runSql:hover:not(:disabled) { background: #36b368; border-color: #36b368; }
+  #runSql svg { width: 9px; height: 10px; fill: currentColor; }
   #sql.more { height: 680px; }   /* Show More: twice the editor (theme.css .sqled: 340px) */
-  .lst .qrun { flex: none; margin: 0 6px 0 0; cursor: pointer; }   /* tick = runs on Run Selected and Update */
+  /* Red X 8px left of the status (clean / not run), shown on the hovered row: deletes that query (asks first). */
+  .lst .qr { display: flex; align-items: center; gap: 8px; flex: none; }
+  .lst .qdel { flex: none; display: inline-flex; margin: 0; visibility: hidden; padding: 0; border: 0; background: none; color: #ff2a2a; cursor: pointer; opacity: 1; }
+  .lst .qdel:hover { opacity: 1; }
+  .lst > div:hover .qdel { visibility: visible; }   /* only on the row under the mouse */
+  /* Delete All box: flashes red */
+  dialog:has(.ack-del) { animation: ackFlash .8s ease-in-out infinite alternate; border: 2px solid #ff2a2a; }
+  @keyframes ackFlash { from { box-shadow: 0 0 0 0 rgba(255, 42, 42, .2); background-color: var(--panel, #1e1e1e); } to { box-shadow: 0 0 24px 6px rgba(255, 42, 42, .75); background-color: #3a1414; } }
+  .ack-del p { margin: 0 0 10px; color: #ff6b6b; font-weight: 600; }
+  .lst .qdel svg { width: 16px; height: 16px; fill: currentColor; }
   .lst > div > span.q { display: flex; align-items: center; }
   .lst > div > span.q > .qn { overflow: hidden; text-overflow: ellipsis; }
   /* Fields grouped by type (Numbers, Text, Dates; A to Z in each), with the type mark and colour of Dashboard Studio's Data window. */
-  .lst > div.fgh { padding-left: 30px; height: 22px; cursor: default; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; justify-content: flex-start; }
+  .lst > div.fgh { padding-left: 30px; height: 30px; cursor: default; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; justify-content: flex-start; }
   .lst > div.fgh:hover { background: none; }
   .lst > div.fgh small { margin-left: 6px; }
   .lst .fld .t { display: inline-block; width: 20px; text-align: center; font-size: 11px; margin-right: 4px; }
@@ -81,30 +99,28 @@
   </header>
   <div class="main">
     <div class="split">
-      <aside>
+      <aside><div id="sideGrip" title="Drag to resize the panel"></div>
         <section>
           <h2 title="Click a dataset: show its fields
 Shift+click a dataset: insert its name in the SQL
-Click a field: insert it in the SQL">Imported Tables</h2>
+Click a field: insert it in the SQL">Input Tables</h2>
           <div class="fsrch"><input type="search" id="fsAll" placeholder="Search fields…" spellcheck="false"></div>
           <div class="lst" id="dsList"></div>
         </section>
         <section id="qSec">
-          <h2 title="Write as many queries as you like. Every CREATE TABLE name AS ... is saved as the dataset CLEAN_name (CREATE TEMP TABLE: a helper, not saved). Ticked queries run on Run Selected and on Update.">Queries</h2>
-          <div class="row" style="margin-bottom:8px"><button id="add">Add</button><button id="run" title="Run every ticked query and save the tables it creates as CLEAN_ datasets">Run Selected</button><button id="del" class="danger">Delete</button></div>
+          <h2 title="Write as many queries as you like. Every CREATE TABLE name AS ... is saved as the dataset CLEAN_name (CREATE TEMP TABLE: a helper, not saved). Ticked queries run on Update.">Query Output Tables</h2>
+          <div class="row" style="margin-bottom:8px"><button id="add" title="New query">New</button><button id="del" class="danger" style="margin-left:auto" title="Delete every query in Query Output Tables">Delete All</button></div>
           <div class="lst" id="qList"></div>
         </section>
       </aside>
       <section class="stack">
-        <div id="none" class="muted">Click Add to write a query. A query is one SELECT, or a script (CREATE TABLE, INSERT, UPDATE, ... ) that ends with a SELECT. Every CREATE TABLE name AS ... in it is saved as the dataset CLEAN_name (Arrow in data/source); ticked queries run on Run Selected and on Update. The simplest one is <span class="mono">SELECT * FROM &lt;input dataset&gt;</span>.</div>
+        <div id="none" class="muted">Click New to write a query. A query is one SELECT, or a script (CREATE TABLE, INSERT, UPDATE, ... ) that ends with a SELECT. Every CREATE TABLE name AS ... in it is saved as the dataset CLEAN_name (Arrow in data/clean); ticked queries run on Update. The simplest one is <span class="mono">SELECT * FROM &lt;input dataset&gt;</span>.</div>
         <div id="editor" hidden class="stack">
-          <section><h2>Query name</h2><input id="qName" type="text" placeholder="Required: name this query" spellcheck="false"></section>
           <h2 id="sqlHead" title="One SELECT, or several statements separated by ; that end with a SELECT (its result is the output)">SQL <small class="muted" style="text-transform:none;letter-spacing:0">Tab / Shift+Tab indent · Ctrl+Space suggestions</small></h2>
           <div id="sqlBox">
             <div class="log-more-row"><a href="#" class="log-more" id="sqlMore">Show Less</a></div>
             <div id="sql" class="more"></div>
-            <div class="row synrow"><button id="synLib" class="ghost" title="Open the SQL syntax and function reference in its own window">Syntax Library</button></div>
-            <div id="sqlErr" class="err" hidden style="font-size:12.5px;margin-top:4px"></div>
+            <div class="row synrow"><button id="runSql" title="Left-click to run highlighted query.&#10;Shift + Left-click to run all queries in sequence."><svg viewBox="0 0 9 10" aria-hidden="true"><path d="M0 0 9 5 0 10z"/></svg>Run</button><button id="synLib" class="ghost" title="Open the SQL syntax and function reference in its own window">Syntax Library</button></div>
           </div>
           <section class="stack"><h2>Activity</h2><div class="progress"><i id="bar"></i></div>
             <div class="lights" title="Engine worker threads: green = ready / idle, blue = reading or computing, red = writing">
@@ -132,31 +148,56 @@ Click a field: insert it in the SQL">Imported Tables</h2>
 <script src="../js/core/worker-lights.js"></script>
 <script>
 // Transform = a list of SQL queries (each one SELECT or a script ending in a SELECT; server/data-engine/Core/Script.cs). The
-// Output dataset name box edits the selected query's output; every ticked query builds data/source/<its output>/ (Arrow
-// parts). Saved in pipeline/pipeline.json as { version: 3, queries: [{ id, name, sql, output, run }] } (ui/js/pipeline/runner.js).
+// Output dataset name box edits the selected query's output; every query builds data/clean/<its output>/ (Arrow
+// parts). Saved in transform/transform.json as { version: 3, queries: [{ id, name, sql, output, run }] } (ui/js/pipeline/runner.js).
 const { $, esc } = UI;
 // Input datasets: click expands the field list, Shift+click inserts the dataset name; click a field to insert it.
 const open = new Set();
 const fhit = col => col.toLowerCase().includes($('fsAll').value.trim().toLowerCase());
 let ctx, pipe = { version: 3, queries: [] }, sel = -1, dirty = false, saveT;
-// Auto-save: every edit schedules a write of pipeline.json shortly after typing stops.
-const touch = () => { dirty = true; clearTimeout(saveT); saveT = setTimeout(() => save().catch(e => UI.toast('Auto-save failed: ' + e.message, 'err')), 600); };
+// Auto-save: every edit schedules a write of transform/transform.json shortly after typing stops.
+const touch = () => { dirty = true; clearTimeout(saveT); saveT = setTimeout(() => save().catch(e => ctx.log('Auto-save failed: ' + e.message, 'err')), 600); };
 const FILE = () => PipelineRunner.file(ctx);
 // A query's datasets: every CREATE TABLE name AS ... saves CLEAN_name (PipelineRunner.tables).
 // Field type groups (the same marks and colours as Dashboard Studio's Data window).
 const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, DATE = /DATE|TIME/i;
 const kindOf = t => NUMERIC.test(t) ? 'num' : DATE.test(t) ? 'date' : 'text';
 const GROUPS = [['num', 'Numbers', '#'], ['text', 'Text', 'Aa'], ['date', 'Dates', 'D']];
-const problems = () => PipelineRunner.problems(pipe, importedDs().map(d => d.name));
 // XXX (the new query's placeholders) is marked red in the editor until a dataset name replaces it.
 const xxxMarks = text => [...text.replace(/--[^\n]*|'(?:[^']|'')*'/g, m => ' '.repeat(m.length)).matchAll(/\bXXX\b/gi)]
-  .map(m => ({ pos: m.index, end: m.index + 3, line: text.slice(0, m.index).split('\n').length, code: 'PLACEHOLDER', message: 'Replace XXX: select it, then Shift+click a dataset on the left.' }));
+  .map(m => ({ pos: m.index, end: m.index + 3, line: text.slice(0, m.index).split('\n').length, code: 'PLACEHOLDER', message: 'Replace XXX: select it, then Shift+click a dataset on the right.' }));
 // Dataset and field lists are alphabetical (queries keep their own order).
 const abc = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true });
 const importedDs = () => (ctx?.cfg.datasets || []).filter(d => Projects.stageOf(d) === 'imported').sort((a, b) => abc(a.name, b.name));
 const cur = () => pipe.queries[sel];
+// Views for the engine: the datasets plus every named query as a table (PipelineRunner.queryViews); never the open query.
+const allViews = () => PipelineRunner.queryViews(pipe, ctx?.cfg.datasets || [], cur());
+// CREATE TABLE names may not be an imported table's name (marked red; Activity says why).
+function sameNameMarks(text) {
+  const imp = new Set(importedDs().map(d => d.name.toUpperCase()));
+  const blank = text.replace(/--[^\n]*|'(?:[^']|'')*'/g, m => ' '.repeat(m.length));
+  return [...blank.matchAll(/\bCREATE\s+(?:GLOBAL\s+TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?("?)([A-Za-z_][\w$#]*)\1/gi)]
+    .filter(m => imp.has(m[2].toUpperCase()))
+    .map(m => { const pos = m.index + m[0].length - m[2].length - m[1].length; return { pos, end: pos + m[2].length, line: text.slice(0, pos).split('\n').length, code: 'TABLE_NAME', message: `CREATE TABLE names can't be the same as imported table names: ${m[2]} is an imported table.` }; });
+}
 const named = q => !!(q && (q.name || '').trim());
-const locked = () => !named(cur()) || $('sql').querySelector('textarea').readOnly;
+const locked = () => !cur() || $('sql').querySelector('textarea').readOnly;
+// A query's name = the table its CREATE TABLE makes (no name box). No CREATE TABLE: the name stays as it was.
+const CREATE_RX = /\bCREATE\s+(?:GLOBAL\s+TEMPORARY\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?("?)([A-Za-z_][\w$#]*)"?/gi;
+const blankOut = text => text.replace(/--[^\n]*|'(?:[^']|'')*'/g, m => ' '.repeat(m.length));
+const nameFromSql = sql => { const m = [...blankOut(sql || '').matchAll(CREATE_RX)][0]; return m && !/^XXX$/i.test(m[2]) ? m[2].toUpperCase() : null; };
+// CREATE TABLE only once per query: the second one is marked red and Activity says why.
+const twoCreateMarks = text => [...blankOut(text).matchAll(CREATE_RX)].slice(1).map(m => ({ pos: m.index, end: m.index + m[0].length, line: text.slice(0, m.index).split('\n').length, code: 'TWO_CREATES', message: 'CREATE TABLE can only be used once in a query.' }));
+// Errors go to Activity (no notifications in this window): each SQL error is written once, when it first appears.
+let shownErrs = new Set();
+// A duplicate column is one problem however many copies are marked: written once (keyed by its message, not its line).
+const logErrs = errs => {
+  const now = new Map();
+  for (const e of errs) { const k = e.code === 'DUPLICATE_COLUMN' ? e.message : (e.line ? `Line ${e.line}: ` : '') + e.message; if (!now.has(k)) now.set(k, (e.line ? `Line ${e.line}: ` : '') + e.message); }
+  for (const [k, m] of now) if (!shownErrs.has(k)) ctx?.log(m, 'err');
+  shownErrs = new Set(now.keys());
+};
+const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { console.error(e); ctx?.log(e.message || String(e), 'err'); } };
 
 // Likely missing comma in a SELECT list: "SELECT A B FROM ..." is valid SQL (B renames A), so the engine says nothing.
 // When B is itself a column name of an input dataset and there is no AS, it is marked: write a comma, or AS B to rename.
@@ -184,17 +225,46 @@ function missingCommas(text) {
   return out;
 }
 
+// The same output column twice in one SELECT list (e.g. A.ID and B.ID with no aliases): every copy is marked red until each
+// name is unique (give one an alias: B.ID AS B_ID).
+function duplicateCols(text) {
+  const out = [], blank = blankOut(text);
+  const lineOf = p => text.slice(0, p).split('\n').length;
+  for (const m of blank.matchAll(/\bSELECT\b(?:\s+(?:DISTINCT|UNIQUE|ALL)\b)?([\s\S]*?)\bFROM\b/gi)) {
+    const at = m.index + m[0].length - 4 - m[1].length; let depth = 0, start = at;
+    const items = [];
+    for (let i = at; i <= at + m[1].length; i++) {
+      const ch = blank[i];
+      if (ch === '(') depth++; else if (ch === ')') depth--;
+      else if ((ch === ',' && !depth) || i === at + m[1].length) { items.push([start, blank.slice(start, i)]); start = i + 1; }
+    }
+    const seen = new Map();
+    for (const [p, item] of items) {
+      // output name: AS alias / trailing alias, else a plain column (last part of t.col); expressions without alias are skipped
+      let r = item.match(/^([\s\S]*?\S)\s+(?:AS\s+)?("[^"]+"|[A-Za-z_][\w$#]*)\s*$/i), name, off;
+      if (r && !/^(AS|DISTINCT)$/i.test(r[2]) && !/[.]$/.test(r[1])) { name = r[2]; off = item.lastIndexOf(r[2]); }
+      else if ((r = item.match(/^\s*(?:("[^"]+"|[A-Za-z_][\w$#]*)\.)?("[^"]+"|[A-Za-z_][\w$#]*)\s*$/))) { name = r[2]; off = item.lastIndexOf(r[2]); }
+      else continue;
+      const key = name.replace(/"/g, '').toUpperCase(); if (key === '*') continue;
+      const pos = p + off, e = { pos, end: pos + name.length, line: lineOf(pos), code: 'DUPLICATE_COLUMN', message: `Duplicate column name ${name.replace(/"/g, '')} in SELECT: give each one its own alias (... AS NEW_NAME).` };
+      if (seen.has(key)) { const first = seen.get(key); if (!first.marked) { out.push(first.e); first.marked = true; } out.push(e); }
+      else seen.set(key, { e, marked: false });
+    }
+  }
+  return out;
+}
+
 const ed = SqlEditor.mount($('sql'), {
-  onChange: v => { const q = cur(); if (q) { q.sql = v; touch(); renderSoon(); } },   // the list shows the tables it saves
+  onChange: v => { const q = cur(); if (q) { q.sql = v; const n = nameFromSql(v); if (n) q.name = n; touch(); renderSoon(); } },   // the list shows the tables it saves
   // Live syntax / name check by the engine (plus the missing-comma check); the first error is shown under the editor.
   check: async text => {
     if (!ctx) return [];
-    const errs = await Engine.check(text, Engine.views(ctx.cfg.datasets || [])) || [];
-    const xs = xxxMarks(text);
+    const errs = await Engine.check(text, allViews()) || [];
+    const xs = [...xxxMarks(text), ...sameNameMarks(text), ...twoCreateMarks(text), ...duplicateCols(text)];
     return [...xs, ...errs.filter(e => !xs.some(x => e.pos >= x.pos && e.pos < x.end)), ...missingCommas(text).filter(x => !errs.some(e => e.pos === x.pos))].sort((a, b) => a.pos - b.pos);
   },
-  onCheck: errs => { const e = errs[0], el = $('sqlErr'); el.hidden = !e; el.textContent = e ? (e.line ? `Line ${e.line}: ` : '') + e.message : ''; },
-  words: () => ({ tables: (ctx?.cfg.datasets || []).map(d => d.name),
+  onCheck: errs => logErrs(errs),
+  words: () => ({ tables: [...Object.keys(allViews()), ...pipe.queries.map(q => (q.name || "").trim()).filter(Boolean)],   // datasets + query / CREATE TABLE names (green)
                   columns: [...new Set((ctx?.cfg.datasets || []).flatMap(d => (d.columns || []).map(c => c.name)))],
                   fields: Object.fromEntries((ctx?.cfg.datasets || []).map(d => [d.name, (d.columns || []).map(c => c.name)])) }),
 });
@@ -207,22 +277,13 @@ function render() {
         return g.length ? `<div class="fgh" data-grp="${k}">${label}<small>${g.length}</small></div>` + g.map(c => `<div class="fld ${k}" data-col="${esc(c.name)}" data-grp="${k}" title="Click to insert"${fhit(c.name) ? '' : ' hidden'}><span title="${esc(c.name)} (${esc(c.type)})"><span class="t">${mark}</span>${esc(c.name)}</span><small>${esc(c.type)}</small></div>`).join('') : '';
       }).join('') : '')).join('') || '<div class="muted">Nothing imported. Import data first.</div>';
   fgroups();
-  $('qList').innerHTML = pipe.queries.map((q, i) => `<div data-i="${i}" draggable="true" title="Drag to reorder" class="${i === sel ? 'sel' : ''}"><span class="q"><input type="checkbox" class="qrun" data-run="${i}" ${q.run ? 'checked' : ''} title="Ticked: runs on Run Selected Queries and on Update"><span class="n">${i + 1}</span><span class="qn">${named(q) ? esc(q.name) : '<span class="muted" style="font-weight:400">blank</span>'}</span></span>${(ts => { const s = qState(q); return `<small class="st-${s}" title="${ts.length ? `Saves ${esc(ts.join(', '))}` : 'Saves no table'}">${s === 'none' ? 'not run' : s === 'run' ? 'running' : 'clean'}</small>`; })(PipelineRunner.tables(q.sql).filter(t => t.ok).map(t => t.name))}</div>`).join('') || '<div class="muted">No queries yet.</div>';
+  $('qList').innerHTML = pipe.queries.map((q, i) => `<div data-i="${i}" draggable="true" title="Drag to reorder" class="${i === sel ? 'sel' : ''}"><span class="q"><span class="n">${i + 1}</span><span class="qn">${named(q) ? esc(q.name) : '<span class="muted" style="font-weight:400">blank</span>'}</span></span>${(ts => { const s = qState(q); return `<span class="qr"><span class="qdel" data-del="${i}" title="Delete this query"><svg viewBox="0 0 24 24"><path d="M5.3 3.9 12 10.6l6.7-6.7 1.4 1.4-6.7 6.7 6.7 6.7-1.4 1.4-6.7-6.7-6.7 6.7-1.4-1.4 6.7-6.7-6.7-6.7z"/></svg></span><small class="st-${s}" title="${ts.length ? `Saves ${esc(ts.join(', '))}` : 'Saves no table'}">${s === 'none' ? 'not run' : s === 'run' ? 'running' : 'clean'}</small></span>`; })(PipelineRunner.tables(q.sql).filter(t => t.ok).map(t => t.name))}</div>`).join('') || '<div class="muted">No queries yet.</div>';
   $('none').hidden = sel >= 0; $('editor').hidden = sel < 0;
-  $('del').disabled = sel < 0;
-  const ticked = PipelineRunner.selected(pipe), bad = problems();
-  $('run').disabled = !ticked.length || bad.length > 0;
-  $('run').title = !ticked.length ? 'Tick at least one query' : bad.length ? bad[0].msg
-    : `Run ${ticked.map(q => `"${q.name}" (saves ${PipelineRunner.tables(q.sql).map(t => t.name).join(', ')})`).join(', ')}`;
-  // The SQL can only be edited or previewed once the query is named (empty box outlined red).
-  const q = cur(), noName = !!q && !named(q), need = noName, ta = $('sql').querySelector('textarea');
-  $('qName').classList.toggle('bad', noName);
-  if (ta) { ta.readOnly = need; ta.title = noName ? 'Enter a query name first' : ''; }
-  $('sql').style.opacity = need ? '.5' : '';
+  $('del').disabled = !pipe.queries.length;
 }
 function select(i, quiet) {
   sel = i; const q = cur();
-  ed.value = q ? q.sql : ''; $('qName').value = q ? q.name || '' : '';
+  ed.value = q ? q.sql : ''; shownErrs = new Set();
   render();
   if (!quiet) previewQuery(q);
 }
@@ -231,9 +292,7 @@ $('dsList').onclick = ev => {
   const f = ev.target.closest('[data-col]'); if (f) { if (sel >= 0 && !locked()) insertField(f.dataset.col); return; }
   const el = ev.target.closest('[data-ds]'); if (!el) return;
   if (ev.shiftKey) {
-    // The cursor in Query name: the dataset name goes there (replacing only the selected text); else into the SQL.
-    if (document.activeElement === $('qName') && sel >= 0) { const o = $('qName'); o.setRangeText(el.dataset.ds, o.selectionStart, o.selectionEnd, 'end'); o.dispatchEvent(new Event('input')); return; }
-    if (sel >= 0 && !locked()) ed.insert(el.dataset.ds); return;
+    if (sel >= 0 && !locked()) insertWord(el.dataset.ds); return;
   }
   const n = el.dataset.ds; open.has(n) ? open.delete(n) : open.add(n); render();
   previewTable(n);
@@ -243,14 +302,29 @@ $('dsList').onclick = ev => {
 // with nothing after the caret on that line:
 //   on an empty indented line   -> the field goes there (the field above, if any, gets its missing comma);
 //   at the end of a listed field -> a comma is added to it and the field goes on a new line, same indent.
-// So every field but the last ends with a comma. Anywhere else the field replaces the selection / goes at the caret.
+// So every field but the last ends with a comma. After an open ( (e.g. SUM(|) and anywhere else the field replaces the selection / goes at the caret.
+// Shift+click insert (tables, queries, fields): a selection is replaced; with no selection, the word the cursor is in or
+// touching (the text between spaces, line breaks, commas, brackets or ;) is replaced; otherwise it goes at the cursor.
+function insertWord(name) {
+  const ta = $('sql').querySelector('textarea'), v = ta.value, a = ta.selectionStart, b = ta.selectionEnd;
+  if (a === b) {
+    const stop = /[\s,();]/;
+    let s = a, e = a;
+    while (s > 0 && !stop.test(v[s - 1])) s--;
+    while (e < v.length && !stop.test(v[e])) e++;
+    if (e > s) { ta.focus(); ta.setSelectionRange(s, e); }
+  }
+  ed.insert(name);
+}
 function insertField(name) {
   const ta = $('sql').querySelector('textarea'), v = ta.value, p = ta.selectionStart;
-  const plain = () => ed.insert(name);
+  const plain = () => insertWord(name);
   if (ta.selectionEnd !== p) return plain();
   const ls = v.lastIndexOf('\n', p - 1) + 1, le = (i => i < 0 ? v.length : i)(v.indexOf('\n', p));
   const before = v.slice(ls, p);
   if (v.slice(p, le).trim()) return plain();
+  // Inside a function call, e.g. SUM(| : an open ( left of the caret on this line -> the field goes at the caret, no new line.
+  if ((before.match(/\(/g) || []).length > (before.match(/\)/g) || []).length) return plain();
   // Walk up: listed fields (one indent in), then the SELECT line.
   const lineAt = end => { const s = v.lastIndexOf('\n', end - 1) + 1; return { s, e: end, t: v.slice(s, end) }; };
   let up = ls - 1, prev = null, select = null;
@@ -287,16 +361,21 @@ addEventListener('dblclick', ev => {
   while (a < b && /\s/.test(el.value[a])) a++;
   if (a !== el.selectionStart || b !== el.selectionEnd) el.setSelectionRange(a, b);
 }, true);
-// Tick a query: it runs on Run Selected and Update. Click a row: edit that query.
+// Trash can: delete that query (same question as Delete). Click a row: edit that query.
 $('qList').onclick = ev => {
-  const cb = ev.target.closest('[data-run]'); if (cb) { const q = pipe.queries[+cb.dataset.run]; q.run = cb.checked; touch(); render(); ctx.log(`${named(q) ? q.name : 'blank'}: ${q.run ? 'runs' : 'does not run'} on Run Selected and Update`); return; }
+  const d = ev.target.closest('[data-del]'); if (d) { ev.stopPropagation(); delQuery(+d.dataset.del); return; }
+  // Shift+click a query: insert its name in the SQL at the cursor (it can be used as a table).
+  if (ev.shiftKey) { const r = ev.target.closest('[data-i]'), q = r && pipe.queries[+r.dataset.i]; if (q && named(q) && sel >= 0 && !locked()) insertWord(q.name.trim()); return; }
   const el = ev.target.closest('[data-i]'); if (el) select(+el.dataset.i);
 };
-// Query names are upper case with _ for spaces, as you type.
-$('qName').oninput = () => { const o = $('qName'), p = o.selectionStart, u = o.value.toUpperCase().replace(/\s/g, '_'); if (u !== o.value) { o.value = u; o.setSelectionRange(p, p); } const q = cur(); if (!q) return; q.name = o.value; touch(); render(); };
+$('qList').onmousedown = ev => { if (ev.shiftKey) ev.preventDefault(); };   // Shift+click keeps the editor focus
+// New: CREATE TABLE NEW_TABLE_01 (the first number no query, imported table or dataset uses).
 $('add').onclick = () => {
-  pipe.queries.push({ id: crypto.randomUUID(), name: '', sql: 'CREATE TABLE XXX AS\nSELECT *\nFROM XXX', run: true });
-  touch(); select(pipe.queries.length - 1); $('qName').focus();
+  const used = new Set([...(ctx?.cfg.datasets || []).map(d => d.name.toUpperCase()),
+    ...pipe.queries.flatMap(q => [(q.name || '').toUpperCase(), ...PipelineRunner.tables(q.sql || '').flatMap(t => [String(t.table || '').toUpperCase(), String(t.name || '').toUpperCase()])])]);
+  let k = 1, nm; do { nm = `NEW_TABLE_${String(k++).padStart(2, '0')}`; } while (used.has(nm) || used.has('CLEAN_' + nm));
+  pipe.queries.push({ id: crypto.randomUUID(), name: nm, sql: `CREATE TABLE ${nm} AS\nSELECT *\nFROM XXX`, run: true });
+  touch(); select(pipe.queries.length - 1); $('sql').querySelector('textarea').focus();
 };
 // Drag a query up or down the list to reorder it; the selection follows the selected query.
 let dragFrom = -1;
@@ -312,11 +391,35 @@ $('qList').addEventListener('drop', ev => {
   const c = cur(), [q] = pipe.queries.splice(from, 1); pipe.queries.splice(to, 0, q);
   touch(); sel = pipe.queries.indexOf(c); render();
 });
-$('del').onclick = UI.guard(async () => {
-  const q = cur();
-  if (!await UI.confirm(`Are you sure you want to delete the query "${named(q) ? q.name.trim() : 'blank'}"?`, { danger: true, ok: 'Delete' })) return;
-  pipe.queries.splice(sel, 1);
-  touch(); select(Math.min(sel, pipe.queries.length - 1));
+// Deleting a query also deletes the table(s) it saved: the CLEAN_ folder on disk and its entry in the project.
+async function dropTables(qs) {
+  const names = new Set(qs.flatMap(q => PipelineRunner.tables(q.sql || '').map(t => t.name.toUpperCase())));
+  if (!names.size) return;
+  const ds = (await ctx.reload()).datasets || [], gone = ds.filter(d => names.has(d.name.toUpperCase()) && Projects.stageOf(d) !== 'imported');
+  if (!gone.length) return;
+  for (const d of gone) await DNFS.remove(d.path, { recursive: !/\.(parquet|arrow)$/.test(d.path) }).catch(e => ctx.log(`Could not delete ${d.path}: ${e.message}`, 'err'));
+  await Projects.update(ctx.folder, { datasets: ((await ctx.reload()).datasets || []).filter(d => !gone.some(g => g.name === d.name)) });
+  for (const d of gone) ctx.log(`Deleted table ${d.name} (${d.path})`, 'warn');
+  await ctx.reload(); await loadBuilt();
+}
+const delQuery = guard(async i => {
+  const q = pipe.queries[i]; if (!q) return;
+  if (!await UI.confirm(`Are you sure you want to delete the query "${named(q) ? q.name.trim() : 'blank'}" and its table?`, { danger: true, ok: 'Delete' })) return;
+  pipe.queries.splice(i, 1);
+  await dropTables([q]);
+  touch(); if (!pipe.queries.length) return $('add').click();   // never empty: the last one deleted -> a new one
+  select(Math.min(i < sel ? sel - 1 : sel, pipe.queries.length - 1));
+});
+// Delete All: a red flashing box; the user must type "I acknowledge" before Delete All is allowed.
+$('del').onclick = guard(async () => {
+  if (!pipe.queries.length) return;
+  const ok = await UI.dialog('Delete All', `<div class="ack-del"><p>Are you sure you want to delete ALL query output tables?</p>
+    <label class="field">Type <b>I acknowledge</b> to continue<input name="ack" type="text" required pattern="I acknowledge" autocomplete="off" spellcheck="false"></label></div>`,
+    [{ label: 'Cancel', value: false, kind: 'ghost' }, { label: 'Delete All', value: f => f.ack.value === 'I acknowledge', kind: 'danger', submit: true }]);
+  if (!ok) return;
+  const n = pipe.queries.length;
+  const all = pipe.queries.splice(0, n); await dropTables(all); touch(); $('add').click();   // a new one in place of them
+  ctx.log(`Deleted all ${n} queries.`, 'warn');
 });
 
 // Preview: the selected query's output, or a source dataset. Top 100 rows plus the total row count; for a script
@@ -337,10 +440,10 @@ async function preview(label, sql) {
   let dots = 0; const calc = () => info(`Running${'.'.repeat(dots++ % 4 + 1)}`);
   calc(); const tick = setInterval(calc, 500);
   try {
-    const r = await Engine.preview(sql, { views: Engine.views(ctx.cfg.datasets || []), limit: 100 });
+    const r = await Engine.preview(sql, { views: allViews(), limit: 100 });
     if (my !== pseq) { st.done(`Previewed ${label} (replaced by a newer preview)`); return; }
     // The grid asks for the next 100 rows as the reader nears the end (the query runs again with a larger limit).
-    const views = Engine.views(ctx.cfg.datasets || []);
+    const views = allViews();
     last = { cols: r.cols, rows: r.rows, title: label, total: r.count, more: async at => (await Engine.preview(sql, { views, limit: at + 100 })).rows.slice(at) }; showTable();
     info(`${UI.num(r.count)} rows · ${r.cols.length} columns · ${UI.ms(performance.now() - t0)}`);
     st.done(`Previewed ${label}: ${UI.num(r.count)} rows`);
@@ -350,8 +453,23 @@ async function preview(label, sql) {
 }
 function fit() { const w = $('result').querySelector('.pgrid'); if (w) w.style.height = Math.max(200, innerHeight - w.getBoundingClientRect().top - 20) + 'px'; }
 // Imported Tables list: grows with what is expanded, up to the window's middle, then scrolls (at least 100px).
-function fitDs() { const l = $('dsList'); l.style.maxHeight = Math.max(100, innerHeight / 2 - (l.getBoundingClientRect().top + $('dsList').closest('.main').scrollTop)) + 'px'; }
+// Input Tables, Query Output Tables and Scheduled Queries: each section a third of the window; its list scrolls inside.
+function fitDs() {
+  const third = innerHeight / 3;
+  for (const id of ['dsList', 'qList']) {
+    const l = $(id), sec = l.closest('section'), head = l.getBoundingClientRect().top - sec.getBoundingClientRect().top;
+    l.style.height = l.style.maxHeight = Math.max(60, Math.floor(third - head - 25)) + 'px';
+  }
+}
 addEventListener('resize', () => { fit(); fitDs(); });
+// Side panel: drag the separator to resize it (200px up to the window width minus 400px); back to 400px on reload.
+$('sideGrip').addEventListener('pointerdown', ev => {
+  ev.preventDefault(); const main = document.querySelector('.main'), right = main.getBoundingClientRect().right;
+  document.body.classList.add('resizing');
+  const move = e => { const w = Math.round(Math.max(200, Math.min(innerWidth - 400, right - e.clientX - 40))); main.style.setProperty('--side', w + 'px'); fit(); };
+  const up = () => { document.body.classList.remove('resizing'); removeEventListener('pointermove', move); removeEventListener('pointerup', up); fitDs(); };
+  addEventListener('pointermove', move); addEventListener('pointerup', up);
+});
 fitDs();
 // SQL Show More / Show Less (like the activity log): the editor opens doubled (Show Less halves it, Show More doubles it again).
 $('sqlMore').onclick = ev => { ev.preventDefault(); ev.target.textContent = $('sql').classList.toggle('more') ? 'Show Less' : 'Show More'; fit(); };
@@ -375,13 +493,13 @@ function showTable() {
 $('synLib').onclick = () => {
   const W = Math.min(1600, screen.availWidth), H = 800, L = (screen.availLeft ?? 0) + screen.availWidth - W, T = (screen.availTop ?? 0) + screen.availHeight - H;
   const w = window.open('syntax-library.html', 'dn-syntax', `popup,width=${W},height=${H},left=${L},top=${T}`);
-  if (!w) return UI.toast('The browser blocked the window. Allow pop-ups for this site.', 'err');
+  if (!w) return ctx.log('The browser blocked the window. Allow pop-ups for this site.', 'err');
   try { w.resizeTo(W, H); w.moveTo(L, T); } catch {}
   w.focus();
 };
 
 async function save() { clearTimeout(saveT); pipe.version = 4; pipe.updated = new Date().toISOString(); pipe.rev = (pipe.rev || 0) + 1; await DNFS.writeJSON(FILE(), pipe); await PipelineRunner.writeSql(ctx, pipe); dirty = false; }
-// Query status: running (during Run Selected); clean = every CLEAN_ table it saves exists in data/source AND its SQL is
+// Query status: running (during Update); clean = every CLEAN_ table it saves exists in data/clean AND its SQL is
 // unchanged since it built them (q.cleanSql, saved with the pipeline; queries built before this was kept count on the
 // tables alone); else not run.
 const running = new Set(); let built = new Set();
@@ -392,40 +510,70 @@ function qState(q) {
   const ts = PipelineRunner.tables(q.sql).filter(t => t.ok).map(t => t.name.toUpperCase());
   return ts.length && ts.every(t => built.has(t)) ? 'clean' : 'none';
 }
-$('run').onclick = UI.guard(async () => {
-  await save();
-  $('run').disabled = true;
-  const sel = PipelineRunner.selected(pipe);
-  const names = PipelineRunner.selected(pipe).flatMap(q => PipelineRunner.tables(q.sql).map(t => t.name)).join(', ');
+// Shift held while the mouse is over Run: the label reads "Run All" (the row is right-aligned, so the button grows left).
+{
+  const b = $('runSql'), label = [...b.childNodes].find(n => n.nodeType === 3);
+  let over = false;
+  const show = shift => { label.textContent = over && shift ? 'Run All' : 'Run'; };
+  b.addEventListener('mouseenter', ev => { over = true; show(ev.shiftKey); });
+  b.addEventListener('mousemove', ev => show(ev.shiftKey));
+  b.addEventListener('mouseleave', () => { over = false; show(false); });
+  addEventListener('keydown', ev => { if (ev.key === 'Shift') show(true); });
+  addEventListener('keyup', ev => { if (ev.key === 'Shift') show(false); });
+  addEventListener('blur', () => show(false));
+}
+// Run: click = the highlighted SQL (nothing highlighted: the whole query); Shift + click: every query in list order as one script (tables made by
+// earlier queries are there for later ones; the last result shows in Preview; nothing is saved).
+// Run builds the query's table(s) (CLEAN_..., status "clean") and previews the result; Shift = Run All, every query in list
+// order. Highlighted SQL is only previewed (a piece of a query builds nothing).
+$('runSql').addEventListener('click', guard(async ev => {
+  const ta = $('sql').querySelector('textarea');
+  const part = !ev.shiftKey && ta.selectionEnd > ta.selectionStart ? ta.value.slice(ta.selectionStart, ta.selectionEnd).trim() : '';
+  if (part) { $('runSql').disabled = true; try { await preview('highlighted SQL', part); } finally { $('runSql').disabled = false; } return; }
+  const qs = ev.shiftKey ? pipe.queries.filter(q => (q.sql || '').trim()) : (cur() && (cur().sql || '').trim() ? [cur()] : []);
+  if (!qs.length) return ctx.log(ev.shiftKey ? 'No queries to run.' : 'Write a query first.', 'err');
+  await build(qs);
+}));
+async function build(qs) {
+  clearTimeout(saveT); await save();
+  $('runSql').disabled = true;
+  const pb = $('bar').parentElement, bar = p => $('bar').style.width = `${Math.round(p)}%`;
+  const total = qs.length; let doneQ = 0;
+  const show = f => { pb.classList.remove('busy'); bar(100 * (doneQ + f) / total); };
+  pb.classList.add('busy'); bar(0);
+  const st = ctx.step(`Running ${total === 1 ? `"${qs[0].name}"` : `all ${total} queries`}…`);
   try {
-    // Progress bar: the whole run. Each ticked query is an equal share; inside it the engine's job % (rows read, then
-    // rows written). The busy animation only while nothing is known yet.
-    const pb = $('bar').parentElement, bar = p => $('bar').style.width = `${Math.round(p)}%`;
-    const total = sel.length; let doneQ = 0;
-    const show = f => { pb.classList.remove('busy'); bar(100 * (doneQ + f) / total); };
-    pb.classList.add('busy'); bar(0);
-    const st = ctx.step(`Running selected queries (${names})…`);
-    const rec = await PipelineRunner.run(ctx, pipe, (m, l) => ctx.log(m, l), null, j => { if (j.progress != null) show(j.progress); },
-      (q, s) => { if (s === 'start') { running.add(q); if (doneQ) show(0); } else { running.delete(q); q.cleanSql = q.sql; doneQ++; built = new Set([...built, ...PipelineRunner.tables(q.sql).filter(t => t.ok).map(t => t.name.toUpperCase())]); show(0); } render(); })   // one query at a time: running, then clean
-      .catch(e => { st.fail(`Run failed: ${e.message}`); throw e; }).finally(() => pb.classList.remove('busy'));
-    if (!rec.ok) { st.fail(`Run failed: ${rec.error}`); throw new Error(`Run failed: ${rec.error}`); }
+    const rec = await PipelineRunner.run(ctx, { ...pipe, only: qs }, (m, l) => ctx.log(m, l), null, j => { if (j.progress != null) show(j.progress); },
+      (q, s) => {
+        if (s === 'start') { running.add(q); if (doneQ) show(0); }
+        else { running.delete(q); q.cleanSql = q.sql; doneQ++; built = new Set([...built, ...PipelineRunner.tables(q.sql).filter(t => t.ok).map(t => t.name.toUpperCase())]); show(0); }
+        render();
+      }).finally(() => pb.classList.remove('busy'));
+    if (!rec.ok) { st.fail(`Run failed: ${rec.error}`); return; }
     await save();
-    bar(100); st.done(`Built ${names}`); UI.toast(`${names} built`, 'ok');
+    bar(100); st.done(`Built ${rec.outputs.map(o => o.name).join(', ')}`);
     setTimeout(() => bar(0), 1200);
-  } finally { running.clear(); await ctx.reload(); await loadBuilt(); render(); previewQuery(cur()); }
-});window.addEventListener('beforeunload', ev => { if (dirty) { ev.preventDefault(); ev.returnValue = ''; } });
+  } finally {
+    running.clear(); $('runSql').disabled = false;
+    await ctx.reload(); await loadBuilt(); render();
+    const last = qs[qs.length - 1], t = PipelineRunner.tables(last.sql).find(x => x.ok);
+    if (t && built.has(t.name.toUpperCase())) previewTable(t.name);
+  }
+}
+window.addEventListener('beforeunload', ev => { if (dirty) { ev.preventDefault(); ev.returnValue = ''; } });
 
 (async () => {
   try {
     ctx = await ModulePage.init('pipeline', 'Transform');
     pipe = await PipelineRunner.load(ctx);
+    for (const q of pipe.queries) { const n = nameFromSql(q.sql); if (n) q.name = n; }   // names come from CREATE TABLE
     await loadBuilt();
     for (const q of pipe.queries) if (q.cleanSql == null && qState(q) === 'clean') q.cleanSql = q.sql;   // built before this was kept: today's SQL is the baseline, so an edit shows "not run"
     // No queries yet: start one, so the next steps are naming the query and the output dataset.
     if (!pipe.queries.length) { $('add').click(); return; }
-    select(Math.max(0, pipe.queries.findIndex(q => q.run)), true);
+    select(0, true);
     const first = importedDs()[0]; if (first) previewTable(first.name);
-  } catch (e) { UI.toast(e.message, 'err'); $('none').textContent = e.message; }
+  } catch (e) { ctx?.log(e.message, 'err'); $('none').textContent = e.message; }
 })();
 </script>
 </body>

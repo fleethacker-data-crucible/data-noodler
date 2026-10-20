@@ -1,7 +1,7 @@
 // Source files OUTSIDE the project (local or network drives), through the server's import API.
 // Global: ExternalSource. Needs dn-fs.js (window.DN_TOKEN).
 //   const info = await ExternalSource.probe('\\\\server\\share\\orders.csv')   { size, modified }  (throws a plain-English error)
-//   ExternalSource.url(src)                       URL DuckDB can read in place (range reads, token in the query)
+//   ExternalSource.url(src)                       URL the engine can read in place (range reads, token in the query)
 //   await ExternalSource.copy(src, 'workspace/projects/x/temp/orders.csv', (done, total) => …)   copies into the project
 //   ExternalSource.drive(src)                     'X:' or '\\server\share'
 //   await ExternalSource.verify(E, aSql, bSql, { values })   compares two sources: columns, types, rows, values
@@ -47,7 +47,7 @@ const ExternalSource = (() => {
   // Compares two SQL sources (e.g. read_parquet(...)). values = also compare every column's contents
   // (order-independent hash per column). Returns { ok, checks: [{ name, ok, detail }] }.
   async function verify(E, aSql, bSql, { values = true, types = true } = {}) {
-    const desc = async s => (await E.query(`DESCRIBE SELECT * FROM ${s}`)).rows.map(r => ({ name: r[0], type: r[1] }));
+    const desc = async s => (await E.describe(`SELECT * FROM ${s}`)).map(c => ({ name: c.name, type: c.type }));
     const [ca, cb] = await Promise.all([desc(aSql), desc(bSql)]);
     const checks = [];
     const add = (name, ok, detail) => checks.push({ name, ok, detail });
@@ -62,8 +62,9 @@ const ExternalSource = (() => {
     const [na, nb] = [await count(aSql), await count(bSql)];
     add('Row count', na === nb, `${na.toLocaleString()} vs ${nb.toLocaleString()}`);
     if (values && nameDiff < 0 && na === nb) {
-      // One streaming pass per file: XOR of row hashes per column (no rows kept in memory).
-      const sums = async s => (await E.query(`SELECT bit_xor(hash(COLUMNS(*)))::VARCHAR FROM ${s}`)).rows[0];
+      // One streaming pass per file: sum of ORA_HASH values per column, as text (no rows kept in memory).
+      const cq = n => `"${String(n).replace(/"/g, '""')}"`;
+      const sums = async s => (await E.query(`SELECT ${ca.map(c => `TO_CHAR(SUM(ORA_HASH(${cq(c.name)})))`).join(', ')} FROM ${s}`)).rows[0];
       const [ha, hb] = [await sums(aSql), await sums(bSql)];
       const bad = ca.filter((c, i) => ha[i] !== hb[i]).map(c => c.name);
       add('Values', !bad.length, bad.length ? `differ in: ${bad.slice(0, 5).join(', ')}${bad.length > 5 ? ` (+${bad.length - 5} more)` : ''}` : 'match');

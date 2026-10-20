@@ -289,7 +289,7 @@ namespace NativeDataEngine
     {
         readonly Op child; readonly List<BExpr> groups; readonly List<AggSpec> aggs;
         public Op Child { get { return child; } }
-        public void ChildRefs(HashSet<int> n) { BExpr.RefsOf(groups, n); foreach (AggSpec a in aggs) { if (a.Arg != null) a.Arg.Refs(n); if (a.Arg2 != null) a.Arg2.Refs(n); if (a.Filter != null) a.Filter.Refs(n); } }
+        public void ChildRefs(HashSet<int> n) { BExpr.RefsOf(groups, n); foreach (AggSpec a in aggs) { if (a.Arg != null) a.Arg.Refs(n); if (a.Arg2 != null) a.Arg2.Refs(n); if (a.Filter != null) a.Filter.Refs(n); if (a.Order != null) a.Order.Refs(n); } }
         public AggOp(Op child, List<BExpr> groups, List<AggSpec> aggs, Schema s) { this.child = child; this.groups = groups; this.aggs = aggs; Schema = s; }
         public override IEnumerable<Batch> Run(ExecCtx ctx)
         {

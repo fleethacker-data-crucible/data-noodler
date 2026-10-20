@@ -18,16 +18,6 @@
   .list small { color: var(--muted); white-space: nowrap; }
   .list small.tag-raw, .list div.sel small.tag-raw { color: var(--err); }         /* raw file */
   .list small.tag-imp, .list div.sel small.tag-imp { color: var(--warn); }        /* imported dataset: gold */
-  /* Engine worker lights (same as the Benchmark page): green idle, blue reading / computing, red writing. */
-  .lights { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 5px 0; }
-  .lights .lbl { text-transform: uppercase; letter-spacing: .06em; }
-  #lights { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
-  #lights i, .lights .key i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; background: var(--border); transition: background .1s; }
-  .lights .key { display: inline-flex; align-items: center; gap: 4px; }
-  .lights .key i { width: 10px; height: 10px; margin-left: 8px; }
-  #lights i.l0, .lights i.l0 { background: var(--ok); }
-  #lights i.l1, .lights i.l1 { background: var(--blue); }
-  #lights i.l2, .lights i.l2 { background: var(--err); }
   .drop { border: 1px dashed var(--border); border-radius: 4px; padding: 27px 14px 26px; text-align: center; color: var(--muted); margin: 8px 0; }
   .drop.over { border-color: var(--blue); color: var(--text); }
   aside { display: flex; flex-direction: column; gap: 24px; }
@@ -41,16 +31,21 @@
   #dsName { width: 100%; box-sizing: border-box; }
   .req { color: var(--err); }
   /* Long file / dataset names: one line with ..., the size stays on the right (full name on hover). */
-  .list > div { display: flex; gap: 8px; min-width: 0; overflow: hidden; }
+  .list > div { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; height: 24px; min-height: 24px; max-height: 24px; box-sizing: border-box; padding-top: 0; padding-bottom: 0; }
   .list > div > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .list > div > small { flex: none; white-space: nowrap; }
+  /* Red X (as in Transform): on the row under the mouse, deletes that raw file / imported table. */
+  .list .qr { display: flex; align-items: center; gap: 8px; flex: none; }
+  .list .qdel { flex: none; display: inline-flex; visibility: hidden; color: #ff2a2a; cursor: pointer; }
+  .list > div:hover .qdel { visibility: visible; }
+  .list .qdel svg { width: 16px; height: 16px; fill: currentColor; }
   #dsName.bad, #dsName.bad:focus { border-color: var(--err); outline: 1px solid var(--err); }
-  #dsNameMsg { color: var(--err); font-size: 12px; }
+  #dsNameMsg { color: var(--err); font-size: 12px; margin-left: 8px; }
+  #dsName { width: 320px; max-width: 100%; }
   #rowCount { display: inline-block; min-width: 13ch; }
   /* Activity log: 5 lines visible, newest on top. */
-  .progress.busy > i { width: 30% !important; animation: busy 1.2s linear infinite; }
-  @keyframes busy { from { margin-left: -30%; } to { margin-left: 100%; } }
   h2.hw { color: var(--text); font-weight: 700; }
+  #empty[hidden] + #editor { margin-top: 0; }   /* Schema level with Raw source files */
   #schema select, #schema select option, #schema select option:checked { font-weight: 400; }
   #schema select.bad { border-color: #f08c00; outline: 1px solid #f08c00; }
   .warn-box { color: var(--warn); font-size: 13px; }
@@ -60,6 +55,16 @@
   /* No page scroll bars (the page still scrolls with the wheel); only the tables show bars. */
   html, body, .main { scrollbar-width: none; }
   html::-webkit-scrollbar, body::-webkit-scrollbar, .main::-webkit-scrollbar { display: none; }
+  /* Importing popup: a progress bar and the rows counted so far (while a source loads / is counted / is imported). */
+  #impPop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .45); }
+  #impPop[hidden] { display: none; }
+  #impPop .box { width: 360px; max-width: calc(100vw - 32px); background: var(--panel, #1e1e1e); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
+  #impPop .ttl { font-weight: 600; margin-bottom: 10px; }
+  #impPop .pb { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+  #impPop .pb > i { display: block; height: 100%; width: 0; background: var(--ok, #4cc27f); transition: width .2s; }
+  #impPop .pb.busy > i { width: 30%; animation: impBusy 1.2s linear infinite; }
+  @keyframes impBusy { from { margin-left: -30%; } to { margin-left: 100%; } }
+  #impPop .rows { margin-top: 8px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -82,19 +87,18 @@
           </div>
           <div class="list" id="sources"></div>
         </section>
-        <section id="nameBox" hidden>
-          <h2>Table Name <span class="req" title="Required">*</span></h2>
-          <input id="dsName" type="text" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="UPPER_CASE_NAME" required><span id="dsNameMsg" hidden></span>
-        </section>
         <section>
-          <h2>Tables</h2>
+          <h2>Imported Tables</h2>
           <div class="list" id="datasets"></div>
         </section>
       </aside>
       <section class="stack">
         <div id="empty" class="muted">Pick a source file on the left, or upload one.</div>
         <div id="editor" hidden class="stack">
-          <div class="ok" id="howto"></div>
+          <section id="nameBox" hidden>
+            <h2>Table Name <span class="req" title="Required">*</span></h2>
+            <input id="dsName" type="text" pattern="[A-Za-z][A-Za-z0-9_]*" placeholder="UPPER_CASE_NAME" required><span id="dsNameMsg" hidden></span>
+          </section>
           <h2 class="hw">Schema</h2>
           <div id="schemaHost"><div class="pgrid" id="schemaBox">
             <div class="dt-bar"><input class="search" id="schemaSearch" type="search" placeholder="Search" spellcheck="false"><span class="muted dt-n" id="schemaN"></span><span style="flex:1"></span>
@@ -107,12 +111,7 @@
             <label class="field" id="tableLbl" hidden>Table<select id="table"></select></label>
             <div class="stats"><div class="stat"><label>Rows</label><b id="rowCount">-</b></div><div class="stat"><label>Columns</label><b id="colCount">-</b></div></div>
           </div>
-          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Arrow in data/imported (input for Transform)">Import</button><button id="delDs" class="danger" hidden>Delete</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
-          <div class="progress"><i id="bar"></i></div>
-          <div class="lights" title="Engine worker threads: green = ready / idle, blue = reading or computing, red = writing">
-            <span class="lbl">Workers</span><span id="lights"></span>
-            <span class="key"><i class="l0"></i>Idle<i class="l1"></i>Reading<i class="l2"></i>Writing</span>
-          </div>
+          <div class="row"><button id="import" title="Apply the column choices above and save the dataset as Arrow in data/imported (input for Transform)">Import</button><button id="validate" hidden>Check Type Changes</button><button id="resetTypes" class="ghost" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button><span id="status" class="muted"></span></div>
           <div class="log" id="log"></div>
           <h2 class="hw">Preview</h2>
           <div id="preview"></div>
@@ -133,6 +132,7 @@
   <footer><button id="extCancel" class="ghost">Cancel</button><button id="extGo">GO</button></footer>
 </dialog>
 
+<div id="impPop" hidden><div class="box"><div class="ttl" id="impTtl">Importing…</div><div class="pb" id="impPb"><i id="impBar"></i></div><div class="rows" id="impRows">0 rows</div></div></div>
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/engine-client.js"></script>
 <script src="../js/core/ui.js"></script>
@@ -141,9 +141,19 @@
 <script src="../js/core/module-page.js"></script>
 <script src="../js/import/external-source.js"></script>
 <script src="../js/grid/data-table.js"></script>
-<script src="../js/core/worker-lights.js"></script>
 <script>
 const { $, esc } = UI;
+// Importing popup (#impPop): shown while a source is counted (open / refresh) or imported; the rows counted so far live.
+const imp = {
+  show(title) { $('impTtl').textContent = title || 'Importing…'; $('impRows').textContent = '0 rows'; $('impBar').style.width = '0'; $('impPb').classList.add('busy'); $('impPop').hidden = false; },
+  set(rows, total, progress) {
+    $('impRows').textContent = `${UI.num(rows || 0)}${total ? ` of ${UI.num(total)}` : ''} rows`;
+    const f = progress != null ? progress : total ? (rows || 0) / total : null;
+    $('impPb').classList.toggle('busy', f == null);
+    if (f != null) $('impBar').style.width = `${Math.round(100 * Math.min(1, f))}%`;
+  },
+  hide() { $('impPop').hidden = true; },
+};
 // Plain-English hint shown next to each type in the Change Type list.
 const TYPE_HINT = { VARCHAR: 'text', BIGINT: 'whole number, very large', INTEGER: 'whole number', SMALLINT: 'small whole number (±32,767)',
   DOUBLE: 'number with decimals', 'DECIMAL(18,2)': 'money, 2 decimal places', 'DECIMAL(38,6)': 'exact number, 6 decimal places',
@@ -178,12 +188,12 @@ $('imode').onchange = UI.guard(async ev => {
 let rawSig = null;
 async function listSources(force = true) {
   let files = [];
-  try { files = (await DNFS.list(RAW())).filter(f => !f.dir); } catch {}
+  try { files = (await DNFS.list(RAW(), { quiet: !force })).filter(f => !f.dir); } catch {}
   const sig = files.map(f => `${f.name}|${f.size}|${f.modified}`).join('\n');
   if (!force && sig === rawSig) return files;
   rawSig = sig;
   $('sources').hidden = !files.length;
-  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${!cur?.ds && cur?.path === f.path ? 'sel' : ''}" title="${esc(f.name)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><small class="tag-raw">raw</small></div>`).join('');
+  $('sources').innerHTML = files.map(f => `<div data-p="${esc(f.path)}" class="${!cur?.ds && cur?.path === f.path ? 'sel' : ''}" title="${esc(f.name)}"><span>${esc(f.name)}${Engine.kind(f.name) ? '' : ' <small>(unsupported)</small>'}</span><span class="qr"><span class="qdel" data-del title="Delete this raw file from data/raw"><svg viewBox="0 0 24 24"><path d="M5.3 3.9 12 10.6l6.7-6.7 1.4 1.4-6.7 6.7 6.7 6.7-1.4 1.4-6.7-6.7-6.7 6.7-1.4-1.4 6.7-6.7-6.7-6.7z"/></svg></span><small class="tag-raw">raw</small></span></div>`).join('');
   return files;
 }
 const importedDs = cfg => (cfg.datasets || []).filter(d => d.source && d.source.kind !== 'pipeline').sort((a, b) => a.name.localeCompare(b.name));
@@ -191,7 +201,7 @@ async function listDatasets() {
   const cfg = await ctx.reload();
   // Imported datasets only (transform outputs live in Transform), A to Z.
   const list = importedDs(cfg);
-  $('datasets').innerHTML = list.map(d => `<div data-ds="${esc(d.name)}" class="${cur?.ds === d.name ? 'sel' : ''}" title="${esc(d.path)}"><span>${esc(d.name)}</span><small class="tag-imp">imported</small></div>`).join('') || '<div class="muted">None yet.</div>';
+  $('datasets').innerHTML = list.map(d => `<div data-ds="${esc(d.name)}" class="${cur?.ds === d.name ? 'sel' : ''}" title="${esc(d.path)}"><span>${esc(d.name)}</span><span class="qr"><span class="qdel" data-del title="Delete this imported table and its data files"><svg viewBox="0 0 24 24"><path d="M5.3 3.9 12 10.6l6.7-6.7 1.4 1.4-6.7 6.7 6.7 6.7-1.4 1.4-6.7-6.7-6.7 6.7-1.4-1.4 6.7-6.7-6.7-6.7z"/></svg></span><small class="tag-imp">imported</small></span></div>`).join('') || '<div class="muted">None yet.</div>';
   return list;
 }
 
@@ -218,6 +228,7 @@ drop.ondrop = UI.guard(async ev => { ev.preventDefault(); drop.classList.remove(
 $('sources').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-p]'); if (!el) return;
   const path = el.dataset.p;
+  if (ev.target.closest('[data-del]')) return delRaw(path);
   if (!Engine.kind(path)) return UI.toast('Unsupported file type. Use CSV, Parquet, Arrow or SQLite.', 'err');
   // The raw file itself (its own schema and preview); its imported datasets open from Imported Tables.
   await openReader({ path, label: path.split('/').pop() }, () => reader(path));
@@ -241,7 +252,6 @@ async function reader(src) {
 }
 // Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
 async function openReader(c, open) {   // c.table / c.ds + c.apply (a imported dataset: its saved column choices)
-  $('howto').innerHTML = `<b>TIP:</b> Check the schema, set the correct types and adjust the new field names as needed. When ready, click <b>Import</b> to convert this raw source (.csv, .sqlite, .parquet or .arrow) into an Arrow dataset (the fast working format of this project; Parquet / CSV / SQLite are for export).`;
   $('empty').hidden = true; $('editor').hidden = $('nameBox').hidden = false; live('Reading source…');
   const r = await open();
   cur = { ...c, reader: r };
@@ -249,8 +259,6 @@ async function openReader(c, open) {   // c.table / c.ds + c.apply (a imported d
   $('table').innerHTML = r.tables.map(t => `<option>${esc(t)}</option>`).join('');
   if (c.table && r.tables.includes(c.table)) $('table').value = c.table;
   // Delete: the imported dataset shown, or a raw file in data/raw (a linked file outside the project is never deleted).
-  $('delDs').hidden = !c.ds && !c.path;
-  $('delDs').title = c.ds ? `Delete the imported dataset ${c.ds} and its data files` : `Delete the raw file ${c.label} from data/raw`;
   // A imported dataset: the button re-runs its import (same name, its saved choices or any made now) instead of a new Import.
   $('import').textContent = c.ds ? 'Update' : 'Import';
   $('import').title = c.ds ? `Read the source again and replace ${c.ds} with the column choices above` : 'Apply the column choices above and save the dataset as Arrow in data/imported (input for Transform)';
@@ -323,11 +331,11 @@ async function loadTable(table) {
   const src = await cur.reader.sql(table);
   cur.table = table; cur.src = src; cur.rows = null;
   $('dsName').value = dsSlug(table || cur.label); checkName();
-  // Schema and preview together. The preview runs on one worker: LIMIT 100 then stops after the first rows instead of
+  // Schema and preview together. The preview runs on one worker: FETCH FIRST 100 ROWS ONLY then stops after the first rows instead of
   // splitting the whole file for a parallel scan (the row count below does that).
   // Preview: an imported dataset shows its own imported data (data/imported); a raw file shows the file.
   const psrc = cur.apply?.path ? Engine.src(cur.apply.path) : src;
-  const [cols, p] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), Engine.query(`SELECT * FROM ${psrc} LIMIT 100`, { workers: 1 })]);
+  const [cols, p] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), Engine.query(`SELECT * FROM ${psrc} FETCH FIRST 100 ROWS ONLY`, { workers: 1 })]);
   cur.cols = cols.map(c => { const n = c.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || c.name; return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
   // A imported dataset: the keep / type / name choices it was imported with (matched by source field name).
   const saved = cur.apply?.source?.columns;
@@ -340,15 +348,15 @@ async function loadTable(table) {
   renderSchema();
   $('colCount').textContent = cols.length; $('rowCount').textContent = '…';
   // The grid asks for the next 100 rows as the reader nears the end.
-  DataTable.show($('preview'), p.cols, p.rows, { title: cur.apply?.name || cur.label, more: async at => (await Engine.query(`SELECT * FROM ${psrc} LIMIT 100 OFFSET ${at}`, { workers: 1 })).rows });
-  // Row count: the engine splits the work across its workers (row groups / batches); no % is known, so the bar runs busy.
-  live(null); const st = ctx.step('Counting rows…'); $('bar').parentElement.classList.add('busy');
+  DataTable.show($('preview'), p.cols, p.rows, { title: cur.apply?.name || cur.label, more: async at => (await Engine.query(`SELECT * FROM ${psrc} OFFSET ${at} ROWS FETCH NEXT 100 ROWS ONLY`, { workers: 1 })).rows });
+  live(null); const st = ctx.step('Counting rows…');
   // Rows shows "Calculating" with 1-4 dots cycling every 500 ms.
   let dots = 0; const calc = () => $('rowCount').textContent = 'Calculating' + '.'.repeat(dots++ % 4 + 1);
   calc(); const dotTick = setInterval(calc, 500);
   let n;
-  try { n = await Engine.count(src); } catch (e) { st.fail(`Counting rows failed: ${e.message}`); throw e; }
-  finally { clearInterval(dotTick); $('bar').parentElement.classList.remove('busy'); }
+  imp.show(`Importing ${cur.apply?.name || cur.label}…`);
+  try { n = await Engine.countLive(src, undefined, j => imp.set(j.rowsProcessed, null, null)); imp.set(n, n, 1); /* the exact total: a CSV header line is read too */ } catch (e) { st.fail(`Counting rows failed: ${e.message}`); throw e; }
+  finally { clearInterval(dotTick); imp.hide(); }
   cur.rows = Number(n); $('rowCount').textContent = UI.num(n);
   st.done(`Counted ${UI.num(n)} rows`);
 }
@@ -421,21 +429,23 @@ $('schema').onchange = ev => {
   showValidate();
 };
 
-// SELECT list with renames and conversions. TRY_CAST so one bad value does not stop the import; checkTypes() counts them first.
+// Engine type name (the Change Type list) -> the Oracle type written in a CAST.
+const oraType = t => ({ VARCHAR: 'VARCHAR2(4000)', BIGINT: 'NUMBER(19)', DOUBLE: 'BINARY_DOUBLE' })[t] || String(t).replace(/^DECIMAL\b/, 'NUMBER');
+// CAST(x AS type DEFAULT NULL ON CONVERSION ERROR): a value that cannot convert becomes null instead of stopping the query.
+const tryCast = (c, t) => `CAST(${Engine.q(c)} AS ${oraType(t)} DEFAULT NULL ON CONVERSION ERROR)`;
+// SELECT list with renames and conversions. Bad values become null so one does not stop the import; checkTypes() counts them first.
 const selectList = () => cur.cols.filter(c => c.keep).map(c =>
-  `${c.newType === c.type ? Engine.q(c.name) : `TRY_CAST(${Engine.q(c.name)} AS ${c.newType})`} AS ${Engine.q(c.newName)}`).join(', ');
+  `${c.newType === c.type ? Engine.q(c.name) : tryCast(c.name, c.newType)} AS ${Engine.q(c.newName)}`).join(', ');
 
 // Values that are not empty in the source but would become empty after the type change.
 async function checkTypes() {
   const changed = cur.cols.filter(c => c.keep && c.newType !== c.type);
   if (!changed.length) { ctx.log('No type changes to check.'); return 0; }
-  // Busy bar + live log line with timer while the engine scans the source.
-  const st = ctx.step(`Checking ${changed.length} type change${changed.length > 1 ? 's' : ''}…`), pb = $('bar').parentElement;
-  pb.classList.add('busy');
+  // Live log line with timer while the engine scans the source.
+  const st = ctx.step(`Checking ${changed.length} type change${changed.length > 1 ? 's' : ''}…`);
   let r;
-  try { r = await Engine.query(`SELECT ${changed.map((c, i) => `count(*) FILTER (WHERE ${Engine.q(c.name)} IS NOT NULL AND TRY_CAST(${Engine.q(c.name)} AS ${c.newType}) IS NULL) AS c${i}`).join(', ')} FROM ${cur.src}`); }
+  try { r = await Engine.query(`SELECT ${changed.map((c, i) => `COUNT(CASE WHEN ${Engine.q(c.name)} IS NOT NULL AND ${tryCast(c.name, c.newType)} IS NULL THEN 1 END) AS c${i}`).join(', ')} FROM ${cur.src}`); }
   catch (e) { st.fail(`Type check failed: ${e.message}`); throw e; }
-  finally { pb.classList.remove('busy'); }
   const bad = changed.map((c, i) => [c, Number(r.rows[0][i])]).filter(([, n]) => n > 0);
   // Orange border on each Change Type box that cannot convert cleanly.
   const badSet = new Set(bad.map(([c]) => c));
@@ -446,7 +456,7 @@ async function checkTypes() {
   for (let k = 0; k < bad.length; k++) {
     const [c, n] = bad[k];
     let ex = [];
-    try { ex = (await Engine.query(`SELECT DISTINCT CAST(${Engine.q(c.name)} AS VARCHAR) FROM ${cur.src} WHERE ${Engine.q(c.name)} IS NOT NULL AND TRY_CAST(${Engine.q(c.name)} AS ${c.newType}) IS NULL LIMIT 3`)).rows.map(r => `"${r[0]}"`); } catch {}
+    try { ex = (await Engine.query(`SELECT DISTINCT CAST(${Engine.q(c.name)} AS VARCHAR2(4000)) FROM ${cur.src} WHERE ${Engine.q(c.name)} IS NOT NULL AND ${tryCast(c.name, c.newType)} IS NULL FETCH FIRST 3 ROWS ONLY`)).rows.map(r => `"${r[0]}"`); } catch {}
     const msg = `Type check: ${c.name} → ${c.newType}: ${UI.num(n)} value(s) cannot convert${ex.length ? `, e.g. ${ex.join(', ')}` : ''}. ${TYPE_NEED[c.newType] || ''} They would become null.`;
     if (k === bad.length - 1) st.done(msg, 'warn'); else ctx.log(msg, 'warn');
   }
@@ -487,15 +497,16 @@ async function runImport(direct) {
   const folder = 'imported', dest = `${ctx.dir}/data/${folder}/${name}`;
   const cfg = await ctx.reload();
   if (cfg.datasets?.some(d => d.name === name) && cur.ds !== name && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;   // Update on a imported dataset replaces it without asking
-  const t0 = performance.now(), bar = p => $('bar').style.width = `${Math.round(p)}%`;
-  importing = true; $('import').disabled = true; bar(5);
+  const t0 = performance.now();
+  importing = true; $('import').disabled = true;
   try {
     const wst = ctx.step('Writing Arrow…');
+    imp.show(`Importing ${name}…`); imp.set(0, cur.rows, 0);
     const w = await Engine.write({ sql: `SELECT ${select} FROM ${cur.src}`, dest, meta: { source: cur.ext?.src || cur.path } }, j => {
-      if (j.progress != null) bar(5 + 85 * j.progress);
+      imp.set(j.rowsProcessed, cur.rows, j.progress);
       wst.set(`${j.stage || 'Working'}… ${UI.num(j.rowsProcessed)} of ${UI.num(cur.rows)} rows${j.progress != null ? ` (${Math.round(100 * j.progress)}%)` : ''}`);
-    }).catch(e => { wst.fail(`Write failed: ${e.message}`); throw e; });
-    bar(90); wst.done('Written'); ctx.log('Checking columns and row count…');
+    }).catch(e => { wst.fail(`Write failed: ${e.message}`); throw e; }).finally(() => imp.hide());
+    wst.done('Written'); ctx.log('Checking columns and row count…');
     // Check what was written (from the dataset's own manifest): header count, order and names, every source row.
     const rows = w.rowCount, columns = Engine.columnsOf(w), parts = w.files;
     const got = columns.map(c => c.name), diff = want.findIndex((n, i) => n !== got[i]);
@@ -530,10 +541,9 @@ async function runImport(direct) {
     await Projects.touchModule(ctx.folder, 'import');
     ctx.log(`Imported ${cur.label}${cur.table ? `:${cur.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
     UI.toast(`Imported ${name}`, 'ok');
-    cur.ds = name; cur.apply = (await ctx.reload()).datasets.find(d => d.name === name); $('delDs').hidden = false; $('import').textContent = 'Update';
-    bar(100);
+    cur.ds = name; cur.apply = (await ctx.reload()).datasets.find(d => d.name === name); $('import').textContent = 'Update';
     await listDatasets();
-  } finally { live(null); importing = false; checkName(); setTimeout(() => bar(0), 1200); }
+  } finally { live(null); importing = false; checkName(); }
 }
 $('import').onclick = UI.guard(() => runImport(false));
 
@@ -541,25 +551,24 @@ $('import').onclick = UI.guard(() => runImport(false));
 $('datasets').onclick = UI.guard(async ev => {
   const el = ev.target.closest('[data-ds]'); if (!el) return;
   const d = (await ctx.reload()).datasets.find(x => x.name === el.dataset.ds);
+  if (d && ev.target.closest('[data-del]')) return delDataset(d);
   if (d) await openDataset(d);
 });
-$('delDs').onclick = UI.guard(async () => {
-  if (!cur?.ds && cur?.path) return delRaw(cur.path);
-  const d = (await ctx.reload()).datasets.find(x => x.name === cur?.ds); if (!d) return;
+async function delDataset(d) {
   if (!await UI.confirm(`Delete dataset "${d.name}" and its data ${d.parts ? 'parts' : 'file'}?`, { danger: true, ok: 'Delete' })) return;
   await DNFS.remove(d.path, { recursive: !/\.(parquet|arrow)$/.test(d.path) }).catch(() => {});
   await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(x => x.name !== d.name) });
   ctx.log(`Deleted dataset ${d.name}`);
-  cur = null; $('editor').hidden = $('nameBox').hidden = true; $('empty').hidden = false;
+  if (cur?.ds === d.name) { cur = null; $('editor').hidden = $('nameBox').hidden = true; $('empty').hidden = false; }
   await listDatasets(); tried.clear(); await autoOpen();
-});
+}
 // A raw file in data/raw (imported datasets made from it keep their data; Update then needs the file again).
 async function delRaw(path) {
   const name = path.split('/').pop(), users = importedDs(await ctx.reload()).filter(d => d.source?.path === path).map(d => d.name);
   if (!await UI.confirm(`Delete the raw file ${name} from data/raw?${users.length ? ` ${users.join(', ')} ${users.length > 1 ? 'were' : 'was'} imported from it: the imported data stays, but Update cannot read this file again.` : ''}`, { danger: true, ok: 'Delete' })) return;
   await DNFS.remove(path);
   ctx.log(`Deleted raw file ${name}`, 'ok');
-  cur = null; $('editor').hidden = $('nameBox').hidden = true; $('empty').hidden = false;
+  if (!cur?.ds && cur?.path === path) { cur = null; $('editor').hidden = $('nameBox').hidden = true; $('empty').hidden = false; }
   await listSources(); tried.clear(); await autoOpen();
 }
 // Nothing shown yet: the first imported dataset (A to Z); with none, the first raw file. Runs on load, after a delete,

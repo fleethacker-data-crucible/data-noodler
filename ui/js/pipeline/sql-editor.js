@@ -14,18 +14,25 @@
 //     vars() -> Set of the page's own variable names (purple), d3names() -> Set of D3 exports (d3.<name> blue).
 //   readOnly: shown and coloured, not editable (D3 Studio's generated variables).
 const SqlEditor = (() => {
-  const KW = ('select from where group by having order limit offset join inner left right full outer cross on using as and or not in is null ' +
-    'between like ilike case when then else end distinct all union with asc desc nulls first last cast try_cast true false exclude filter over ' +
-    'partition rows range describe').split(' ');
-  const FN = ('count sum avg mean min max any_value first last string_agg median quantile_cont stddev variance count_if bool_and bool_or ' +
-    'row_number rank dense_rank lag lead first_value last_value ntile coalesce ifnull nullif greatest least abs round floor ceil sqrt ln log ' +
-    'exp pow power mod lower upper length trim ltrim rtrim substr substring left right replace concat concat_ws contains starts_with ends_with ' +
-    'strpos split_part lpad rpad regexp_matches regexp_replace regexp_extract year month day quarter dayofweek hour minute second date_part ' +
-    'date_trunc date_add date_diff strftime strptime make_date last_day today now hash choose add_seconds if typeof read_parquet read_csv read_sqlite range').split(' ');
-  const TYPES = 'varchar bigint integer int smallint tinyint double decimal date timestamp boolean'.split(' ');
+  // Oracle SQL (.claude/docs/SQL_DIALECT.md): keywords, functions and types.
+  const KW = ('select distinct unique all from where group by having order asc desc nulls first last offset fetch next rows row only ' +
+    'join inner left right full outer cross on using as and or not in is null between like escape exists any some case when then else end ' +
+    'union intersect minus with rollup cube grouping sets pivot for over partition dual rownum true false interval year month day hour ' +
+    'minute second cast conversion error within sysdate systimestamp current_date current_timestamp sqlerrm sqlcode ' +
+    'create global temporary table view force noforce read check option index bitmap replace drop cascade constraints purge ' +
+    'if insert into values update set delete truncate merge matched alter add modify column rename to constraint primary key foreign ' +
+    'references default generated always identity commit rollback begin exception others raise execute immediate prompt describe').split(' ');
+  const FN = ('abs ceil floor round trunc mod remainder power sqrt exp ln log sign sin cos tan asin acos atan atan2 sinh cosh tanh bitand greatest least ' +
+    'lower upper initcap length substr instr replace translate concat lpad rpad ltrim rtrim trim chr ascii reverse soundex ' +
+    'regexp_like regexp_substr regexp_replace regexp_instr regexp_count nvl nvl2 nullif coalesce decode lnnvl ' +
+    'to_char to_date to_timestamp to_number add_months months_between last_day next_day extract ' +
+    'ora_hash count sum avg min max median stddev stddev_samp stddev_pop variance var_samp var_pop any_value approx_count_distinct stats_mode ' +
+    'listagg percentile_cont percentile_disc row_number rank dense_rank percent_rank cume_dist ntile lag lead first_value last_value ' +
+    'raise_application_error read_dataset read_parquet range').split(' ');
+  const TYPES = 'varchar2 nvarchar2 varchar char nchar clob nclob number integer int smallint decimal numeric float binary_float binary_double real double precision date timestamp boolean'.split(' ');
   const KWS = new Set(KW), FNS = new Set(FN), TYS = new Set(TYPES);
   // Words that can follow a table name but are not its alias.
-  const NOT_ALIAS = new Set([...KW, 'natural', 'lateral', 'qualify', 'window', 'pivot', 'unpivot', 'intersect', 'except', 'set', 'values']);
+  const NOT_ALIAS = new Set([...KW, 'natural', 'unpivot', 'set', 'values', 'start', 'connect', 'model']);
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const IND = '    ';
   const isW = c => /[A-Za-z0-9_]/.test(c || '');
@@ -122,6 +129,10 @@ const SqlEditor = (() => {
     function tokSql(t) {
       // Source tables and their aliases (FROM / JOIN name [AS] alias) are coloured as tables (green).
       const tables = new Set([...words().tables.map(x => x.toLowerCase()), ...aliases(words().fields || {}).keys()]);
+      // Field names in a SELECT list (SELECT ... FROM) are white even when the name is also a keyword / function (DATE, LEVEL):
+      // a known column not followed by "(", or any name right after "t.".
+      const cols = new Set((words().columns || []).map(x => x.toLowerCase()));
+      let inSel = false;
       const out = [], re = /(--[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|('(?:[^']|'')*'?)|("(?:[^"]|"")*"?)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)|([\s\S])/g;
       let m;
       while ((m = re.exec(t))) {
@@ -133,7 +144,10 @@ const SqlEditor = (() => {
         else if (num) h = `<span class="t-num">${s}</span>`;
         else if (id) {
           const w = id.toLowerCase(), next = t.slice(re.lastIndex).match(/^\s*\(/);
-          h = KWS.has(w) ? `<span class="t-kw">${s}</span>` : FNS.has(w) && next ? `<span class="t-fn">${s}</span>` : TYS.has(w) ? `<span class="t-ty">${s}</span>` : tables.has(w) ? `<span class="t-tb">${s}</span>` : esc(s);
+          if (w === 'select') inSel = true; else if (w === 'from') inSel = false;
+          const dotted = /\.\s*$/.test(t.slice(Math.max(0, m.index - 4), m.index));
+          if (inSel && w !== 'select' && !next && (cols.has(w) || dotted)) h = esc(s);
+          else h = KWS.has(w) ? `<span class="t-kw">${s}</span>` : FNS.has(w) && next ? `<span class="t-fn">${s}</span>` : TYS.has(w) ? `<span class="t-ty">${s}</span>` : tables.has(w) ? `<span class="t-tb">${s}</span>` : esc(s);
         } else h = esc(s);
         out.push([m.index, s, h]);
       }
@@ -277,7 +291,7 @@ const SqlEditor = (() => {
         const tbl = new Set(wd.tables.map(t => t.toLowerCase()));
         const al = [...aliases(wd.fields || {}).keys()].filter(k => !tbl.has(k)).map(k => [k, 'alias']);
         const all = [...[...wd.tables.map(t => [t, 'dataset']), ...al].sort(abc), ...wd.columns.map(c => [c, 'column']).sort(abc),
-          ...[...KW.map(k => [k.toUpperCase(), 'keyword']), ...FN.map(f => [f, 'function'])].sort(abc)];
+          ...[...KW.map(k => [k.toUpperCase(), 'keyword']), ...FN.map(f => [f.toUpperCase(), 'function'])].sort(abc)];
         items = all.filter(([t]) => { const k = t.toLowerCase(); if (!k.startsWith(lw) || k === lw || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 300);
       }
       if (!items.length) return close();
@@ -322,6 +336,29 @@ const SqlEditor = (() => {
         if (ev.key === 'Tab' || (ev.key === 'Enter' && chosen)) { ev.preventDefault(); return accept(); }
         if (ev.key === 'Enter') close();
         if (ev.key === 'Escape') { ev.preventDefault(); return close(); }
+      }
+      // Auto-close: ( [ { " ' type their closer with the cursor in between (a selection is wrapped); typing the closer
+      // right before the same closer steps over it; Backspace between an empty pair deletes both.
+      const PAIRS = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'" };
+      if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && !ta.readOnly) {
+        const a = ta.selectionStart, b = ta.selectionEnd, v = ta.value;
+        if ((ev.key === ')' || ev.key === ']' || ev.key === '}' || ev.key === '"' || ev.key === "'") && a === b && v[a] === ev.key) {
+          ev.preventDefault(); ta.setSelectionRange(a + 1, a + 1); return;
+        }
+        if (PAIRS[ev.key]) {
+          const close = PAIRS[ev.key], q = ev.key === '"' || ev.key === "'";
+          // a quote right after a letter / digit (e.g. it's) is typed alone
+          if (!(q && a === b && a > 0 && /\w/.test(v[a - 1]))) {
+            ev.preventDefault();
+            const inner = v.slice(a, b);
+            insert(ev.key + inner + close);
+            ta.setSelectionRange(a + 1, a + 1 + inner.length);
+            return;
+          }
+        }
+        if (ev.key === 'Backspace' && a === b && a > 0 && PAIRS[v[a - 1]] && v[a] === PAIRS[v[a - 1]]) {
+          ev.preventDefault(); ta.setSelectionRange(a - 1, a + 1); insert(''); return;
+        }
       }
       if (ev.key === 'Tab') {
         ev.preventDefault();

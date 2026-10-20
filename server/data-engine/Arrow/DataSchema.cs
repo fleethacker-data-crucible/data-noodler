@@ -84,7 +84,20 @@ namespace NativeDataEngine
                 case "DATE": return Date;
                 case "TIMESTAMP": case "DATETIME": case "TIMESTAMP_US": case "TIMESTAMP_MS": case "TIMESTAMP_S": case "TIMESTAMPTZ": case "TIMESTAMP WITH TIME ZONE": return Timestamp;
                 case "BOOLEAN": case "BOOL": case "LOGICAL": return Bool;
-                case "DECIMAL": case "NUMERIC":
+                // Oracle names
+                case "VARCHAR2": case "NVARCHAR2": case "NCHAR": case "CLOB": case "NCLOB": return Varchar;
+                case "BINARY_FLOAT": case "BINARY_DOUBLE": return Double;
+                case "NUMBER":
+                    {
+                        // NUMBER = any number (double); NUMBER(p) / NUMBER(p,0) = whole numbers; NUMBER(p,s) = decimal.
+                        if (args == null) return Double;
+                        string[] na = args.Split(',');
+                        int np = na[0].Trim() == "*" ? 38 : int.Parse(na[0].Trim(), CultureInfo.InvariantCulture);
+                        int ns = na.Length > 1 ? int.Parse(na[1].Trim(), CultureInfo.InvariantCulture) : 0;
+                        if (ns <= 0) return np <= 18 ? BigInt : Double;
+                        return Decimal(Math.Min(np, 38), ns);
+                    }
+                case "DECIMAL": case "NUMERIC": case "DEC":
                     if (args == null) return Decimal(18, 3);
                     string[] a = args.Split(',');
                     int p = int.Parse(a[0].Trim(), CultureInfo.InvariantCulture);
@@ -654,23 +667,61 @@ namespace NativeDataEngine
             if (t == "false" || t == "f" || t == "no" || t == "n" || t == "0") { v = false; return true; }
             v = false; return false;
         }
-        private static readonly string[] DateFormats = { "yyyy-MM-dd", "yyyy-M-d", "yyyy/MM/dd", "yyyy/M/d" };
-        private static readonly string[] TimeFormats = {
-            "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd'T'HH:mm",
-            "yyyy-MM-dd HH:mm:ss.FFFFFFF", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF", "yyyy-MM-dd'T'HH:mm:ssK", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK",
-            "yyyy-MM-dd HH:mm:ssK", "yyyy-MM-dd HH:mm:ss.FFFFFFFK", "yyyy/MM/dd HH:mm:ss", "yyyy-MM-dd" };
+        // Date forms, tried in order: ISO year first; then US month first (M/d/yyyy), then day first (d/M/yyyy) when the month
+        // reading fails (day > 12); dotted dates are day first (d.M.yyyy); month names (Jan / January, with or without the weekday).
+        private static readonly string[] DateFormats = {
+            "yyyy-M-d", "yyyy/M/d", "yyyy.M.d", "yyyy-MMM-d", "yyyy-MMMM-d", "yyyy MMM d", "yyyy MMMM d",
+            "M/d/yyyy", "M-d-yyyy", "M/d/yy", "M-d-yy",
+            "d/M/yyyy", "d-M-yyyy", "d/M/yy", "d-M-yy", "d.M.yyyy", "d.M.yy",
+            "d-MMM-yyyy", "d-MMM-yy", "d MMM yyyy", "d MMM yy", "d/MMM/yyyy", "d-MMMM-yyyy", "d MMMM yyyy", "d. MMMM yyyy",
+            "MMM d, yyyy", "MMM d yyyy", "MMM-d-yyyy", "MMMM d, yyyy", "MMMM d yyyy", "MMM. d, yyyy",
+            "ddd, MMM d, yyyy", "dddd, MMMM d, yyyy", "ddd MMM d yyyy", "ddd, d MMM yyyy", "dddd, d MMMM yyyy" };
+        // Every date form above followed by a time (24 h or 12 h with AM / PM, seconds and fractions optional), joined by
+        // a space or T, with an optional zone (Z, +01:00); plus the ISO forms with the zone straight after the seconds.
+        private static readonly string[] TimeFormats = BuildTimeFormats();
+        static string[] BuildTimeFormats()
+        {
+            string[] times = { "H:mm", "H:mm:ss", "H:mm:ss.FFFFFFF", "h:mm tt", "h:mm:ss tt", "h:mm:ss.FFFFFFF tt", "h:mmtt", "h:mm:sstt" };
+            var list = new List<string>();
+            foreach (string d in DateFormats)
+                foreach (string t in times)
+                {
+                    list.Add(d + " " + t); list.Add(d + " " + t + "K"); list.Add(d + " " + t + " K");
+                    if (d.StartsWith("yyyy")) { list.Add(d + "'T'" + t); list.Add(d + "'T'" + t + "K"); }
+                }
+            return list.ToArray();
+        }
+        static readonly DateTimeStyles DateStyles = DateTimeStyles.AllowWhiteSpaces;
         public static bool ParseDate(string s, out long days)
         {
-            DateTime d;
-            if (s.Length >= 8 && s.Length <= 10 && DateTime.TryParseExact(s.Trim(), DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) { days = Days(DateTime.SpecifyKind(d, DateTimeKind.Utc)); return true; }
-            days = 0; return false;
+            DateTime d; days = 0;
+            if (s.Length < 6 || s.Length > 40 || s.IndexOf(':') >= 0) return false;
+            string t = s.Trim();
+            if (DateTime.TryParseExact(t, DateFormats, CultureInfo.InvariantCulture, DateStyles, out d)) { days = Days(DateTime.SpecifyKind(d, DateTimeKind.Utc)); return true; }
+            return false;
         }
+        // Text with a time is tried against ~1,500 formats; a column repeats few distinct values, so results (hits and misses) are kept.
+        static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> TsMemo = new System.Collections.Concurrent.ConcurrentDictionary<string, long>();
+        const long TsMiss = long.MinValue;
         public static bool ParseTimestamp(string s, out long micros)
         {
-            DateTime d;
-            if (s.Length >= 10 && DateTime.TryParseExact(s.Trim(), TimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out d))
+            micros = 0;
+            if (s.IndexOf(':') < 0) return ParseTimestampRaw(s, out micros);
+            long m;
+            if (TsMemo.TryGetValue(s, out m)) { if (m == TsMiss) return false; micros = m; return true; }
+            bool ok = ParseTimestampRaw(s, out micros);
+            if (TsMemo.Count > 200000) TsMemo.Clear();
+            TsMemo[s] = ok ? micros : TsMiss;
+            return ok;
+        }
+        static bool ParseTimestampRaw(string s, out long micros)
+        {
+            DateTime d; micros = 0;
+            if (s.IndexOf(':') < 0) { long dd; if (!ParseDate(s, out dd)) return false; micros = dd * 86400000000L; return true; }   // a date alone = midnight
+            if (s.Length < 8 || s.Length > 60) return false;
+            if (DateTime.TryParseExact(s.Trim(), TimeFormats, CultureInfo.InvariantCulture, DateStyles | DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out d))
             { micros = Micros(DateTime.SpecifyKind(d, DateTimeKind.Utc)); return true; }
-            micros = 0; return false;
+            return false;
         }
 
         public static string JsonEscape(string s)

@@ -4,7 +4,7 @@
 // Older versions wrote one file per month (activity-YYYY-MM.log); the first write merges those in and removes them.
 const ProjectLog = (() => {
   const MAX = 1000;
-  const dir = folder => `workspace/projects/${folder}/logs`;
+  const dir = folder => `workspace/${folder}/logs`;   // folder = "<ws>/<project>"
   const file = folder => `${dir(folder)}/activity.log`;
   let queue = Promise.resolve(); // serialise appends from the same page
 
