@@ -68,7 +68,7 @@ const ProjectsView = (() => {
           <div class="pp-desc" data-act="desc" title="Click to edit">${p.description ? esc(p.description) : '<span class="muted">No description.</span>'}</div></div>
         <div class="pp-sec"><div class="wf" id="wf">${workflow(p)}</div></div>
         <div class="pp-sec"><div class="pcards" id="pcards"></div></div>
-        <div class="pp-actions"><button class="ghost" data-act="edit">Edit details</button><button class="ghost" data-act="archives"${p.broken ? ' disabled' : ''} title="Project snapshots (zipped): take, restore, delete">Archives</button><button class="danger" data-act="delete">Delete</button></div>
+        <div class="pp-actions"><button class="dev" data-act="dataStudio" title="Data Studio (in development)">Data Studio</button><button class="ghost" data-act="edit">Edit details</button><button class="ghost" data-act="archives"${p.broken ? ' disabled' : ''} title="Project snapshots (zipped): take, restore, delete">Archives</button><button class="danger" data-act="delete">Delete</button></div>
         <div class="pp-tabs"><span class="on">Activity</span></div>
         <div class="log" id="plog"></div>
       </div>`;
@@ -286,6 +286,7 @@ const ProjectsView = (() => {
     return { set: (phase, done, total) => { line.textContent = `${phase || 'Working'}... ${total ? `${UI.bytes(done)} of ${UI.bytes(total)} (${Math.floor(done * 100 / total)}%)` : ''}`; }, close: () => { d.close(); d.remove(); } };
   }
   const actions = {
+    dataStudio(p) { if (p && !p.broken) Windows.open('data_studio', p.folder); },
     async new() {
       if (!wsList.length) return UI.toast('Create a workspace first (Workspace + on the left).', 'err');
       await UserPicker.load();

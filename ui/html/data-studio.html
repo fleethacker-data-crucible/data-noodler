@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Data Studio</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<link rel="stylesheet" href="../css/data-studio.css">
+</head>
+<body>
+<div class="dst">
+  <main class="stage" id="stage">
+    <div class="typebar" id="types"><div class="type" data-act="nodes" title="Nodes"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="7" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="15" y="15" width="7" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 6h3a2 2 0 0 1 2 2v8a2 2 0 0 0 2 2" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Nodes</span></div><div class="type" data-act="settings" title="Data Studio settings"><svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Settings</span></div></div>
+    <div id="nodes"></div>
+    <div class="vbar">
+      <button class="ghost vreset" id="zReset" title="Back to 100%">Reset Zoom<small id="zPct">100%</small></button>
+      <button class="ghost vreset" id="sReset" title="Grid 0, 0 back to the window centre">Reset Scroll<small id="sPos">X 0  Y 0</small></button>
+    </div>
+  </main>
+</div>
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/menus.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/module-page.js"></script>
+<script src="../js/data-studio/studio.js"></script>
+</body>
+</html>

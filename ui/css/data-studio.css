@@ -1,0 +1,74 @@
+/* Data Studio (ui/html/data-studio.html): the node-based project workflow on the 24px grid (in development). */
+html, body { height: 100%; margin: 0; overflow: hidden; }
+* { scrollbar-width: thin; }
+.dst { position: fixed; inset: 0; }
+
+/* Stage: the 24px grid. */
+.stage { position: absolute; inset: 0; overflow: hidden; min-width: 0;
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px),
+                    linear-gradient(to bottom, color-mix(in srgb, var(--border) 30%, transparent) 1px, transparent 1px);
+  background-size: var(--gs, 24px) var(--gs, 24px); background-position: var(--gp, 0 0); }
+#nodes { position: absolute; inset: 0; z-index: 1; transform-origin: 0 0; }
+
+/* The bar on top. */
+.typebar { position: absolute; top: 24px; left: 50%; z-index: 6; transform: translateX(-50%); display: flex; gap: 6px; }
+.type { flex: none; width: 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 6px; border: 1px solid var(--border); border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 92%, #fff); cursor: pointer; font-size: 12px; color: var(--text-2); text-align: center; }
+.type span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.type svg { width: 26px; height: 26px; fill: var(--muted); color: var(--muted); }
+.type:hover { border-color: var(--muted); }
+.typebar { transition: opacity .5s ease; }
+.typebar.faded { opacity: 0; }
+body.nogrid .stage { background-image: none; }
+body.barbottom .typebar { top: auto; bottom: 24px; }
+
+/* Settings drop-down: OFF | ON toggles and pickers. */
+.tmenu { position: fixed; z-index: 60; width: 220px; padding: 8px; display: flex; flex-direction: column; gap: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 10px 30px #0008; }
+.tm-h { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text); }
+.optrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 20px; }
+.optrow + .optrow { margin-top: -5px; }
+.optrow > span:first-child { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.optrow select { box-sizing: border-box; height: 18px; max-height: 18px; padding: 0 6px 0 8px; font-size: 12px; justify-self: end; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); }
+.optrow .seg { display: inline-grid; grid-template-columns: 36px 36px; gap: 0; justify-self: end; border: 1px solid color-mix(in srgb, var(--muted) 60%, var(--bg)); border-radius: 4px; overflow: hidden; }
+.optrow .seg button { margin: 0; height: 18px; max-height: 18px; padding: 0 0 1px; display: flex; align-items: center; justify-content: center; line-height: 1; font-size: 12px; font-weight: 400; border: 0; border-radius: 0; box-shadow: none; outline: 0; background: none; color: var(--muted); cursor: pointer; }
+.optrow .seg button:hover { color: var(--text); }
+.optrow .seg button.on[data-on="1"] { background: var(--ok); color: #fff; }
+.optrow .seg button.on[data-on="0"] { background: var(--err); color: #fff; }
+
+/* Reset Zoom / Reset Scroll: 40px from the bottom, the value under the label; each fades out at its default. */
+.stage { cursor: default; }
+.stage.grabbing { cursor: grabbing; }
+.vbar { position: absolute; left: 50%; bottom: 40px; z-index: 7; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: none; }
+.vreset { pointer-events: auto; height: auto; min-width: 96px; padding: 5px 14px 6px; flex-direction: column; gap: 2px; transition: opacity .3s ease; }
+.vreset small { font-size: 11px; font-weight: 400; color: var(--text-2); white-space: pre; }
+.vreset.off { opacity: 0; pointer-events: none; }
+
+/* Nodes: 6 x 3 grid cells by default (size set in studio.js), a coloured header, ports centred on the left / right edges. */
+.node { position: absolute; box-sizing: border-box; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
+  box-shadow: 0 4px 14px #0006; cursor: grab; user-select: none; --nc: var(--blue); }
+.node.sel { border-color: var(--nc); box-shadow: 0 0 0 1px var(--nc), 0 4px 14px #0006; }
+.node.drag { cursor: grabbing; box-shadow: 0 0 0 1px var(--nc), 0 10px 28px #0008; z-index: 2; }
+.node .nh { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-bottom: 1px solid var(--border); border-radius: 4px 4px 0 0;
+  background: color-mix(in srgb, var(--nc) 22%, var(--panel)); font-size: 12px; color: var(--text); }
+.node .nh svg { width: 14px; height: 14px; flex: none; color: var(--nc); }
+.node .nh b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node .nb { flex: 1; padding: 6px 8px; font-size: 12px; color: var(--muted); }
+.port { position: absolute; top: 50%; z-index: 2; width: 12px; height: 12px; margin-top: -6px; box-sizing: border-box; border: 2px solid var(--nc); border-radius: 50%; background: var(--panel); cursor: crosshair; }
+.port.in { left: -6px; }
+.port.out { right: -6px; }
+.port:hover, .port.on { background: var(--nc); }
+.port.hot { background: var(--nc); transform: scale(1.4); box-shadow: 0 0 0 4px color-mix(in srgb, var(--nc) 35%, transparent); }
+.node.t-join { --nc: var(--orange, #d9822b); }
+.node.t-transform { --nc: var(--c5, #a463f2); }
+#wires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.wire { fill: none; stroke: var(--muted); stroke-width: 2; }
+.wire.live { stroke-dasharray: 6 4; }
+
+/* Resize handles: the edges and corners of a node (under the ports). */
+.node .rz { position: absolute; z-index: 1; }
+.node .rz.n, .node .rz.s { left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.node .rz.e, .node .rz.w { top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.node .rz.n { top: -3px; } .node .rz.s { bottom: -3px; } .node .rz.e { right: -3px; } .node .rz.w { left: -3px; }
+.node .rz.ne, .node .rz.nw, .node .rz.se, .node .rz.sw { width: 10px; height: 10px; }
+.node .rz.nw { left: -4px; top: -4px; cursor: nwse-resize; } .node .rz.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+.node .rz.ne { right: -4px; top: -4px; cursor: nesw-resize; } .node .rz.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
