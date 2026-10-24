@@ -1146,6 +1146,20 @@ function Handle-Site($req, $res, $rel, $ctx) {
         } else { $res.StatusCode = 403 }
         return $false
     }
+    # Live reload (ui/js/core/live-reload.js), polled every second: last-write ticks of the page's own ui/ files. Not logged.
+    # GET /api/dev/mtimes?paths=ui/html/a.html,ui/css/a.css -> { ok, mtimes: { <path>: ticks (0 = missing) } }
+    if ($rel -eq 'api/dev/mtimes') {
+        if (-not (Test-FsRequest $req)) { $res.StatusCode = 403; return $false }
+        $out = @{}
+        foreach ($p in ([string]$req.QueryString['paths']).Split(',')) {
+            $p = $p.Trim().TrimStart('/')
+            if (-not $p.StartsWith('ui/') -or $p.Contains('..')) { continue }
+            $full = Join-Path $root $p.Replace('/', '\')
+            $out[$p] = if (Test-Path -LiteralPath $full -PathType Leaf) { [IO.File]::GetLastWriteTimeUtc($full).Ticks } else { 0 }
+        }
+        Send-Json $res @{ ok = $true; mtimes = $out }
+        return $false
+    }
     # Polled by the Benchmark page's memory card: not logged.
     if ($rel -eq 'api/mem') {
         try { if (Test-FsRequest $req) { Send-Json $res (Get-BrowserMem) } else { $res.StatusCode = 403 } } catch { $res.StatusCode = 500 }
