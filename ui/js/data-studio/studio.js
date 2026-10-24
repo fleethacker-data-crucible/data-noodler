@@ -5,12 +5,13 @@
   let ctx, saveT = 0, dirty = false;   // the project (once loaded); pending save of the studio state
   // Data Studio settings (this browser).
   const PREFS = 'dn-data-studio-prefs';
-  let prefs = { grid: true, snap: true, barPos: 'Top', autoHide: false };
+  let prefs = { grid: true, snap: true, barPos: 'Top', autoHide: false, wire: 2 };
   try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(PREFS) || '{}') }; } catch {}
   const savePrefs = () => { try { localStorage.setItem(PREFS, JSON.stringify(prefs)); } catch {} };
   const applyPrefs = () => {
     document.body.classList.toggle('nogrid', !prefs.grid);
     document.body.classList.toggle('barbottom', prefs.barPos === 'Bottom');
+    document.body.style.setProperty('--ww', `${prefs.wire}px`);
     hideSoon();
   };
   // Auto Hide: the icon bar fades out once the mouse has been off it for 2s.
@@ -26,8 +27,15 @@
     const pick = (k, label, choices) => `<div class="optrow"><span>${label}</span><select data-k="${k}">${choices.map(c => `<option ${prefs[k] === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>`;
     const row = (k, label) => `<div class="optrow"><span>${label}</span><span class="seg"><button type="button" data-k="${k}" data-on="0" class="${prefs[k] ? '' : 'on'}">OFF</button><button type="button" data-k="${k}" data-on="1" class="${prefs[k] ? 'on' : ''}">ON</button></span></div>`;
     menu = document.createElement('div'); menu.className = 'tmenu';
-    menu.innerHTML = `<div class="tm-h">Data Studio</div>${row('autoHide', 'Auto Hide')}${pick('barPos', 'Icon Bar Position', ['Top', 'Bottom'])}${row('grid', 'Show Grid')}${row('snap', 'Snap to Grid')}`;
-    menu.onchange = e => { const k = e.target.dataset?.k; if (!k) return; prefs[k] = e.target.value; savePrefs(); applyPrefs(); place(btn); };
+    const slide = (k, label, min, max) => { const f = (prefs[k] - min) / (max - min); return `<div class="optrow"><span>${label}</span><span class="slide" style="--p:${f * 100}%;--pf:${f}"><span class="sl-tip">${prefs[k]}</span><input type="range" data-k="${k}" min="${min}" max="${max}" step="1" value="${prefs[k]}"><span class="sl-mm"><i>${min}</i><i>${max}</i></span></span></div>`; };
+    menu.innerHTML = `<div class="tm-h">Data Studio</div>${row('autoHide', 'Auto Hide')}${slide('wire', 'Connector Line Thickness', 1, 5)}${pick('barPos', 'Icon Bar Position', ['Top', 'Bottom'])}${row('grid', 'Show Grid')}${row('snap', 'Snap to Grid')}`;
+    menu.oninput = e => {   // sliders: live
+      const r = e.target; if (r.type !== 'range') return;
+      const sl = r.closest('.slide'), f = (r.value - r.min) / (r.max - r.min || 1);
+      sl.style.setProperty('--p', f * 100 + '%'); sl.style.setProperty('--pf', f); sl.querySelector('.sl-tip').textContent = r.value;
+      prefs[r.dataset.k] = +r.value; savePrefs(); applyPrefs();
+    };
+    menu.onchange = e => { const k = e.target.dataset?.k; if (!k || e.target.type === 'range') return; prefs[k] = e.target.value; savePrefs(); applyPrefs(); place(btn); };
     menu.onclick = e => {
       const b = e.target.closest('.seg button'); if (!b) return;
       prefs[b.dataset.k] = b.dataset.on === '1'; savePrefs(); applyPrefs();
@@ -62,7 +70,8 @@
     $('zReset').classList.toggle('off', Math.abs(zoom - 1) < 1e-6);
     // X / Y: the grid point at the window centre, in grid px
     $('sPos').textContent = `X ${Math.round(-offX / zoom)}  Y ${Math.round(-offY / zoom)}`;
-    $('sReset').classList.toggle('off', !Math.round(offX) && !Math.round(offY));
+    const c = home();   // Re-center fades out once the window is centred on it
+    $('sReset').classList.toggle('off', Math.round(offX + c.x * zoom) === 0 && Math.round(offY + c.y * zoom) === 0);
   }
   $('stage').addEventListener('wheel', e => {
     if (e.target !== $('stage') && !$('nodes').contains(e.target)) return;   // only over the grid and its nodes, never over UI
@@ -85,9 +94,14 @@
     st.addEventListener('pointermove', move); st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
   });
   $('zReset').onclick = () => { offX /= zoom; offY /= zoom; zoom = 1; applyView(); };   // about the window centre
-  $('sReset').onclick = () => { offX = 0; offY = 0; applyView(); };
+  // Re-center: the centre of all the nodes (their bounding box) to the window centre; no nodes = grid 0, 0.
+  function home() {
+    if (!nodes.length) return { x: 0, y: 0 };
+    const L = Math.min(...nodes.map(n => n.x)), T = Math.min(...nodes.map(n => n.y)), R = Math.max(...nodes.map(n => n.x + n.w)), B = Math.max(...nodes.map(n => n.y + n.h));
+    return { x: (L + R) / 2, y: (T + B) / 2 };
+  }
+  $('sReset').onclick = () => { const c = home(); offX = -c.x * zoom; offY = -c.y * zoom; applyView(); };
   addEventListener('resize', applyView);
-  applyView();
 
   // ---- Nodes: cards on the grid at grid px (x, y = top-left, w x h), input port(s) on the left, an output port on the right.
   // A Join node's one input takes any number of wires; every other node's input takes one. ----
@@ -101,6 +115,7 @@
                { id: 'n4', type: 'join', title: 'Join', sub: 'Test node', x: 72, y: 96 },
                { id: 'n2', type: 'transform', title: 'Transform', sub: 'Test node', x: 72, y: -48 }];
   nodes.forEach(n => { n.w ??= W0; n.h ??= H0; });
+  applyView();
   let links = [];   // { from: node id (its out port), to: node id (its in port) }
   const snap = v => prefs.snap ? Math.round(v / G) * G : Math.round(v);
   const nodeOf = id => nodes.find(m => m.id === id), elOf = id => $('nodes').querySelector(`.node[data-id="${id}"]`);
@@ -113,12 +128,27 @@
     el.className = `node t-${n.type}`; el.dataset.id = n.id;
     el.innerHTML = `<div class="nh"><svg viewBox="0 0 24 24">${ICONS[n.type]}</svg><b>${UI.esc(n.title)}</b></div><div class="nb">${UI.esc(n.sub)}</div>`
       + '<span class="port in" data-port="in"></span><span class="port out" data-port="out"></span>' + DIRS.map(d => `<span class="rz ${d}" data-dir="${d}"></span>`).join('');
-    $('nodes').append(el); putNode(el, n);
+    $('nodes').append(el); vis.set(n.id, { x: n.x, y: n.y, w: n.w, h: n.h }); putNode(el, n);
   }
-  const putNode = (el, n) => { Object.assign(el.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.w}px`, height: `${n.h}px` }); };
+  // Shown position: glides to the node's (snapped) place over a few frames instead of jumping a grid cell; wires and
+  // ports follow what is shown.
+  const vis = new Map();   // node id -> { x, y, w, h } on screen
+  let glideRaf = 0;
+  const rectOf = n => vis.get(n.id) || n;
+  const putNode = () => { if (!glideRaf) glideRaf = requestAnimationFrame(glide); };
+  function glide() {
+    glideRaf = 0; let moving = false;
+    for (const n of nodes) {
+      const v = vis.get(n.id); if (!v) continue;
+      for (const k of ['x', 'y', 'w', 'h']) { const d = n[k] - v[k]; if (Math.abs(d) < 0.5) v[k] = n[k]; else { v[k] += d * 0.35; moving = true; } }
+      Object.assign(elOf(n.id).style, { left: `${v.x}px`, top: `${v.y}px`, width: `${v.w}px`, height: `${v.h}px` });
+    }
+    drawWires();
+    if (moving) glideRaf = requestAnimationFrame(glide);
+  }
   const toGrid = (cx, cy) => { const r = $('stage').getBoundingClientRect(); return { x: (cx - r.left - r.width / 2 - offX) / zoom, y: (cy - r.top - r.height / 2 - offY) / zoom }; };
   // Port centres (grid px): the middle of the left (in) / right (out) edge.
-  const portAt = (n, k) => ({ x: n.x + (k === 'out' ? n.w : 0), y: n.y + n.h / 2 });
+  const portAt = (n, k) => { const r = rectOf(n); return { x: r.x + (k === 'out' ? r.w : 0), y: r.y + r.h / 2 }; };
   const SNAP_R = 36;   // screen px: a wire end within this of a port snaps to it
   function drawLinks() {
     save();
@@ -127,6 +157,9 @@
       el.querySelector('.port.in').classList.toggle('on', ins(n).length > 0);
       el.querySelector('.port.out').classList.toggle('on', links.some(l => l.from === n.id));
     }
+    drawWires();
+  }
+  function drawWires() {
     wires.querySelectorAll('.wire:not(.live)').forEach(x => x.remove());
     for (const l of links) {
       const a = nodeOf(l.from), b = nodeOf(l.to); if (!a || !b) continue;
@@ -166,7 +199,12 @@
     const el = e.target.closest('.node'); if (!el || e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
     const n = nodeOf(el.dataset.id), st = $('stage');
-    document.querySelectorAll('.node.sel').forEach(x => x.classList.toggle('sel', x === el)); el.classList.add('sel'); save();
+    // Selection: Ctrl + click adds / removes a node; a plain click on an unselected node selects only it (on a selected
+    // one it keeps the group, to drag it).
+    if (e.ctrlKey || e.metaKey) el.classList.toggle('sel');
+    else if (!el.classList.contains('sel')) document.querySelectorAll('.node.sel').forEach(x => x.classList.remove('sel'));
+    if (!e.ctrlKey && !e.metaKey) el.classList.add('sel');
+    save();
     st.setPointerCapture(e.pointerId);
     const port = e.target.closest('.port'), rz = e.target.closest('.rz');
     let move, done;
@@ -214,21 +252,50 @@
         Object.assign(n, { x, y, w: r - x, h: b - y }); putNode(el, n); drawLinks();
       };
       done = () => el.classList.remove('drag');
-    } else {   // move the node (snaps to the grid with Snap to Grid on)
+    } else {   // move the node, or the whole selection with it (snaps to the grid with Snap to Grid on); wires follow
+      if (!el.classList.contains('sel')) return;   // Ctrl + click just took it out of the selection
       const p0 = toGrid(e.clientX, e.clientY), x0 = n.x, y0 = n.y;
-      el.classList.add('drag');
-      move = ev => { const p = toGrid(ev.clientX, ev.clientY); n.x = snap(x0 + p.x - p0.x); n.y = snap(y0 + p.y - p0.y); putNode(el, n); drawLinks(); };
-      done = () => el.classList.remove('drag');
+      const group = [...document.querySelectorAll('.node.sel')].map(g => ({ g, m: nodeOf(g.dataset.id) })).map(o => ({ ...o, x: o.m.x, y: o.m.y }));
+      group.forEach(o => o.g.classList.add('drag'));
+      move = ev => {
+        const p = toGrid(ev.clientX, ev.clientY), dx = snap(x0 + p.x - p0.x) - x0, dy = snap(y0 + p.y - p0.y) - y0;   // the grabbed node snaps; the rest keep their places to it
+        group.forEach(o => { o.m.x = o.x + dx; o.m.y = o.y + dy; putNode(o.g, o.m); });
+        drawLinks();
+      };
+      done = () => group.forEach(o => o.g.classList.remove('drag'));
     }
     const up = () => { done(); st.removeEventListener('pointermove', move); st.removeEventListener('pointerup', up); st.removeEventListener('pointercancel', up); };
     st.addEventListener('pointermove', move); st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
   });
   $('stage').addEventListener('pointerdown', e => { if (onGrid(e.target) && document.querySelector('.node.sel')) { document.querySelectorAll('.node.sel').forEach(x => x.classList.remove('sel')); save(); } });
 
+  // Shift + drag (anywhere on the grid, over nodes too): a selection box; a node with at least 50% of it inside is
+  // selected, live. Ctrl as well keeps the nodes already selected.
+  $('stage').addEventListener('pointerdown', e => {
+    if (e.button !== 0 || !e.shiftKey || !(onGrid(e.target) || e.target.closest('.node'))) return;
+    e.preventDefault(); e.stopPropagation();
+    const st = $('stage'), r0 = st.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+    const keep = e.ctrlKey || e.metaKey ? new Set([...document.querySelectorAll('.node.sel')]) : new Set();
+    const box = document.createElement('div'); box.className = 'selbox'; st.append(box);
+    st.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const L = Math.min(x0, ev.clientX), T = Math.min(y0, ev.clientY), Rr = Math.max(x0, ev.clientX), B = Math.max(y0, ev.clientY);
+      Object.assign(box.style, { left: `${L - r0.left}px`, top: `${T - r0.top}px`, width: `${Rr - L}px`, height: `${B - T}px` });
+      for (const el of document.querySelectorAll('.node')) {
+        const b = el.getBoundingClientRect();
+        const ix = Math.max(0, Math.min(Rr, b.right) - Math.max(L, b.left)), iy = Math.max(0, Math.min(B, b.bottom) - Math.max(T, b.top));
+        el.classList.toggle('sel', keep.has(el) || ix * iy >= 0.5 * b.width * b.height);
+      }
+    };
+    const up = () => { box.remove(); save(); st.removeEventListener('pointermove', move); st.removeEventListener('pointerup', up); st.removeEventListener('pointercancel', up); };
+    st.addEventListener('pointermove', move); st.addEventListener('pointerup', up); st.addEventListener('pointercancel', up);
+    move(e);
+  }, true);
+
   // ---- State: <project>/data-studio/studio.json = { version, view: { zoom, offX, offY }, nodes, links, sel }, written as it
   // changes (every move, wire, resize, zoom, scroll, selection), so the window reopens exactly as it was left. ----
   const FILE = () => `${ctx.dir}/data-studio/studio.json`;
-  const state = () => ({ version: 1, view: { zoom, offX, offY }, nodes, links, sel: document.querySelector('.node.sel')?.dataset.id || null, updated: new Date().toISOString() });
+  const state = () => ({ version: 1, view: { zoom, offX, offY }, nodes, links, sel: [...document.querySelectorAll('.node.sel')].map(x => x.dataset.id), updated: new Date().toISOString() });
   function save() {
     if (!ctx) return;
     dirty = true; clearTimeout(saveT);
@@ -251,7 +318,7 @@
     ({ zoom = 1, offX = 0, offY = 0 } = saved.view || {});
   }
   nodes.forEach(drawNode); drawLinks();
-  if (saved?.sel) elOf(saved.sel)?.classList.add('sel');
+  [].concat(saved?.sel || []).forEach(id => elOf(id)?.classList.add('sel'));
   applyView();
   $('types').onclick = e => {
     const t = e.target.closest('.type'); if (!t) return;
