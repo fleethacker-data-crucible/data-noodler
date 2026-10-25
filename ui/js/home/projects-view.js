@@ -265,7 +265,7 @@ const ProjectsView = (() => {
     { name: 'description', label: 'Description', type: 'textarea', value: p?.description },
     { name: 'phase', label: 'Phase', type: 'select', options: P.PHASE, value: p?.phase || 'not-started' },
     { name: 'status', label: 'Status', type: 'select', options: P.STATUS, value: p?.status ?? 0 },
-    { name: 'classification', label: 'Classification', type: 'select', options: P.CLASSIFICATION, value: p?.classification || 'unclassified' /* stored key; the select shows its label, 'Public' */ },
+    { name: 'classification', label: 'Classification', type: 'select', options: P.CLASSIFICATION, value: p?.classification || 'unnpi' /* stored key; new projects default to its label, 'Internal' */ },
     { name: 'tags', label: 'Tags (comma separated)', value: (p?.tags || []).join(', ') },
   ];
   const capWords = t => t.replace(/(^|\s)(\p{Ll})/gu, (m, sp, c) => sp + c.toUpperCase());

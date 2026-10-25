@@ -35,6 +35,8 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
   changes on disk is reloaded; one too large for the engine's in-memory share is read from its parts instead.
 - **Parquet is an export format.** Older projects whose datasets are Parquet keep working; a dataset becomes Arrow the
   next time it is imported or built.
+- **Check project classification labels.** Before 2026-10-25, an older project marked `internal` (or with an unknown or
+  missing value) was saved as Public. Open each older project in Project Manager and confirm its label.
 
 ## Modules
 
@@ -56,6 +58,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\sql-cheatsheet
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\arrow-format.ps1      # Arrow = Parquet answers, memory, exports
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\spill.ps1             # GROUP BY / sort / window / join spill to disk
 powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\bench-compare.ps1     # old vs new engine, rows/s per step
+node --test tests/                                                                       # project classification migration (needs Node 18+)
 ```
 
 ## Rules for working on it
