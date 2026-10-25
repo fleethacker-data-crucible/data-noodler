@@ -1,6 +1,9 @@
 server/.profile*/
 server/logs/
 server/.pid
+# This install's settings (server/settings.json holds the tracked defaults and is never written at run time)
+server/settings.local.json
+server/settings.local.json.tmp
 test-data/
 temp/
 .trash/
