@@ -141,6 +141,7 @@
 <script src="../js/core/module-page.js"></script>
 <script src="../js/import/external-source.js"></script>
 <script src="../js/grid/data-table.js"></script>
+<script src="../js/import/import-core.js"></script>
 <script>
 const { $, esc } = UI;
 // Importing popup (#impPop): shown while a source is counted (open / refresh) or imported; the rows counted so far live.
@@ -154,17 +155,8 @@ const imp = {
   },
   hide() { $('impPop').hidden = true; },
 };
-// Plain-English hint shown next to each type in the Change Type list.
-const TYPE_HINT = { VARCHAR: 'text', BIGINT: 'whole number, very large', INTEGER: 'whole number', SMALLINT: 'small whole number (±32,767)',
-  DOUBLE: 'number with decimals', 'DECIMAL(18,2)': 'money, 2 decimal places', 'DECIMAL(38,6)': 'exact number, 6 decimal places',
-  DATE: 'calendar date', TIMESTAMP: 'date and time', BOOLEAN: 'true / false' };
-// What a value must look like to convert (used to explain failed type checks).
-const TYPE_NEED = { BIGINT: 'Needs whole numbers only (no decimals, letters or symbols).', INTEGER: 'Needs whole numbers between ±2,147,483,647.',
-  SMALLINT: 'Needs whole numbers between ±32,767.', DOUBLE: 'Needs numbers (no letters, currency signs or thousands commas).',
-  'DECIMAL(18,2)': 'Needs numbers (no letters, currency signs or thousands commas).', 'DECIMAL(38,6)': 'Needs numbers (no letters, currency signs or thousands commas).',
-  DATE: 'Needs dates like 2024-01-31.', TIMESTAMP: 'Needs date-times like 2024-01-31 13:45:00.', BOOLEAN: 'Needs true/false, yes/no or 1/0.' };
-const typeLabel = t => TYPE_HINT[t.toUpperCase()] ? `${t} - ${TYPE_HINT[t.toUpperCase()]}` : t;
-const TYPES = ['VARCHAR', 'BIGINT', 'INTEGER', 'SMALLINT', 'DOUBLE', 'DECIMAL(18,2)', 'DECIMAL(38,6)', 'DATE', 'TIMESTAMP', 'BOOLEAN'];
+// Types, casts, the SELECT list, the reader and the preview: ui/js/import/import-core.js (shared with Data Studio).
+const { TYPES, TYPE_NEED, typeLabel, tryCast } = ImportCore;
 let ctx, cur = null; // cur = { path, label, ext?, src, table, cols: [{ name, type, newName, newType, keep }] }
 // cur.ext (file outside the project, read where it is; nothing is copied) = { src, size, modified }
 
@@ -245,11 +237,7 @@ async function openDataset(d) {
     throw new Error(`${d.name}: its source ${s.path || s.origin} cannot be read (${String(e.message).split('\n')[0]}).`);
   }
 }
-// A source the engine reads in place (project path, or a full local/network path): { kind, tables, sql(table) }.
-async function reader(src) {
-  const o = await Engine.open(src);
-  return { kind: o.kind, tables: o.tables?.length ? o.tables : [''], sql: t => Engine.src(src, t) };
-}
+const reader = ImportCore.reader;
 // Shows a source in the editor. c = { path, label, ext? }; open() -> reader.
 async function openReader(c, open) {   // c.table / c.ds + c.apply (a imported dataset: its saved column choices)
   $('empty').hidden = true; $('editor').hidden = $('nameBox').hidden = false; live('Reading source…');
@@ -283,7 +271,7 @@ $('extPath').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('extG
 // The box holds one path, so a paste replaces whatever is there (paste again any time).
 // The clipboard is only read, never changed.
 // Strips spaces and straight or curly quotes at either end; a path without quotes is left as it is.
-const unquote = s => String(s).replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g, '');
+const unquote = ImportCore.unquote;
 $('extPath').addEventListener('input', ev => { const v = ev.target.value.replace(/^["'“”‘’]+|["'“”‘’]+$/g, ''); if (v !== ev.target.value) ev.target.value = v; });
 $('extPath').addEventListener('paste', ev => {
   const text = unquote(ev.clipboardData?.getData('text/plain') || '');
@@ -335,8 +323,8 @@ async function loadTable(table) {
   // splitting the whole file for a parallel scan (the row count below does that).
   // Preview: an imported dataset shows its own imported data (data/imported); a raw file shows the file.
   const psrc = cur.apply?.path ? Engine.src(cur.apply.path) : src;
-  const [cols, p] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), Engine.query(`SELECT * FROM ${psrc} FETCH FIRST 100 ROWS ONLY`, { workers: 1 })]);
-  cur.cols = cols.map(c => { const n = c.name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || c.name; return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
+  const [cols] = await Promise.all([Engine.describe(`SELECT * FROM ${src}`), ImportCore.preview($('preview'), psrc, cur.apply?.name || cur.label)]);
+  cur.cols = cols.map(c => { const n = ImportCore.defName(c.name); return { ...c, newName: n, defName: n, newType: c.type, keep: true }; });
   // A imported dataset: the keep / type / name choices it was imported with (matched by source field name).
   const saved = cur.apply?.source?.columns;
   if (saved) {
@@ -347,8 +335,6 @@ async function loadTable(table) {
   checkName();
   renderSchema();
   $('colCount').textContent = cols.length; $('rowCount').textContent = '…';
-  // The grid asks for the next 100 rows as the reader nears the end.
-  DataTable.show($('preview'), p.cols, p.rows, { title: cur.apply?.name || cur.label, more: async at => (await Engine.query(`SELECT * FROM ${psrc} OFFSET ${at} ROWS FETCH NEXT 100 ROWS ONLY`, { workers: 1 })).rows });
   live(null); const st = ctx.step('Counting rows…');
   // Rows shows "Calculating" with 1-4 dots cycling every 500 ms.
   let dots = 0; const calc = () => $('rowCount').textContent = 'Calculating' + '.'.repeat(dots++ % 4 + 1);
@@ -429,13 +415,8 @@ $('schema').onchange = ev => {
   showValidate();
 };
 
-// Engine type name (the Change Type list) -> the Oracle type written in a CAST.
-const oraType = t => ({ VARCHAR: 'VARCHAR2(4000)', BIGINT: 'NUMBER(19)', DOUBLE: 'BINARY_DOUBLE' })[t] || String(t).replace(/^DECIMAL\b/, 'NUMBER');
-// CAST(x AS type DEFAULT NULL ON CONVERSION ERROR): a value that cannot convert becomes null instead of stopping the query.
-const tryCast = (c, t) => `CAST(${Engine.q(c)} AS ${oraType(t)} DEFAULT NULL ON CONVERSION ERROR)`;
 // SELECT list with renames and conversions. Bad values become null so one does not stop the import; checkTypes() counts them first.
-const selectList = () => cur.cols.filter(c => c.keep).map(c =>
-  `${c.newType === c.type ? Engine.q(c.name) : tryCast(c.name, c.newType)} AS ${Engine.q(c.newName)}`).join(', ');
+const selectList = () => ImportCore.selectList(cur.cols);
 
 // Values that are not empty in the source but would become empty after the type change.
 async function checkTypes() {

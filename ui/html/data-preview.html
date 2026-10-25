@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Data Studio's Data Preview, popped out: Data Studio moves its tabs and table in here (ui/js/data-studio/studio.js). -->
+<meta name="color-scheme" content="dark light">
+<style>html { background: #1a1a19; color-scheme: dark; } html[data-theme="light"] { background: #fcfcfb; color-scheme: light; }</style>
+<title>Data Preview</title>
+<script src="../js/core/theme.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<link rel="stylesheet" href="../css/data-studio.css">
+</head>
+<body class="pv-popped"><section class="preview popped"></section>
+<script>
+// Reloaded (F5): Data Studio moved its preview back when this page went; ask for it again.
+addEventListener('load', () => { if (!document.querySelector('.preview').children.length) try { opener?.DSPreview?.reattach(window); } catch {} });
+</script>
+</body>
+</html>
