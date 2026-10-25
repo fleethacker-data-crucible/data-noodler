@@ -1,5 +1,7 @@
 # Data Noodler
 
+> self-contained flat-file analytics (CSV/Parquet/Arrow/SQLite) with dashboards.
+
 A fully local, self-contained data analytics app for Windows. It runs in Edge or Chrome, is served by the project's
 own PowerShell server, and does all of its data work in its own C# engine (no DuckDB, no WebAssembly, no third-party
 DLLs, no installs, no admin rights).
