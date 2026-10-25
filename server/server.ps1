@@ -23,7 +23,10 @@ $env:TEMP = Join-Path $root 'temp\sys'; $env:TMP = $env:TEMP
 New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 # Control panel: port block 8079-8081, policy reuse (edge-ops PORTS.md). $uiPort is set by Resolve-FleetPort below.
 $uiPort = 8079
+# settings.json = tracked defaults (never written); settings.local.json = this install's changes (gitignored). See settings.ps1.
 $settingsFile = Join-Path $here 'settings.json'
+$settingsLocalFile = Join-Path $here 'settings.local.json'
+. (Join-Path $here 'settings.ps1')
 $logFile = Join-Path $here ('logs\Data_Noodler_Server_Logs_{0:yyyy_MM_dd_HHmmss}.log' -f (Get-Date))
 New-Item -ItemType Directory -Force (Split-Path $logFile) | Out-Null
 
@@ -45,21 +48,8 @@ $mime = @{
 # engineSpill = true: work that does not fit in memory spills to Arrow files in temp/spill; false: it fails instead.
 # App entry point (hard-coded): the site's "/" and the app window open this page.
 $entryPage = 'ui/html/project_manager.html'
-$settings = @{ port = 47823; portMode = 'manual'; browser = 'edge'; theme = 'dark'; fileThreads = 16; engineWorkers = 64; engineFreeMb = 1024; engineSpill = $true }
-if (Test-Path $settingsFile) {
-    try {
-        $j = Get-Content $settingsFile -Raw | ConvertFrom-Json
-        if ($j.port) { $settings.port = [int]$j.port }
-        if ($j.portMode -in 'manual', 'random') { $settings.portMode = [string]$j.portMode }
-        if ($j.browser -in 'edge', 'chrome') { $settings.browser = [string]$j.browser }
-        if ($j.theme -in 'dark', 'light') { $settings.theme = [string]$j.theme }
-        if ($j.fileThreads) { $settings.fileThreads = [Math]::Max(1, [Math]::Min(64, [int]$j.fileThreads)) }
-        if ($j.engineWorkers) { $settings.engineWorkers = [Math]::Max(1, [Math]::Min(64, [int]$j.engineWorkers)) }
-        if ($j.engineFreeMb) { $settings.engineFreeMb = [Math]::Max(256, [Math]::Min(1048576, [int]$j.engineFreeMb)) }
-        if ($null -ne $j.engineSpill) { $settings.engineSpill = [bool]$j.engineSpill }
-    } catch {}
-}
-function Save-Settings { $settings | ConvertTo-Json | Set-Content $settingsFile -Encoding UTF8 }
+$settings = Read-NoodlerSettings -DefaultsFile $settingsFile -LocalFile $settingsLocalFile
+function Save-Settings { Save-NoodlerSettings -Settings $settings -LocalFile $settingsLocalFile }
 # Light/dark for every window; saved so windows opened later use it too.
 function Set-Theme([string]$t) {
     if ($t -notin 'dark', 'light') { throw 'Theme must be dark or light.' }
@@ -693,7 +683,7 @@ $iss.Commands.Add([Management.Automation.Runspaces.SessionStateFunctionEntry]::n
 $iss.Variables.Add([Management.Automation.Runspaces.SessionStateVariableEntry]::new('mime', $mime, ''))
 $staticPool = [RunspaceFactory]::CreateRunspacePool(1, $settings.fileThreads, $iss, $Host)
 $staticPool.Open()
-Add-Log 'sys' "File requests: up to $($settings.fileThreads) at a time (settings.json fileThreads)."
+Add-Log 'sys' "File requests: up to $($settings.fileThreads) at a time (settings.local.json / settings.json fileThreads)."
 $staticJobs = [Collections.Generic.List[object]]::new()
 $staticScript = {
     param($ctx, $path, $logPath)
@@ -935,13 +925,11 @@ function Handle-Archive($req, $res, $op) {
 # --- import api (source files outside the project) ---
 . (Join-Path $here 'import-api.ps1')
 
-# --- Data Noodler.lnk is relative (empty Start in); only its icon needs a full path: point it at this folder's assets ---
+# --- Data Noodler.lnk is relative (empty Start in); only its icon needs a full path: point it at this folder's assets.
+#     Never in a git checkout (the .lnk is tracked there), and only saved when the icon really differs. ---
 try {
-    $lnkPath = Join-Path $root 'Data Noodler.lnk'; $ico = Join-Path $root 'assets\client_favicon.ico'
-    if ((Test-Path -LiteralPath $lnkPath) -and (Test-Path -LiteralPath $ico)) {
-        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
-        if ($lnk.IconLocation -ne "$ico,0") { $lnk.IconLocation = "$ico,0"; $lnk.Save() }
-    }
+    $lnkState = Update-NoodlerShortcutIcon -Root $root
+    if ($lnkState -eq 'updated') { Add-Log 'server' 'Shortcut icon updated for this folder.' }
 } catch { Add-Log 'server' "Shortcut icon not updated: $($_.Exception.Message)" }
 
 # --- one-time move: projects/ -> workspace/, and stored "projects/..." paths -> "workspace/projects/..." ---

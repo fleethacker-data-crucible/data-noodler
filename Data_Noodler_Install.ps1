@@ -82,7 +82,7 @@ try {
     foreach ($d in $dirs) { [void](New-Item -ItemType Directory -Force -Path (Join-Path $Root ($d.Replace('/', '\')))) }
     # User data is never overwritten: projects, settings, users, charts and temp. A file there is written only when it
     # does not exist yet (a fresh install gets the defaults); everything else is program files and is replaced.
-    $UserData = @('workspace/*', 'temp/*', 'config/*', 'server/settings.json', 'version.txt')
+    $UserData = @('workspace/*', 'temp/*', 'config/*', 'server/settings.json', 'server/settings.local.json', 'version.txt')
     $isUser = { param($p) foreach ($u in $UserData) { if ($p -like $u) { return $true } }; return $false }
     # Older installs kept the server in .server: move its settings to server\ and remove the old folder.
     $old = Join-Path $Root '.server'

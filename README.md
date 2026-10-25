@@ -14,6 +14,8 @@ DLLs, no installs, no admin rights).
 The server compiles the engine (`server/data-engine/**/*.cs`, cached as a DLL in `temp\data-engine\`) and opens the
 **Project Manager**. The red **Server Control** button opens the control panel (port 8079, or 8080/8081 if another program holds it: status, engine check, live log). Starting Data Noodler while it is already running opens the running copy's panel; an older running copy is asked to shut down and replaced. The site port is manual (default 47823) or random in 30000-46999 (edge-ops PORTS.md).
 
+**Settings:** `server/settings.json` holds the tracked defaults and is never written while the tool runs. Changes made in the control panel (port, port mode, browser, theme, engine memory) are saved to `server/settings.local.json`, which is gitignored and overrides the defaults key by key. Delete that file to go back to the defaults. In a git checkout the server never rewrites the tracked `Data Noodler.lnk`. In an installed copy it updates the shortcut's icon path only when it really differs.
+
 ## How data flows
 
 ```
