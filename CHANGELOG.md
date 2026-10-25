@@ -2,6 +2,14 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-25: Port block and self-detection (edge-ops PORTS.md)
+
+- Control panel: port block 8079-8081 (was 8079 only, exiting if busy). Starting Data Noodler while it runs opens the
+  running copy's panel; an older running copy is asked to shut down (`POST /__fleethacker/shutdown`) and replaced.
+  The old start-up step that force-stopped any process whose command line contained `server.ps1` is gone.
+- `GET /__fleethacker/id` (panel and site ports) reports tool, version (this changelog's newest date), pid and path.
+- Random site port: now 30000-46999 (was 10000-65535). Manual stays the default (47823).
+
 ## 2026-10-12: Dashboard Studio (widgets, official D3 only)
 
 - One studio replaces Chart Builder, D3 Studio and the Dashboard Builder: widget bar (category placeholders, Custom
