@@ -21,6 +21,7 @@ $root = (Resolve-Path (Join-Path $here '..')).Path
 # Temporary files of this process (Add-Type compiler scratch, .NET temp) stay in the project: <root>\temp\sys.
 $env:TEMP = Join-Path $root 'temp\sys'; $env:TMP = $env:TEMP
 New-Item -ItemType Directory -Force $env:TEMP | Out-Null
+# Control panel: port block 8079-8081, policy reuse (edge-ops PORTS.md). $uiPort is set by Resolve-FleetPort below.
 $uiPort = 8079
 $settingsFile = Join-Path $here 'settings.json'
 $logFile = Join-Path $here ('logs\Data_Noodler_Server_Logs_{0:yyyy_MM_dd_HHmmss}.log' -f (Get-Date))
@@ -167,16 +168,22 @@ function Send-File($res, $base, $rel, [switch]$Token, $req) {
 }
 
 # --- listener ---
-# Stop a previous instance still holding the ports.
-$pidFile = Join-Path $here '.pid'
-if (Test-Path $pidFile) {
-    $old = Get-CimInstance Win32_Process -Filter "ProcessId=$([int](Get-Content $pidFile))" -ErrorAction SilentlyContinue
-    if ($old -and $old.CommandLine -like '*server.ps1*') {
-        Stop-Process -Id $old.ProcessId -Force
-        Start-Sleep -Milliseconds 500
-        Add-Log 'sys' "Stopped previous server instance (PID $($old.ProcessId))."
-    }
+# A running Data Noodler is found by asking GET /__fleethacker/id on the panel block (no process-name matching):
+# same or newer version -> open its panel and exit; older -> ask it to shut down and take its place.
+Import-Module (Join-Path $here 'FleetPort.psm1') -Force
+$fleetVersion = '0.0.0'
+$changelog = Join-Path $root 'CHANGELOG.md'
+if ((Test-Path -LiteralPath $changelog) -and ([IO.File]::ReadAllText($changelog) -match '(?m)^## (\d{4})-(\d{2})-(\d{2})')) { $fleetVersion = '{0}.{1}.{2}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3] }
+$fleetSelfPath = [IO.Path]::GetFullPath($PSCommandPath)
+$slot = Resolve-FleetPort -Tool 'data-noodler' -Version $fleetVersion -RegistryPath (Join-Path $here 'FleetPorts.psd1') -NoListener -GraceMs 8000
+if ($slot.Action -eq 'Reuse') {
+    if ($slot.Note) { Add-Log 'sys' $slot.Note }
+    Add-Log 'sys' "Data Noodler $($slot.Existing.Version) is already running (PID $($slot.Existing.Pid)); opening its control panel."
+    Start-Process "http://localhost:$($slot.Port)/"
+    exit 0
 }
+$uiPort = $slot.Port
+$pidFile = Join-Path $here '.pid'
 Set-Content $pidFile $PID
 
 # Clear upload temp files left by a crash.
@@ -208,10 +215,10 @@ function Set-SitePort([int]$p) {
     $settings.port = $p
 }
 
-# A free 5-digit port (10000-65535), other than the current one.
+# A free port in 30000-46999 (the random-site range in edge-ops PORTS.md), other than the current one.
 function Get-RandomPort {
     for ($n = 0; $n -lt 25; $n++) {
-        $c = Get-Random -Minimum 10000 -Maximum 65536
+        $c = Get-Random -Minimum 30000 -Maximum 47000
         if ($c -ne $settings.port -and (Test-PortFree $c)) { return $c }
     }
     throw 'Could not find a free port.'
@@ -1432,6 +1439,12 @@ try {
             $req = $ctx.Request; $res = $ctx.Response
             $async = $false
             try {
+                $fleet = Invoke-FleetIdEndpoint -Context $ctx -Tool 'data-noodler' -Version $fleetVersion -Path $fleetSelfPath
+                if ($fleet) {
+                    if ($fleet -eq 'shutdown') { Add-Log 'sys' 'Shutdown requested by a newer Data Noodler launcher.'; $script:running = $false }
+                    $async = $true   # response already closed
+                    continue
+                }
                 $rel = [Uri]::UnescapeDataString($req.Url.AbsolutePath).TrimStart('/')
                 if ($req.Url.Port -eq $uiPort) {
                     if ($rel -eq 'api/log') { $lastBeat = $script:panelBeat = Get-Date }

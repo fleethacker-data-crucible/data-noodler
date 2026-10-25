@@ -309,7 +309,7 @@ select { height: 25px; font: inherit; color: var(--text); background: var(--bg);
         <div class="slabel">Port</div>
         <label class="opt"><input type="radio" name="pmode" value="manual"> Manual</label>
         <div id="portrow" class="portrow"><input id="port" type="text" inputmode="numeric" maxlength="5" autocomplete="off" spellcheck="false" placeholder="5 digits"><span id="portnote" class="portnote" hidden>Must be a 5-digit port, 10000-65535</span></div>
-        <label class="opt"><input type="radio" name="pmode" value="random"> Random (new 5-digit port each time the server starts)</label>
+        <label class="opt"><input type="radio" name="pmode" value="random"> Random (new port in 30000-46999 each time the server starts)</label>
       </div>
       <div class="row">
         <button id="s-save" class="go">Save</button>

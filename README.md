@@ -12,7 +12,7 @@ DLLs, no installs, no admin rights).
 - Or run `powershell -NoProfile -ExecutionPolicy Bypass -File server\server.ps1`.
 
 The server compiles the engine (`server/data-engine/**/*.cs`, cached as a DLL in `temp\data-engine\`) and opens the
-**Project Manager**. The red **Server Control** button opens the control panel (port 8079: status, engine check, live log).
+**Project Manager**. The red **Server Control** button opens the control panel (port 8079, or 8080/8081 if another program holds it: status, engine check, live log). Starting Data Noodler while it is already running opens the running copy's panel; an older running copy is asked to shut down and replaced. The site port is manual (default 47823) or random in 30000-46999 (edge-ops PORTS.md).
 
 ## How data flows
 
