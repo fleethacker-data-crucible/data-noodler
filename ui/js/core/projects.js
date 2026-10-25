@@ -23,6 +23,19 @@ const Projects = (() => {
   const CLASSIFICATION = [['unclassified', 'Public'], ['unnpi', 'Internal'], ['cui', 'Restricted']];
   const label = (list, v) => (list.find(([k]) => String(k) === String(v)) || [, v ?? ''])[1];
   // Older configs: status was a word (active/complete/planning...), classification public/internal/confidential/restricted.
+  // Legacy classification -> stored key. Only an explicit 'public' becomes Public. 'confidential'/'restricted' become
+  // Restricted. 'internal', and anything unknown or missing, becomes Internal: never widen a project to Public by guessing,
+  // and use Restricted only where the legacy value says so (Internal is the most restrictive choice that doesn't invent a
+  // marking). The original value is kept in legacyClassification so a later save doesn't lose it.
+  const LEGACY_CLASSIFICATION = { public: 'unclassified', internal: 'unnpi', confidential: 'cui', restricted: 'cui',
+    unclassified: 'unclassified', unnpi: 'unnpi', cui: 'cui' };   // stored keys in another case (e.g. 'CUI') keep their meaning
+  const migrateClassification = c => {
+    const v = c.classification;
+    if (CLASSIFICATION.some(([k]) => k === v)) return v;
+    const key = LEGACY_CLASSIFICATION[String(v ?? '').trim().toLowerCase()] || 'unnpi';
+    if (v != null && v !== '' && c.legacyClassification == null) c.legacyClassification = String(v);
+    return key;
+  };
   const migrate = c => {
     if (typeof c.status !== 'number') {
       const old = String(c.status ?? '');
@@ -31,7 +44,7 @@ const Projects = (() => {
     }
     if (c.handling === 'unnpi' && c.classification !== 'cui') c.classification = 'unnpi'; // handling was folded into classification
     delete c.handling;
-    if (!CLASSIFICATION.some(([k]) => k === c.classification)) c.classification = ['confidential', 'restricted'].includes(c.classification) ? 'cui' : 'unclassified';
+    c.classification = migrateClassification(c);
     return c;
   };
   const cfgPath = folder => `${ROOT}/${folder}/project-config.json`;
@@ -166,7 +179,7 @@ const Projects = (() => {
   const peek = async folder => migrate(await DNFS.readJSON(cfgPath(folder), { quiet: true }));
   async function save(cfg) { cfg.modified = new Date().toISOString(); await DNFS.writeJSON(cfgPath(cfg.folder), cfg); return cfg; }
 
-  async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified' /* stored key, shown as 'Public' */, tags = [], workspace }) {
+  async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unnpi' /* stored key, shown as 'Internal': new projects default to Internal, not Public */, tags = [], workspace }) {
     const err = validName(name); if (err) throw new Error(err);
     const all = await workspaces(), ws = all.find(w => w.folder === workspace || w.id === workspace) || all[0];
     if (!ws) throw new Error('Create a workspace first.');
@@ -302,5 +315,5 @@ const Projects = (() => {
   // 'imported' | 'source' (older records have no stage: taken from the path; pipeline outputs are 'source').
   const stageOf = d => (d.stage === 'staged' ? 'imported' : d.stage) || (d.source?.kind !== 'pipeline' && d.path.includes('/data/imported/') ? 'imported' : 'source');
 
-  return { ROOT, BUILTIN_WS, workspaces, createWorkspace, deleteWorkspace, wsOf, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, user, label, slug, validName, list, get, peek, save, create, update, rename, trash, trashList, restore, emptyTrash, archives, snapshot, restoreSnapshot, deleteSnapshot, touchModule, upsertDataset, dir, stageOf, sourceDatasets };
+  return { ROOT, BUILTIN_WS, workspaces, createWorkspace, deleteWorkspace, wsOf, LAYOUT, MODULES, PHASE, STATUS, CLASSIFICATION, migrate, user, label, slug, validName, list, get, peek, save, create, update, rename, trash, trashList, restore, emptyTrash, archives, snapshot, restoreSnapshot, deleteSnapshot, touchModule, upsertDataset, dir, stageOf, sourceDatasets };
 })();

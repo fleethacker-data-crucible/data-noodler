@@ -2,6 +2,14 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-25: Project classification migration fix
+
+- Older project values now map to Public / Internal / Restricted by meaning: `public` becomes Public, `internal` becomes
+  Internal, and `confidential` / `restricted` become Restricted. Unknown or missing values become Internal, never Public.
+  The original value is kept in `legacyClassification`. New projects default to Internal.
+- **Re-check older projects:** the previous migration saved `internal`, unknown or missing values as Public, and the
+  original value was not kept, so those projects still show Public. Confirm each one's label in Project Manager.
+
 ## 2026-10-25: Port block and self-detection (edge-ops PORTS.md)
 
 - Control panel: port block 8079-8081 (was 8079 only, exiting if busy). Starting Data Noodler while it runs opens the
