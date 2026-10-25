@@ -6,9 +6,9 @@ BeforeDiscovery {
     $script:ScriptFiles = @(Get-ChildItem -Path $script:RepoRoot -Recurse -File -Include *.ps1, *.psm1 |
         Where-Object { $_.FullName -notmatch $skip } |
         ForEach-Object { @{ Name = $_.FullName.Substring($script:RepoRoot.Length + 1); Path = $_.FullName } })
-    # Server source files: Path, the loopback pattern expected, and Skip text for known follow-ups.
+    # Server source files and the loopback bind expected. Fails only on +, *, 0.0.0.0 or a non-loopback bind.
     $script:Servers = @(
-        @{ File = 'server\server.ps1'; Pattern = '(IPAddress\]?::Loopback|IPAddress\.Loopback|http://127\.0\.0\.1:)'; Skip = 'Follow-up: control panel binds http://localhost:8079/ via HttpListener; move to 127.0.0.1' }
+        @{ File = 'server\server.ps1'; Pattern = '(IPAddress\]?::Loopback|IPAddress\.Loopback|http://127\.0\.0\.1:|http://localhost:|http://\[::1\]:)'; Skip = $null }
     )
 }
 
@@ -28,7 +28,7 @@ Describe 'Loopback-only bind' -Skip:($script:Servers.Count -eq 0) {
         $text | Should -Not -Match 'https?://(\+|\*|0\.0\.0\.0)[:/]'
         $text | Should -Not -Match 'IPAddress\]?::(Any|IPv6Any)\b'
     }
-    It '<File> binds 127.0.0.1' -ForEach $script:Servers {
+    It '<File> binds loopback (localhost, 127.0.0.1 or IPAddress.Loopback)' -ForEach $script:Servers {
         if ($Skip) { Set-ItResult -Skipped -Because $Skip; return }
         $text = [IO.File]::ReadAllText((Join-Path $script:RepoRootRun ($File -replace "\\", [IO.Path]::DirectorySeparatorChar)))
         $text | Should -Match $Pattern

@@ -4,7 +4,12 @@
     Severity     = @('Error', 'Warning')
     IncludeDefaultRules = $true
     ExcludeRules = @(
-        'PSAvoidUsingWriteHost'   # console tools print status to the host on purpose
+        'PSAvoidUsingWriteHost'                        # console tools print status to the host on purpose
+        # Style rules the reference repos (phoenix-lai, data-noodler) do not follow by design:
+        'PSAvoidUsingEmptyCatchBlock'                  # best-effort `catch { }` around logging/cleanup
+        'PSUseShouldProcessForStateChangingFunctions'  # internal helpers, not public cmdlets
+        'PSUseSingularNouns'
+        'PSUseApprovedVerbs'                           # e.g. Load-DataEngine
     )
     Rules = @{
         PSUseCompatibleSyntax = @{
