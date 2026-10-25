@@ -1,0 +1,42 @@
+[
+  {
+    "first": "Jane",
+    "middle": "Q",
+    "last": "Doe",
+    "type": "CIV",
+    "display": "Doe, Jane Q. CIV",
+    "id": "sample1"
+  },
+  {
+    "first": "Richard",
+    "middle": "A",
+    "last": "Roe",
+    "type": "CIV",
+    "display": "Roe, Richard A. CIV",
+    "id": "sample2"
+  },
+  {
+    "first": "John",
+    "middle": "Q",
+    "last": "Public",
+    "type": "CIV",
+    "display": "Public, John Q. CIV",
+    "id": "sample3"
+  },
+  {
+    "first": "Alex",
+    "middle": "B",
+    "last": "Sample",
+    "type": "CIV",
+    "display": "Sample, Alex B. CIV",
+    "id": "sample4"
+  },
+  {
+    "first": "Pat",
+    "middle": "C",
+    "last": "Tester",
+    "type": "CIV",
+    "display": "Tester, Pat C. CIV",
+    "id": "sample5"
+  }
+]
