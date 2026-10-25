@@ -2,6 +2,18 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-10-25: Shortcut made on each computer
+
+- `Data Noodler.lnk` is no longer tracked (`*.lnk` in `.gitignore`): it recorded the computer name, the user's SID and
+  an absolute icon path. Same target and arguments as before (`conhost.exe --headless powershell.exe ... -File
+  "server\server.ps1"`, empty Start in, minimized), with the icon path taken from this folder.
+- New `Data_Noodler.bat` -> `Start-DataNoodler.ps1`: creates or repairs the shortcut, then starts Data Noodler with no
+  console window (`-NoStart`: shortcut only). The server also creates or repairs it on every start. A matching
+  shortcut is never rewritten, and a missing or blocked WScript.Shell never stops the start.
+- `server/settings.ps1`: `Get-NoodlerShortcutSpec`, `Test-NoodlerShortcutMatch` and `Sync-NoodlerShortcut` replace
+  `Update-NoodlerShortcutIcon` and its git-checkout skip, which only existed because the file was tracked.
+- The old shortcut is still in git history; removing it is part of the pending history decision.
+
 ## 2026-10-25: Project classification migration fix
 
 - Older project values now map to Public / Internal / Restricted by meaning: `public` becomes Public, `internal` becomes

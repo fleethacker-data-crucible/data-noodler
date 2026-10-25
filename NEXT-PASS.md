@@ -17,7 +17,8 @@ This branch already removed the items below from the current tree. They are **st
      git push --force --mirror
      ```
   3. Delete `names.txt`. Re-clone everywhere, and delete old branches, tags and PRs that point at pre-rewrite commits. Rewrite every fork in the network the same way.
-- [ ] **Regenerate `Data Noodler.lnk`.** It embeds a user SID, the hostname and an absolute `D:\Dev_Project_Repository\...` icon path. Either build it at install time and stop tracking it, or recreate it with relative paths. Also, `server/server.ps1:932-938` rewrites this tracked file's icon on every start, which dirties the tree. That's another reason to stop tracking it.
+- [x] **Regenerate `Data Noodler.lnk`.** It embedded a user SID, the hostname and an absolute `D:\Dev_Project_Repository\...` icon path. *(2026-10-25, branch `standards/untrack-lnk`: no longer tracked; `*.lnk` is ignored; `Data_Noodler.bat` and every server start create or repair it from `Get-NoodlerShortcutSpec`. The git-checkout skip from PR #5 is gone because the file is no longer tracked.)*
+- [ ] **Old `Data Noodler.lnk` copies in history.** The SID, hostname and `D:\...` path are still in every commit before `standards/untrack-lnk`. Removing them is part of Jeremy's pending history / fork decision; if the rewrite above goes ahead, add `--path 'Data Noodler.lnk'`.
 - [ ] **Stop tracking runtime files the app rewrites.** `server/settings.json` gets a new random port on each start (`server.ps1:223,246`). `workspace/workspaces.json` holds a machine-specific workspace UUID. Ship `*.example.json` templates instead.
 - [ ] **Ignore new workspaces.** `.gitignore` excludes only `workspace/smpg/` and `workspace/projects/*`, so user projects in any other workspace get committed. Add `workspace/*/` with the needed exceptions (`sample-data`, `dashboard-studio` widgets, `workspaces.example.json`).
 
@@ -41,7 +42,7 @@ This branch already removed the items below from the current tree. They are **st
 
 - [ ] **Listener:** `HttpListener` with `http://localhost:PORT/` (`server.ps1:185-186,201,243`) is used instead of `TcpListener` on `127.0.0.1`. Confirm with `netstat -ano` that it binds to loopback only, and that it needs no admin URL reservation.
 - [ ] **Ports:** the site defaults to 47823, or a random port in 10000-65535 (`server.ps1:47,211-223`). Neither is in edge-ops `PORTS.md`. Port 8079 has no fallback and exits if busy (line 188). Register the ports, or follow the fallback convention.
-- [ ] **Launcher and installer:** the tool ships a `.lnk` (`conhost --headless ... -ExecutionPolicy Bypass`) and an installer. The conventions call for one `.bat` → `powershell.exe -File` and no installers.
+- [ ] **Launcher and installer:** the tool ships a `.lnk` (`conhost --headless ... -ExecutionPolicy Bypass`) and an installer. The conventions call for one `.bat` → `powershell.exe -File` and no installers. *(2026-10-25: `Data_Noodler.bat` -> `Start-DataNoodler.ps1` added, and the `.lnk` is now made locally; the installer is still open.)*
 - [ ] **UI stack:** the UI is hand-written JS with vendored billboard.js and d3, and has no build step. TechStack calls for React or Svelte, Tailwind and ECharts. Either migrate or record this as an approved exception.
 - [ ] Add `LICENSE` and `VERSION` per edge-ops `CONVENTIONS.md`.
 

@@ -51,3 +51,6 @@ config/users.json
 
 # Release packages written by Data_Noodler_Package.ps1
 Data_Noodler_*.gz
+
+# Windows shortcuts are made on each computer (Data_Noodler.bat / first start): a .lnk records the computer name and SID
+*.lnk

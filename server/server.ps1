@@ -925,12 +925,14 @@ function Handle-Archive($req, $res, $op) {
 # --- import api (source files outside the project) ---
 . (Join-Path $here 'import-api.ps1')
 
-# --- Data Noodler.lnk is relative (empty Start in); only its icon needs a full path: point it at this folder's assets.
-#     Never in a git checkout (the .lnk is tracked there), and only saved when the icon really differs. ---
+# --- Data Noodler.lnk (not tracked: it records the computer name and SID): create it on first run, repair it when it
+#     differs (for example a moved folder's icon path). Never stops the start; a matching shortcut is not written. ---
 try {
-    $lnkState = Update-NoodlerShortcutIcon -Root $root
-    if ($lnkState -eq 'updated') { Add-Log 'server' 'Shortcut icon updated for this folder.' }
-} catch { Add-Log 'server' "Shortcut icon not updated: $($_.Exception.Message)" }
+    $lnkState = Sync-NoodlerShortcut -Root $root
+    if ($lnkState -eq 'created') { Add-Log 'server' 'Shortcut "Data Noodler.lnk" created in this folder.' }
+    elseif ($lnkState -eq 'repaired') { Add-Log 'server' 'Shortcut "Data Noodler.lnk" repaired for this folder.' }
+    elseif ($lnkState -eq 'unavailable') { Add-Log 'server' 'Shortcut "Data Noodler.lnk" not made (Windows Script Host unavailable); use Data_Noodler.bat to start.' }
+} catch { Add-Log 'server' "Shortcut not checked: $($_.Exception.Message)" }
 
 # --- one-time move: projects/ -> workspace/, and stored "projects/..." paths -> "workspace/projects/..." ---
 try {

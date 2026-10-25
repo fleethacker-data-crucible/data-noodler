@@ -1,5 +1,6 @@
 # Pester 5. Runs on Windows PowerShell 5.1 and pwsh. Run: Invoke-Pester -Path .\tests -Output Detailed
-# Running the tool must not rewrite tracked files: server\settings.json (defaults) and "Data Noodler.lnk".
+# Running the tool must not rewrite tracked files (server\settings.json holds the defaults). "Data Noodler.lnk" is not
+# tracked: it is made on each computer, and these tests cover its spec and the create-or-repair logic (COM mocked).
 BeforeAll {
     $script:repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     . (Join-Path $repo (Join-Path 'server' 'settings.ps1'))
@@ -8,19 +9,13 @@ BeforeAll {
         [void](New-Item -ItemType Directory -Force -Path $d)
         return $d
     }
-    function New-FakeShortcut([string]$Icon) {
-        $o = New-Object PSObject -Property @{ IconLocation = $Icon; Saved = 0 }
+    # Stands in for the WScript.Shell shortcut object (no COM, no .lnk written).
+    function New-FakeShortcut {
+        param($Spec, [switch]$Blank)
+        $o = New-Object PSObject -Property @{ TargetPath = ''; Arguments = ''; WorkingDirectory = ''; Description = ''; IconLocation = ''; WindowStyle = 1; Saved = 0 }
+        if (-not $Blank) { foreach ($f in 'TargetPath', 'Arguments', 'WorkingDirectory', 'Description', 'IconLocation', 'WindowStyle') { $o.$f = $Spec.$f } }
         $o | Add-Member -MemberType ScriptMethod -Name Save -Value { $this.Saved++ }
         return $o
-    }
-    function New-ShortcutRoot([switch]$Git, [switch]$GitFile) {
-        $r = New-Scratch
-        [IO.File]::WriteAllBytes((Join-Path $r 'Data Noodler.lnk'), [byte[]](1, 2, 3))
-        [void](New-Item -ItemType Directory -Force -Path (Join-Path $r 'assets'))
-        [IO.File]::WriteAllBytes((Join-Path (Join-Path $r 'assets') 'client_favicon.ico'), [byte[]](0))
-        if ($Git) { [void](New-Item -ItemType Directory -Force -Path (Join-Path $r '.git')) }
-        if ($GitFile) { [IO.File]::WriteAllText((Join-Path $r '.git'), 'gitdir: C:/somewhere/worktrees/x') }
-        return $r
     }
 }
 
@@ -85,40 +80,106 @@ Describe 'Settings: tracked defaults plus a local file' {
     }
 }
 
-Describe 'Shortcut icon: never rewrites the tracked Data Noodler.lnk' {
-    It 'skips a git checkout (.git folder) without opening the shortcut' {
-        $r = New-ShortcutRoot -Git
-        try {
-            $opened = @{ N = 0 }
-            Update-NoodlerShortcutIcon -Root $r -OpenShortcut ({ param($p) $null = $p; $opened.N++; New-FakeShortcut 'x' }.GetNewClosure()) | Should -Be 'skipped-git'
-            $opened.N | Should -Be 0
-        } finally { Remove-Item -LiteralPath $r -Recurse -Force }
+Describe 'Shortcut spec: Get-NoodlerShortcutSpec' {
+    It 'matches the shortcut that used to be tracked (conhost --headless, relative server\server.ps1, minimized)' {
+        $s = Get-NoodlerShortcutSpec -Root 'X:\tools\Data Noodler' -SystemRoot 'C:\Windows'
+        $s.TargetPath | Should -BeExactly 'C:\Windows\System32\conhost.exe'
+        $s.Arguments | Should -BeExactly '--headless powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "server\server.ps1"'
+        $s.WorkingDirectory | Should -Be ''
+        $s.WindowStyle | Should -Be 7
+        $s.Description | Should -Be ''
     }
-
-    It 'skips a git worktree (.git file)' {
-        $r = New-ShortcutRoot -GitFile
-        try { Update-NoodlerShortcutIcon -Root $r -OpenShortcut { param($p) $null = $p; throw 'must not open' } | Should -Be 'skipped-git' }
-        finally { Remove-Item -LiteralPath $r -Recurse -Force }
+    It 'derives the path and icon from the tool folder at run time' {
+        $s = Get-NoodlerShortcutSpec -Root 'X:\tools\Data Noodler'
+        $s.Path | Should -Be ([IO.Path]::Combine('X:\tools\Data Noodler', 'Data Noodler.lnk'))
+        $s.IconLocation | Should -Be ([IO.Path]::Combine('X:\tools\Data Noodler', 'assets', 'client_favicon.ico') + ',0')
+        $s.Path | Should -BeLike 'X:\tools\Data Noodler*Data Noodler.lnk'
+        $s.IconLocation | Should -BeLike 'X:\tools\Data Noodler*client_favicon.ico,0'
     }
-
-    It 'installed copy: saves only when the icon differs' {
-        $r = New-ShortcutRoot
-        try {
-            $want = (Join-Path $r 'assets\client_favicon.ico') + ',0'
-            $same = New-FakeShortcut $want
-            Update-NoodlerShortcutIcon -Root $r -OpenShortcut ({ param($p) $null = $p; $same }.GetNewClosure()) | Should -Be 'unchanged'
-            $same.Saved | Should -Be 0
-            $other = New-FakeShortcut 'D:\elsewhere\client_favicon.ico,0'
-            Update-NoodlerShortcutIcon -Root $r -OpenShortcut ({ param($p) $null = $p; $other }.GetNewClosure()) | Should -Be 'updated'
-            $other.Saved | Should -Be 1
-            $other.IconLocation | Should -Be $want
-        } finally { Remove-Item -LiteralPath $r -Recurse -Force }
+    It 'puts no absolute path in the arguments, and no SID or computer name anywhere' {
+        $a = Get-NoodlerShortcutSpec -Root 'C:\one'; $b = Get-NoodlerShortcutSpec -Root 'D:\two\deeper'
+        $a.Arguments | Should -BeExactly $b.Arguments
+        $a.Arguments | Should -Not -Match '[A-Za-z]:\\'
+        ($a | ConvertTo-Json) | Should -Not -Match '(?i)desktop-|S-1-5-21|Dev_Project_Repository'
     }
+}
 
-    It 'does nothing when the shortcut is missing' {
-        $r = New-Scratch
-        try { Update-NoodlerShortcutIcon -Root $r -OpenShortcut { param($p) $null = $p; throw 'must not open' } | Should -Be 'missing' }
-        finally { Remove-Item -LiteralPath $r -Recurse -Force }
+Describe 'Shortcut: Test-NoodlerShortcutMatch' {
+    BeforeAll { $script:spec = Get-NoodlerShortcutSpec -Root 'C:\dn' }
+    It 'matches regardless of casing and %SystemRoot% expansion' {
+        $l = New-FakeShortcut $script:spec
+        $l.TargetPath = $script:spec.TargetPath.ToUpperInvariant()
+        Test-NoodlerShortcutMatch -Shortcut $l -Spec $script:spec | Should -BeTrue
+    }
+    It 'does not match when <_> differs' -ForEach @('TargetPath', 'Arguments', 'WorkingDirectory', 'IconLocation') {
+        $l = New-FakeShortcut $script:spec
+        $l.$_ = 'D:\Dev_Project_Repository\web-pages\data-noodler\assets\client_favicon.ico,0'
+        Test-NoodlerShortcutMatch -Shortcut $l -Spec $script:spec | Should -BeFalse
+    }
+    It 'does not match another window style' {
+        $l = New-FakeShortcut $script:spec; $l.WindowStyle = 1
+        Test-NoodlerShortcutMatch -Shortcut $l -Spec $script:spec | Should -BeFalse
+    }
+}
+
+Describe 'Shortcut: Sync-NoodlerShortcut (COM mocked)' {
+    BeforeEach { $script:r = New-Scratch }
+    AfterEach { Remove-Item -LiteralPath $r -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'creates the shortcut when it is missing (also in a git checkout: it is no longer tracked)' {
+        [void](New-Item -ItemType Directory -Force -Path (Join-Path $r '.git'))
+        $mk = ${function:New-FakeShortcut}; $box = @{}
+        Sync-NoodlerShortcut -Root $r -OpenShortcut ({ param($p) $box.P = $p; $box.L = & $mk -Blank; $box.L }.GetNewClosure()) | Should -Be 'created'
+        $box.P | Should -Be ([IO.Path]::Combine($r, 'Data Noodler.lnk'))
+        $box.L.Saved | Should -Be 1
+        Test-NoodlerShortcutMatch -Shortcut $box.L -Spec (Get-NoodlerShortcutSpec -Root $r) | Should -BeTrue
+    }
+    It 'leaves a matching shortcut alone (no Save)' {
+        $spec = Get-NoodlerShortcutSpec -Root $r
+        [IO.File]::WriteAllBytes($spec.Path, [byte[]](1, 2, 3))
+        $same = New-FakeShortcut $spec
+        Sync-NoodlerShortcut -Root $r -OpenShortcut ({ param($p) $null = $p; $same }.GetNewClosure()) | Should -Be 'unchanged'
+        $same.Saved | Should -Be 0
+    }
+    It 'repairs a shortcut with a stale icon path (folder moved)' {
+        $spec = Get-NoodlerShortcutSpec -Root $r
+        [IO.File]::WriteAllBytes($spec.Path, [byte[]](1, 2, 3))
+        $old = New-FakeShortcut $spec; $old.IconLocation = 'D:\elsewhere\assets\client_favicon.ico,0'
+        Sync-NoodlerShortcut -Root $r -OpenShortcut ({ param($p) $null = $p; $old }.GetNewClosure()) | Should -Be 'repaired'
+        $old.Saved | Should -Be 1
+        $old.IconLocation | Should -Be $spec.IconLocation
+    }
+    It 'is idempotent: the second run writes nothing' {
+        $mk = ${function:New-FakeShortcut}; $store = @{}
+        $open = { param($p) if (-not $store.ContainsKey($p)) { $store[$p] = & $mk -Blank }; $store[$p] }.GetNewClosure()
+        Sync-NoodlerShortcut -Root $r -OpenShortcut $open | Should -Be 'created'
+        [IO.File]::WriteAllBytes((Join-Path $r 'Data Noodler.lnk'), [byte[]](1))   # the fake Save writes no file
+        Sync-NoodlerShortcut -Root $r -OpenShortcut $open | Should -Be 'unchanged'
+        $store[(Join-Path $r 'Data Noodler.lnk')].Saved | Should -Be 1
+    }
+    It 'never throws when COM is unavailable or Save fails' {
+        Sync-NoodlerShortcut -Root $r -OpenShortcut { param($p) $null = $p; throw 'Retrieving the COM class factory failed' } | Should -Be 'unavailable'
+        $bad = { param($p) $null = $p; $o = New-Object PSObject -Property @{ TargetPath = ''; Arguments = ''; WorkingDirectory = ''; Description = ''; IconLocation = ''; WindowStyle = 1 }; $o | Add-Member -MemberType ScriptMethod -Name Save -Value { throw 'Access is denied' }; $o }
+        Sync-NoodlerShortcut -Root $r -OpenShortcut $bad | Should -Be 'unavailable'
+    }
+}
+
+Describe 'Launcher and git' {
+    It 'Data_Noodler.bat runs Start-DataNoodler.ps1 with powershell.exe -File (CONVENTIONS)' {
+        [IO.File]::ReadAllText((Join-Path $repo 'Data_Noodler.bat')) | Should -Match 'powershell\.exe -NoProfile -ExecutionPolicy Bypass -STA -File "%~dp0Start-DataNoodler\.ps1" %\*'
+    }
+    It 'Start-DataNoodler.ps1 makes the shortcut, then starts the server' {
+        $t = [IO.File]::ReadAllText((Join-Path $repo 'Start-DataNoodler.ps1'))
+        $t | Should -Match 'Sync-NoodlerShortcut -Root \$root'
+        $t | Should -Match 'Start-Process'
+    }
+    It '.gitignore ignores *.lnk and no .lnk is tracked' {
+        [IO.File]::ReadAllText((Join-Path $repo '.gitignore')) | Should -Match '(?m)^\*\.lnk\s*$'
+        if (Get-Command git -ErrorAction SilentlyContinue) {
+            Push-Location $repo
+            try { $tracked = @(git ls-files -- '*.lnk' 2>$null) } finally { Pop-Location }
+            $tracked | Should -BeNullOrEmpty
+        }
     }
 }
 
@@ -133,8 +194,8 @@ Describe 'server.ps1 wiring (static)' {
         $server | Should -Not -Match 'WriteAllText\(\s*\$settingsFile'
     }
 
-    It 'updates the shortcut only through Update-NoodlerShortcutIcon' {
-        $server | Should -Match 'Update-NoodlerShortcutIcon -Root \$root'
+    It 'makes or repairs the shortcut only through Sync-NoodlerShortcut' {
+        $server | Should -Match 'Sync-NoodlerShortcut -Root \$root'
         $server | Should -Not -Match 'CreateShortcut'
     }
 
