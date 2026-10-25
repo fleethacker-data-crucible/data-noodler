@@ -194,7 +194,7 @@ table.data td.null { color: var(--muted); font-style: italic; }
 .badge.testing                                      { --bc: #5a9cec; }
 .badge.light-blue                                   { --bc: #7cc4f5; }
 .badge.lime                                         { --bc: #a6cf3f; }
-/* Classification */
+/* Classification badges: the class is the stored key (Projects.CLASSIFICATION), shown as Public / Internal / Restricted. */
 .badge.unclassified, .badge.unnpi                   { --bc: #4cc27f; }
 .badge.cui                                          { --bc: #b38ae6; }
 .badge.grey,   .badge.archived                      { --bc: #8d8b82; }

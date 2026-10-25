@@ -18,7 +18,9 @@ const Projects = (() => {
   // Option lists: [stored value, label]. The value is also the badge class.
   const PHASE = [['not-started', 'Not Started'], ['planning', 'Planning'], ['development', 'Development'], ['testing', 'Testing'], ['production', 'Production']];
   const STATUS = [0, 25, 50, 75, 100].map(n => [n, n + '%']); // percent complete
-  const CLASSIFICATION = [['unclassified', 'UNCLASSIFIED'], ['unnpi', 'UNNPI'], ['cui', 'CUI']];
+  // Stored keys ('unclassified', 'unnpi', 'cui') are kept as-is for compatibility with saved projects, the migration below
+  // and the badge CSS classes. Only the labels are shown in the UI (Public / Internal / Restricted); never display the keys.
+  const CLASSIFICATION = [['unclassified', 'Public'], ['unnpi', 'Internal'], ['cui', 'Restricted']];
   const label = (list, v) => (list.find(([k]) => String(k) === String(v)) || [, v ?? ''])[1];
   // Older configs: status was a word (active/complete/planning...), classification public/internal/confidential/restricted.
   const migrate = c => {
@@ -164,7 +166,7 @@ const Projects = (() => {
   const peek = async folder => migrate(await DNFS.readJSON(cfgPath(folder), { quiet: true }));
   async function save(cfg) { cfg.modified = new Date().toISOString(); await DNFS.writeJSON(cfgPath(cfg.folder), cfg); return cfg; }
 
-  async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified', tags = [], workspace }) {
+  async function create({ name, owner = '', developers = [], updaters = [], description = '', phase = 'not-started', status = 0, classification = 'unclassified' /* stored key, shown as 'Public' */, tags = [], workspace }) {
     const err = validName(name); if (err) throw new Error(err);
     const all = await workspaces(), ws = all.find(w => w.folder === workspace || w.id === workspace) || all[0];
     if (!ws) throw new Error('Create a workspace first.');

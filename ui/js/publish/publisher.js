@@ -101,7 +101,7 @@ const Publisher = (() => {
 .card .body>figure{margin:0;height:100%;display:flex;flex-direction:column}
 .card .body>figure>svg:last-child{flex:1;min-height:0}
 .note{height:100%;display:grid;place-items:center;color:var(--muted)}</style></head>
-<body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>${esc(cfg.name)}</h1><div class="sub">Dashboard published ${esc(new Date().toLocaleString(undefined, { hourCycle: 'h23' }))}${cfg.classification ? ` (classification: ${esc(cfg.classification)})` : ''}</div></div></div></header>
+<body><div class="app"><header class="topbar"><div class="brand"><span class="logo">DN</span><div><h1>${esc(cfg.name)}</h1><div class="sub">Dashboard published ${esc(new Date().toLocaleString(undefined, { hourCycle: 'h23' }))}${cfg.classification ? ` (classification: ${esc(Projects.label(Projects.CLASSIFICATION, cfg.classification))})` : ''}</div></div></div></header>
 <div class="main"><div class="board">${cards.join('\n')}</div></div></div></body></html>`;
     // Every ticked format goes to the project's publish folder as <Dashboard Name>.<ext>.
     name = fixName(name || nameStamp() + (cfg.publish?.name || '')).replace(/_+$/, '') || nameStamp() + 'Dashboard';

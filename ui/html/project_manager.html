@@ -475,7 +475,7 @@ const fields = p => [
   { name: 'description', label: 'Description', type: 'textarea', value: p?.description },
   { name: 'phase', label: 'Phase', type: 'select', options: P.PHASE, value: p?.phase || 'not-started' },
   { name: 'status', label: 'Status', type: 'select', options: P.STATUS, value: p?.status ?? 0 },
-  { name: 'classification', label: 'Classification', type: 'select', options: P.CLASSIFICATION, value: p?.classification || 'unclassified' },
+  { name: 'classification', label: 'Classification', type: 'select', options: P.CLASSIFICATION, value: p?.classification || 'unclassified' /* stored key; the select shows its label, 'Public' */ },
   { name: 'tags', label: 'Tags (comma separated)', value: (p?.tags || []).join(', ') },
 ];
 // Project names: the first letter of every word is upper case, changed as the user types (other capitals are kept, for acronyms).
