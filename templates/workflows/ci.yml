@@ -1,0 +1,80 @@
+# FleetHacker CI (from edge-ops templates/workflows/ci.yml): lint + Pester on Windows PowerShell 5.1.
+# STAGED HERE because the pushing token lacks `workflow` scope. To enable it, move this file to
+# .github/workflows/ci.yml (a maintainer with workflow permission).
+name: ci
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tests-path:
+        description: Folder with Pester tests (falls back to templates/tests)
+        type: string
+        default: tests
+env:
+  # Override per repo if tests live elsewhere. Falls back to templates/tests when missing.
+  TESTS_PATH: ${{ inputs.tests-path || 'tests' }}
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show PowerShell version
+        run: $PSVersionTable | Format-Table -AutoSize
+      - name: Install Pester 5 and PSScriptAnalyzer (CurrentUser)
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -MaximumVersion 5.99.99 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+      - name: Parse check (PS 5.1 parser)
+        run: |
+          # Class files that inherit a type from another file (e.g. keystone Providers\*Provider.ps1
+          # needing [GitProviderBase]) fail a standalone parse with TypeNotFound. That error depends on
+          # load order, not syntax, so it is ignored. List any other files to skip in .ci/lint-exclude.txt.
+          $exclude = @(); if (Test-Path .\.ci\lint-exclude.txt) { $exclude = @(Get-Content .\.ci\lint-exclude.txt | Where-Object { $_ -and -not $_.StartsWith('#') }) }
+          $bad = 0
+          Get-ChildItem -Recurse -Include *.ps1, *.psm1, *.psd1 -File | ForEach-Object {
+            $rel = Resolve-Path -Relative $_.FullName
+            if ($exclude | Where-Object { $rel -like $_ }) { return }
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($e in @($errors | Where-Object { $_.ErrorId -ne 'TypeNotFound' })) { Write-Host "${rel}:$($e.Extent.StartLineNumber) $($e.Message)"; $bad++ }
+          }
+          if ($bad -gt 0) { throw "$bad parse error(s)" }
+      - name: Lint (PSScriptAnalyzer, PS 5.1 compatibility)
+        run: |
+          $settings = if (Test-Path .\PSScriptAnalyzerSettings.psd1) { '.\PSScriptAnalyzerSettings.psd1' } else { $null }
+          $r = if ($settings) { Invoke-ScriptAnalyzer -Path . -Recurse -Settings $settings } else { Invoke-ScriptAnalyzer -Path . -Recurse }
+          # Pester 5 'Should -Be' is not in the inbox 5.1 profile (Pester 3.4); ignore that rule in *.Tests.ps1.
+          $exclude = @(); if (Test-Path .\.ci\lint-exclude.txt) { $exclude = @(Get-Content .\.ci\lint-exclude.txt | Where-Object { $_ -and -not $_.StartsWith('#') }) }
+          $r = @($r | Where-Object { $p = $_.ScriptPath; -not ($exclude | Where-Object { (Resolve-Path -Relative $p) -like $_ }) } | Where-Object { -not ($_.ScriptName -like '*.Tests.ps1' -and $_.RuleName -eq 'PSUseCompatibleCommands') })
+          $r | Format-Table -AutoSize
+          if (@($r | Where-Object Severity -eq 'Error').Count -gt 0) { throw 'PSScriptAnalyzer found errors' }
+      - name: Tests (Pester 5)
+        run: |
+          Import-Module Pester -MinimumVersion 5.5.0 -MaximumVersion 5.99.99
+          $path = $env:TESTS_PATH
+          if (-not (Test-Path $path)) { $path = 'templates\tests' }
+          if (-not (Test-Path $path)) { Write-Host "::warning::No tests folder ($env:TESTS_PATH or templates\tests); skipping Pester."; exit 0 }
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = $path
+          $cfg.Run.PassThru = $true
+          $cfg.Output.Verbosity = 'Detailed'
+          $cfg.TestResult.Enabled = $true
+          $cfg.TestResult.OutputPath = 'testResults.xml'
+          $result = Invoke-Pester -Configuration $cfg
+          if ($result.TotalCount -eq 0) { Write-Host "::warning::Pester found 0 tests in $path."; exit 0 }
+          if ($result.FailedCount -gt 0) { throw "$($result.FailedCount) Pester test(s) failed" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pester-results
+          path: testResults.xml
+          if-no-files-found: ignore
