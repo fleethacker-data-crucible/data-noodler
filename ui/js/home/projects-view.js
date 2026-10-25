@@ -9,7 +9,7 @@ const ProjectsView = (() => {
   let projects = [], open = null, listEl, paneEl, ws = null, wsList = [];
   const updated = p => p.modules?.update?.lastRun || '';
   const badge = (list, v) => v === '' || v == null ? '-' : `<span class="badge ${esc(v)}">${esc(P.label(list, v))}</span>`;
-  // "Staggs, Christopher C. CIV" -> "Staggs C."; a Windows login ("christopher_staggs") -> "Staggs C.".
+  // "Doe, Jane Q. CIV" -> "Doe Q."; a Windows login ("jane_doe") -> "Doe Q.".
   const shortName = n => { const [last, rest = ''] = String(n).split(','); const f = rest.trim()[0]; return f ? `${last.trim()} ${f.toUpperCase()}.` : last.trim(); };
   const shortUser = u => { u = String(u || ''); if (u.includes(',')) return shortName(u); const w = u.split(/[._\s-]+/).filter(Boolean); return w.length > 1 ? `${w[w.length - 1][0].toUpperCase()}${w[w.length - 1].slice(1)} ${w[0][0].toUpperCase()}.` : u; };
   const lastUpdated = p => { const u = p.modules?.update; return u?.lastRun ? `${UI.date(u.lastRun)}${u.by ? ` by ${esc(shortUser(u.by))}` : ''}` : '-'; };
