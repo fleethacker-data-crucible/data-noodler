@@ -36,3 +36,15 @@ version.txt
 
 # User workspace (local only)
 workspace/smpg/
+
+# Local environment files (secrets)
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+# Per-install user list (real names): never committed. See config/users.example.json
+config/users.json
+
+# Release packages written by Data_Noodler_Package.ps1
+Data_Noodler_*.gz

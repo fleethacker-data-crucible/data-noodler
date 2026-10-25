@@ -178,9 +178,9 @@ function render() {
   if (open) { loadLog(open); loadCards(projects.find(p => p.folder === open)); }
 }
 
-// "Staggs, Christopher C. CIV" -> "Staggs C."; several joined with "; ".
+// "Doe, Jane Q. CIV" -> "Doe Q."; several joined with "; ".
 const shortName = n => { const [last, rest = ''] = String(n).split(','); const f = rest.trim()[0]; return f ? `${last.trim()} ${f.toUpperCase()}.` : last.trim(); };
-// Who ran Update: a Windows login ("christopher_staggs" -> "Staggs C.") or a "Last, First" name.
+// Who ran Update: a Windows login ("jane_doe" -> "Doe Q.") or a "Last, First" name.
 const shortUser = u => { u = String(u || ''); if (u.includes(',')) return shortName(u); const w = u.split(/[._\s-]+/).filter(Boolean); return w.length > 1 ? `${w[w.length - 1][0].toUpperCase()}${w[w.length - 1].slice(1)} ${w[0][0].toUpperCase()}.` : u; };
 const lastUpdated = p => { const u = p.modules?.update; return u?.lastRun ? `${UI.date(u.lastRun)}${u.by ? ` by ${esc(shortUser(u.by))}` : ''}` : '-'; };
 const shortNames = l => (l || []).map(n => esc(shortName(n))).join('; ') || '-';
