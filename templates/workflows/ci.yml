@@ -23,7 +23,8 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: powershell
+        # Explicit -ExecutionPolicy Bypass -File: the default "powershell -command . {0}" wrapper fails on runners with a Restricted policy (PSSecurityException).
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
     steps:
       - uses: actions/checkout@v4
       - name: Show PowerShell version
