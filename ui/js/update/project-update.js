@@ -1,6 +1,7 @@
 // Update one project: re-runs everything the project has set up, in order, with the choices saved in each module.
 // Global: ProjectUpdate. Needs dn-fs.js, engine-client.js, ui.js, project-log.js, projects.js, external-source.js,
-// pipeline/runner.js, publish/publisher.js (Publisher loads the chart libraries itself).
+// pipeline/runner.js, publish/publisher.js (Publisher loads the chart libraries itself), import/import-core.js and
+// data-studio/pipeline.js (a project with Data Studio pipelines runs those instead of the module steps).
 //   Import     each imported dataset whose source file changed (or has no size / date recorded) is read again with the
 //              same column choices as its first import (dataset.source.select); unchanged sources are left as they are
 //   Transform  every ticked transform query rebuilds its output dataset (when the project has one)
@@ -154,6 +155,19 @@ const ProjectUpdate = (() => {
         return 'Snapshot taken';
       },
     };
+    // Data Studio pipelines (<project>/pipelines/*.pipeline): when the project has any, they ARE the update: every
+    // pipeline runs on the full data (A-Z) as the Import step, the others are done inside them.
+    const pipes = typeof DSPipeline !== 'undefined' ? await DSPipeline.list(ctx) : [];
+    if (pipes.length) {
+      jobs.import = async () => {
+        ctx.at(0); let n = 0;
+        const r = await DSPipeline.runAll(ctx, { log: (m, l) => ctx.log(m, l === 'error' ? 'error' : l), onNode: (nd, st) => { if (st === 'done') ctx.at(Math.min(0.99, ++n / 20)); } });
+        if (!r.ok) throw new Error(r.error);
+        ctx.at(1);
+        return `${r.done.length} pipeline(s) run: ${r.done.join(', ')}`;
+      };
+      for (const k of ['transform', 'publish', 'archive']) jobs[k] = async () => 'skip:Done in the pipeline';
+    }
     for (const s of STEPS) {
       if (s.id === 'update') continue;   // the whole update: set below
       if (failed) { set(s.id, 'skipped', 'Not run (an earlier step failed)'); continue; }

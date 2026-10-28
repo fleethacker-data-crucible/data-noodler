@@ -5,6 +5,8 @@
 //   await ExternalSource.copy(src, 'workspace/projects/x/temp/orders.csv', (done, total) => …)   copies into the project
 //   ExternalSource.drive(src)                     'X:' or '\\server\share'
 //   await ExternalSource.verify(E, aSql, bSql, { values })   compares two sources: columns, types, rows, values
+//   await ExternalSource.pick()                   the server's Windows Open File dialog: [full path] ([] = cancelled)
+//   await ExternalSource.locate([{ name, size }]) full paths of files dropped from Explorer: { paths, missing }
 // The server gives up on a drive after 30 s without progress; this side warns the user after 10 s (onWait).
 const ExternalSource = (() => {
   const WARN_MS = 10000;
@@ -72,5 +74,17 @@ const ExternalSource = (() => {
     return { ok: checks.every(c => c.ok), checks, rows: na, columns: ca };
   }
 
-  return { isPath, drive, name, probe, url, copy, verify };
+  // The browser never sees a picked / dropped file's location: the server finds it.
+  async function post(op, body) {
+    if (!window.DN_TOKEN) throw new Error('Page was not served by the Data Noodler server.');
+    const r = await fetch(`/api/import/${op}`, { method: 'POST', headers: { 'X-DN-Token': window.DN_TOKEN, 'Content-Type': 'application/json' }, body: body == null ? '' : JSON.stringify(body) });
+    let j = {}; try { j = await r.json(); } catch {}
+    if (!r.ok || j.ok === false) throw new Error(j.error || `${op} failed (HTTP ${r.status})`);
+    return j;
+  }
+  const arr = v => v == null ? [] : Array.isArray(v) ? v : [v];   // PowerShell sends a one-item list as the item
+  const pick = async () => arr((await post('pick')).paths);
+  const locate = async files => { const j = await post('locate', files); return { paths: arr(j.paths), missing: arr(j.missing) }; };
+
+  return { isPath, drive, name, probe, url, copy, verify, pick, locate };
 })();
