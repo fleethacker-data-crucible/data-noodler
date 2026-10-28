@@ -226,3 +226,97 @@ body.nocursor, body.nocursor * { cursor: none !important; }   /* while dragging 
 /* No page text selection in Data Studio (labels, buttons, tables): only text boxes and SQL editors select text. */
 body, body * { user-select: none; -webkit-user-select: none; }
 input, textarea, [contenteditable], [contenteditable] *, .sqled, .sqled * { user-select: text; -webkit-user-select: text; }
+/* Node window (double-click a node): the node's look, on top of everything; the grid and nodes fade, blurred, behind it. */
+.nwin-bd { position: fixed; inset: 0; z-index: 90; background: color-mix(in srgb, var(--bg) 35%, transparent); backdrop-filter: blur(3px); opacity: 0; transition: opacity .2s ease; }
+.node.nwin { position: fixed; z-index: 91; cursor: default; opacity: 0; transition: opacity .2s ease; box-shadow: 0 0 0 1px var(--nc), 0 12px 40px #0009; }
+.nwin-bd.in, .node.nwin.in { opacity: 1; }
+.node.nwin:hover { background: var(--panel); }
+.node.nwin .nh { cursor: move; }
+.node.nwin .nx { display: inline-flex; }
+.drawer.nwin-in { position: static; transform: none; transition: none; width: auto; max-width: none; flex: 1; min-height: 0; border: 0; background: none; }
+/* Input node window: the Import module's schema table and controls (theme.css), not the drawer's settings look. */
+.nwin .im table.schema { width: max-content; }
+.nwin .im table.schema td { padding: 4px 8px; }
+.nwin .im table.schema th, .nwin .im table.schema td { white-space: nowrap; text-align: left; }
+.nwin .im table.schema input[type=text] { font-family: inherit; }
+.nwin .im select, .nwin .im select option { text-transform: none; font-family: inherit; font-weight: 400; }
+.nwin .im select.bad { border-color: #f08c00; outline: 1px solid #f08c00; }
+.nwin .im .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nwin .im .req, .nwin .im .im-nmsg { color: var(--err); }
+.nwin .im .im-nmsg { font-size: 12px; margin-left: 8px; }
+.nwin .im .im-name { width: 320px; max-width: 100%; box-sizing: border-box; }
+.nwin .im .im-name.bad { border-color: var(--err); outline: 1px solid var(--err); }
+.nwin .im .in-st.err { color: var(--err); } .nwin .im .in-st.warn { color: var(--warn); }
+.nwin .nh b { flex: 1; }
+/* Node window schema: the whole table, no scroll bars (the wheel still scrolls a wide table). */
+.nwin .im .table-wrap { max-height: none; scrollbar-width: none; }
+.nwin .im .table-wrap::-webkit-scrollbar { display: none; }
+.nwin .im .table-wrap .vthumb { display: none; }
+/* Node window schema: as wide as the window; every column fits its longest value, New Field Name takes the rest. */
+.nwin .im table.schema { width: 100%; table-layout: auto; }
+.nwin .im table.schema th, .nwin .im table.schema td { width: 1%; }
+.nwin .im table.schema th:last-child, .nwin .im table.schema td.nn { width: auto; }
+.nwin .im table.schema td.nn input[type=text] { box-sizing: border-box; width: 100% !important; min-width: 80px !important; }
+.nwin .im .table-wrap { overflow: visible; }
+.nwin .dr-b { overflow-x: hidden; }
+/* Settings window: every button 1 grid cell (24px) tall. */
+.nwin .dr-b button { box-sizing: border-box; height: 24px; min-height: 24px; max-height: 24px; padding-top: 0; padding-bottom: 1px; display: inline-flex; align-items: center; justify-content: center; }
+/* Settings window: every text box 1 grid cell (24px) tall. */
+.nwin .dr-b :is(input[type=text], input[type=search], input:not([type])) { box-sizing: border-box; height: 24px !important; min-height: 24px; max-height: 24px; padding-top: 0; padding-bottom: 0; }
+.nwin .in-mode { gap: 0; }
+.nwin .in-mode label { line-height: 1; min-height: 0; margin: 0; padding: 1px 0; }
+.nwin .in-mode input[type=radio] { margin: 0 2px 0 0; }
+/* Node state dot (title bar): orange flashing = running, green = done, red = failed; done: the border flashes green 3 times. */
+.node .nst { display: none; width: 8px; height: 8px; flex: none; border-radius: 50%; }
+.node[data-st] .nst { display: inline-block; }
+.node[data-st=""] .nst { display: none; }
+.node[data-st="running"] .nst { background: var(--warn, #f08c00); animation: nstBlink .6s ease-in-out infinite alternate; }
+.node[data-st="done"] .nst { background: var(--ok); }
+.node[data-st="failed"] .nst { background: var(--err); }
+@keyframes nstBlink { from { opacity: 1; } to { opacity: .2; } }
+.node.flash { animation: nodeFlash .6s ease-in-out 3; }
+@keyframes nodeFlash { 0%, 100% { box-shadow: 0 4px 14px #0006; } 50% { border-color: var(--ok); box-shadow: 0 0 0 2px var(--ok), 0 4px 14px #0006; } }
+/* The open pipeline's name (top left, under the view buttons). */
+.pipe-name { position: absolute; left: 24px; top: 72px; z-index: 6; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: var(--muted); pointer-events: none; text-transform: uppercase; }
+/* Memory and Workers cards: top right, as tall as the top bar buttons. */
+.cards { position: absolute; top: 24px; right: 24px; z-index: 6; display: flex; gap: 6px; }
+.cards .card { box-sizing: border-box; height: 62px; min-width: 96px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--border); border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 92%, #fff); font-size: 12px; color: var(--text-2); }
+.cards .card label { font-size: 11px; color: var(--muted); }
+.cards .card b { font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }
+.cards .card.spill b { color: var(--err); }
+.cards .cbar { height: 4px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.cards .cbar i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .3s ease; }
+.cards #memCard.spill .cbar i { background: var(--err); }
+.cards .cbar i.busy { width: 30% !important; animation: impBusy 1.2s linear infinite; }
+@keyframes impBusy { from { margin-left: -30%; } to { margin-left: 100%; } }
+.cards .card.wk { width: 220px; }
+.cards .card.wk small { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#wkLights { display: flex; flex-wrap: wrap; gap: 2px; max-height: 14px; overflow: hidden; }
+#wkLights i { width: 6px; height: 6px; border-radius: 1px; background: #6b7280; }
+#wkLights i.l1 { background: var(--ok); } #wkLights i.l2 { background: var(--err); }
+/* Execute: green, bottom centre, 1 grid cell up from the bottom. */
+.exec { position: absolute; left: 50%; bottom: calc(24px + var(--pvh, 0px)); z-index: 6; transform: translateX(-50%); height: 48px; padding: 0 22px 1px 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 0; border-radius: 4px; background: var(--ok); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px #0006; }
+.exec svg { width: 18px; height: 18px; }
+.exec:hover { filter: brightness(1.1); }
+.exec:disabled { opacity: .5; cursor: default; }
+/* Pipelines window: the list of the project's pipelines. */
+.pwin { --nc: var(--blue); }
+.pw-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 4px; }
+.pw-list:has(.in-hint) { border: 0; }
+.pw-row { display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 4px 0 8px; cursor: pointer; }
+.pw-row + .pw-row { border-top: 1px solid var(--border); }
+.pw-row:hover { background: var(--sel); }
+.pw-row.on { font-weight: 700; color: var(--text); }
+.pw-row span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nwin .dr-b .pw-row .pw-x { visibility: hidden; width: 20px; height: 20px !important; min-height: 0; max-height: 20px; padding: 0 0 3px; border: 0; background: none; color: var(--err); font-size: 20px; font-weight: 700; }
+.pw-row:hover .pw-x { visibility: visible; }
+.nwin .in-row input[type=text] { flex: 1; min-width: 0; }
+/* Node settings: SQL editor fills the width; rows of fields / keys; ticks. */
+.nwin .ns-sql .sqled { height: 360px; }
+.nwin .ns-fn input[data-f="name"] { flex: 0 0 160px; }
+.nwin .ns-fn input[data-f="expr"] { flex: 1; min-width: 0; }
+.nwin .ns-key select { flex: 1; min-width: 0; height: 24px; }
+.nwin .ns-tick { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--st); }
+.nwin code { font-family: var(--mono); color: var(--text); }

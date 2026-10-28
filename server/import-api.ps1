@@ -6,6 +6,9 @@
 #   POST /api/import/copy?src=<full path>&to=<project path>&id=<job id>
 #                                                    copies into the project in 4 MB chunks, checks the size: { path, size }
 #   GET  /api/import/progress?id=<job id>            { done, total } of a running copy
+#   POST /api/import/pick                            Windows Open File dialog (several files): { paths: [full path] } ([] = cancelled)
+#   POST /api/import/locate  body [{ name, size }]   full paths of files dragged in from Explorer (the browser never gets them):
+#                                                    the selected items of the open Explorer windows, then the Desktop: { paths, missing }
 #
 # Every call runs on a background runspace, so a dead network drive can't freeze the server.
 # The main loop watches each job (Watch-ImportJobs): no progress for 10 s -> warning naming the drive,
@@ -137,6 +140,7 @@ function Handle-Import($req, $res, $op, $ctx) {
         Send-Json $res $(if ($p) { @{ ok = $true; done = $p.done; total = $p.total } } else { @{ ok = $false; error = 'No such job.' } })
         return $false
     }
+    if ($op -in 'pick', 'locate') { Start-PickJob $req $op $ctx; return $true }
     if ($op -notin 'probe', 'read', 'copy') { throw [FsError]::new(404, "Unknown import call '$op'.") }
     $src = Resolve-SourcePath $q['src']
     $dest = $null
@@ -167,8 +171,65 @@ function Send-ImportError($job, $fsErr) {
     try { $res.Close() } catch {}
 }
 
+# Pick / locate: Windows dialogs and Explorer (Shell COM) need an STA thread, so each runs on its own STA runspace; the
+# job writes its own response. The main loop only disposes finished ones.
+$pickJobs = [Collections.Generic.List[object]]::new()
+$pickScript = {
+    param($ctx, $op, $body, $exts)
+    $res = $ctx.Response
+    function Reply($obj) {
+        $b = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $obj -Compress -Depth 4))
+        $res.ContentType = 'application/json'; $res.ContentLength64 = $b.Length
+        $res.OutputStream.Write($b, 0, $b.Length); $res.Close()
+    }
+    try {
+        if ($op -eq 'pick') {
+            Add-Type -AssemblyName System.Windows.Forms
+            $owner = New-Object Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false; Width = 0; Height = 0; StartPosition = 'CenterScreen' }
+            $owner.Show(); $owner.Activate()
+            $d = New-Object Windows.Forms.OpenFileDialog -Property @{ Multiselect = $true; Title = 'Pick raw source files'
+                Filter = 'Data files|' + (($exts | ForEach-Object { "*$_" }) -join ';') + '|All files|*.*' }
+            $paths = @(); if ($d.ShowDialog($owner) -eq 'OK') { $paths = @($d.FileNames) }
+            $owner.Close(); $owner.Dispose()
+            Reply @{ ok = $true; paths = $paths }
+        } else {
+            $want = @(($body | ConvertFrom-Json) | ForEach-Object { $_ })
+            $seen = [Collections.Generic.List[string]]::new()
+            try {
+                $sh = New-Object -ComObject Shell.Application
+                foreach ($w in @($sh.Windows())) { try { foreach ($it in @($w.Document.SelectedItems())) { if ($it.Path) { $seen.Add([string]$it.Path) } } } catch {} }
+            } catch {}
+            $desk = [Environment]::GetFolderPath('Desktop')
+            if ($desk -and (Test-Path -LiteralPath $desk)) { Get-ChildItem -LiteralPath $desk -File -ErrorAction SilentlyContinue | ForEach-Object { $seen.Add($_.FullName) } }
+            $paths = @(); $missing = @()
+            foreach ($f in $want) {
+                $hit = $seen | Where-Object { [IO.Path]::GetFileName($_) -ieq $f.name -and (-not $f.size -or ([IO.FileInfo]::new($_)).Length -eq [long]$f.size) } | Select-Object -First 1
+                if ($hit) { $paths += $hit } else { $missing += $f.name }
+            }
+            Reply @{ ok = $true; paths = $paths; missing = $missing }
+        }
+    } catch {
+        try { $res.StatusCode = 500; Reply @{ ok = $false; error = $_.Exception.Message } } catch {}
+    }
+}
+function Start-PickJob($req, $op, $ctx) {
+    if ($req.HttpMethod -ne 'POST') { throw [FsError]::new(405, 'Use POST.') }
+    $body = ''
+    if ($op -eq 'locate') { $r = [IO.StreamReader]::new($req.InputStream, [Text.Encoding]::UTF8); try { $body = $r.ReadToEnd() } finally { $r.Dispose() } }
+    $rs = [RunspaceFactory]::CreateRunspace(); $rs.ApartmentState = 'STA'; $rs.ThreadOptions = 'ReuseThread'; $rs.Open()
+    $ps = [PowerShell]::Create(); $ps.Runspace = $rs
+    [void]$ps.AddScript($pickScript).AddArgument($ctx).AddArgument($op).AddArgument($body).AddArgument($importExts)
+    $pickJobs.Add(@{ ps = $ps; rs = $rs; handle = $ps.BeginInvoke() })
+    $script:hits++
+    Add-Log 'sys' "Import $op started"
+}
+
 # Called every loop pass: finish done jobs, warn on stalls, give up on dead drives.
 function Watch-ImportJobs {
+    for ($i = $pickJobs.Count - 1; $i -ge 0; $i--) {
+        $j = $pickJobs[$i]
+        if ($j.handle.IsCompleted) { try { [void]$j.ps.EndInvoke($j.handle) } catch {}; try { $j.ps.Dispose(); $j.rs.Dispose() } catch {}; $pickJobs.RemoveAt($i) }
+    }
     $now = [DateTime]::UtcNow
     for ($i = $importJobs.Count - 1; $i -ge 0; $i--) {
         $j = $importJobs[$i]

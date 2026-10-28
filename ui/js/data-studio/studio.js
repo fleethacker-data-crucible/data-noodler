@@ -145,14 +145,13 @@
   const ICON_APPEND = `<rect x="4" y="3" width="16" height="7" rx="1.5" ${SW}/><rect x="4" y="14" width="16" height="7" rx="1.5" ${SW}/><path d="M12 10v4" ${SW}/>`;
   const ICON_CHART = `<path d="M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6" ${SW}/>`;
   const ICON_OUTPUT = `<path d="M12 15V3M7 8l5-5 5 5M4 19h16" ${SW}/>`;
-  const ICONS = { import: ICON_IMPORT, transform: ICON_TRANSFORM, sql: ICON_SQL, function: ICON_FUNCTION, join: ICON_JOIN, append: ICON_APPEND, chart: ICON_CHART, output: ICON_OUTPUT };
+  const ICON_PUBLISH = `<path d="M4 12v7h16v-7M12 3v12M8 7l4-4 4 4" ${SW}/><circle cx="12" cy="3" r="0" ${SW}/>`;
+  const ICON_ARCHIVE = `<rect x="3" y="4" width="18" height="4" rx="1" ${SW}/><path d="M5 8v11h14V8M10 12h4" ${SW}/>`;
+  const ICON_PIPE = `<circle cx="5" cy="6" r="2.5" ${SW}/><circle cx="19" cy="6" r="2.5" ${SW}/><circle cx="12" cy="18" r="2.5" ${SW}/><path d="M7.5 6h9M6.5 8l4 8M17.5 8l-4 8" ${SW}/>`;
+  const ICONS = { import: ICON_IMPORT, transform: ICON_TRANSFORM, sql: ICON_SQL, function: ICON_FUNCTION, join: ICON_JOIN, append: ICON_APPEND, chart: ICON_CHART, output: ICON_OUTPUT, publish: ICON_PUBLISH, archive: ICON_ARCHIVE };
   // The Nodes menu (top bar Nodes), in this order: [type, name]
-  const NODE_TYPES = [['import', 'Input'], ['transform', 'Transform'], ['sql', 'SQL'], ['function', 'Function'], ['join', 'Join'], ['append', 'Append'], ['chart', 'Chart'], ['output', 'Output']];
-  let nodes = [{ id: 'n1', type: 'import', title: 'Import', sub: 'Test node', x: -264, y: -48 },
-               { id: 'n3', type: 'import', title: 'Import 2', sub: 'Test node', x: -264, y: 96 },
-               { id: 'n4', type: 'join', title: 'Join', sub: 'Test node', x: 72, y: 96 },
-               { id: 'n2', type: 'transform', title: 'Transform', sub: 'Test node', x: 72, y: -48 }];
-  nodes.forEach(n => { n.w ??= W0; n.h ??= H0; });
+  const NODE_TYPES = [['import', 'Input'], ['transform', 'Transform'], ['sql', 'SQL'], ['function', 'Function'], ['join', 'Join'], ['append', 'Append'], ['chart', 'Chart'], ['output', 'Output'], ['publish', 'Publish'], ['archive', 'Archive']];
+  let nodes = [];   // the open pipeline's nodes (DSPipeline: <project>/pipelines/<name>.pipeline)
   applyView();
   let links = [];   // { from: node id (its out port), to: node id (its in port) }
   const snap = v => prefs.snap ? Math.round(v / G) * G : Math.round(v);
@@ -163,14 +162,14 @@
   const hits = (r, skip = new Set()) => nodes.some(m => !skip.has(m.id) && r.x < m.x + m.w + GAP && m.x - GAP < r.x + r.w && r.y < m.y + m.h + GAP && m.y - GAP < r.y + r.h);
   const multi = n => n.type === 'join' || n.type === 'append';   // one input dot, any number of wires
   const hasIn = n => n.type !== 'import';   // input nodes: an output only
-  const hasOut = n => n.type !== 'output';   // output nodes: an input only
+  const hasOut = n => !['output', 'publish', 'archive'].includes(n.type);   // output, publish and archive nodes: an input only
   const ins = n => links.filter(l => l.to === n.id);
   const wires = document.createElementNS(NS, 'svg'); wires.id = 'wires'; $('nodes').append(wires);
   const DIRS = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
   function drawNode(n) {
     const el = document.createElement('div');
     el.className = `node t-${n.type}`; el.dataset.id = n.id;
-    el.innerHTML = `<div class="nh"><svg viewBox="0 0 24 24">${ICONS[n.type]}</svg><b>${UI.esc(n.title)}</b><button type="button" class="nx" title="Delete this node">×</button></div><div class="nb">${UI.esc(n.sub)}</div>`
+    el.innerHTML = `<div class="nh"><svg viewBox="0 0 24 24">${ICONS[n.type]}</svg><i class="nst"></i><b>${UI.esc(n.title)}</b><button type="button" class="nx" title="Delete this node">×</button></div><div class="nb">${UI.esc(n.sub)}</div>`
       + (hasIn(n) ? '<span class="port in" data-port="in"></span>' : '') + (hasOut(n) ? '<span class="port out" data-port="out"></span>' : '') + DIRS.map(d => `<span class="rz ${d}" data-dir="${d}"></span>`).join('');
     $('nodes').append(el); vis.set(n.id, { x: n.x, y: n.y, w: n.w, h: n.h }); putNode(el, n);
     el.classList.toggle('bar', n.h <= G);
@@ -220,7 +219,7 @@
     const up = ev => {
       tile.removeEventListener('pointermove', move); tile.removeEventListener('pointerup', up); ghost.remove(); document.body.classList.remove('nocursor');
       if (!canDrop(ev)) return;
-      const n = { id: `n${Date.now().toString(36)}`, type, title: name, sub: '', ...place(ev) };
+      const n = { id: DSPipeline.uuid(), type, title: name, sub: '', ...place(ev) };
       nodes.push(n); drawNode(n);
       $('nodes').querySelectorAll('.node.sel').forEach(x => x.classList.remove('sel')); elOf(n.id).classList.add('sel');
       drawLinks(); applyView();
@@ -248,109 +247,429 @@
     };
     save();
   }
-  // ---- Input node settings (every input node the same, for now): RAW SOURCE FILES and SCHEMA, as in the Import module.
-  // Browse / drop / a typed path pick the files (only .csv, .tsv, .txt); Import then copies them into data/raw (Copy) or
-  // keeps where they are (Link: a typed path only; browsed / dropped files are always copied, the browser hides their
-  // location). The node keeps n.src = { mode, files: [{ name, path | origin, size, modified }], cols: [{ name, type,
-  // newName, newType }] }; the schema is read from the first file. ----
-  const INPUT_EXT = /\.(csv|tsv|txt)$/i;
-  const pending = new Map();   // node id -> { files: [File], paths: [string] } picked, not imported yet
-  // the Import module's own code (ui/js/import/import-core.js): types, names, casts, reader, preview
-  const { TYPES, typeLabel, unquote, defName: colName } = ImportCore;
-  function inputSettings(n, box) {
-    const src = n.src ||= { mode: 'copy', files: [], cols: [] };
-    const pend = pending.get(n.id) || { files: [], paths: [] }; pending.set(n.id, pend);
-    const picked = [...pend.files.map(f => f.name), ...pend.paths.map(p => ExternalSource.name(p))];
-    let open = null;   // the schema field expanded
-    const draw = () => {
-      const fileRows = picked.length ? picked.map(t => `<div class="in-f"><span>${UI.esc(t)}</span><small>to import</small></div>`).join('')
-        : src.files.map(f => `<div class="in-f" title="${UI.esc(f.path || f.origin)}"><span>${UI.esc(f.name)}</span><small>${f.path ? 'copied' : 'linked'}</small></div>`).join('');
-      const cols = src.cols.map((c, i) => [c, i]).sort((a, b) => a[0].name.localeCompare(b[0].name, undefined, { sensitivity: 'base', numeric: true }));
-      box.querySelectorAll('.in-part').forEach(x => x.remove());
-      box.insertAdjacentHTML('beforeend', `<div class="tm-sep in-part"></div>
-        <div class="dr-sec in-part">RAW SOURCE FILES</div>
-        <div class="dr-full in-part">
-          <div class="in-row"><button type="button" class="ghost" data-in="browse">Browse</button><input type="text" class="in-path" placeholder="File path: X:\\folder\\file.csv, Enter" spellcheck="false"></div>
-          <input type="file" class="in-file" multiple hidden accept=".csv,.tsv,.txt">
-          <div class="in-drop">Drop .csv, .tsv or .txt files here</div>
-          <div class="in-mode">
-            <label><input type="radio" name="imode-${n.id}" value="copy" ${src.mode !== 'link' ? 'checked' : ''}> Copy raw files to project</label>
-            <label><input type="radio" name="imode-${n.id}" value="link" ${src.mode === 'link' ? 'checked' : ''}> Link to raw file's location</label>
-            ${src.mode === 'link' ? '<div class="in-hint">Link works with a typed path. Browse and drop always copy (the browser does not tell the app where a file is).</div>' : ''}
-          </div>
-          ${fileRows ? `<div class="in-list">${fileRows}</div>` : ''}
-          <div class="in-row"><button type="button" data-in="import" ${picked.length ? '' : 'disabled'}>Import</button><span class="in-st"></span></div>
-        </div>
-        <div class="tm-sep in-part"></div>
-        <div class="dr-sec in-part">SCHEMA</div>
-        <div class="dr-full in-part">${cols.length ? `<div class="sc-list">${cols.map(([c, i]) => `<div class="sc-f${open === i ? ' open' : ''}" data-i="${i}">
-            <div class="sc-h"><span class="nd-arr"></span><span class="sc-n">${UI.esc(c.name)}</span>${c.newName !== colName(c.name) || c.newType !== c.type ? '<small>changed</small>' : ''}</div>
-            ${open === i ? `<div class="sc-b">
-              <div class="optrow"><span>Detected Type</span><span class="sc-t">${UI.esc(c.type)}</span></div>
-              <div class="optrow"><span>Change Type</span><select data-sc="newType">${[...new Set([c.type, ...TYPES])].map(t => `<option value="${UI.esc(t)}" ${t === c.newType ? 'selected' : ''}>${UI.esc(typeLabel(t))}</option>`).join('')}</select></div>
-              <div class="optrow"><span>Rename</span><input type="text" data-sc="newName" value="${UI.esc(c.newName)}" spellcheck="false"></div>
-            </div>` : ''}</div>`).join('')}</div>` : '<div class="in-hint">Import a file to see its fields.</div>'}</div>`);
-      const drop = box.querySelector('.in-drop');
-      drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
-      drop.ondragleave = () => drop.classList.remove('over');
-      drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); take([...e.dataTransfer.files], []); };
-      box.querySelector('.in-file').onchange = e => { take([...e.target.files], []); e.target.value = ''; };
-      const path = box.querySelector('.in-path');
-      path.addEventListener('paste', e => { const t = unquote(e.clipboardData?.getData('text/plain') || ''); if (t) { e.preventDefault(); path.value = t; } });
-      path.addEventListener('keydown', e => { if (e.key === 'Enter') { const t = unquote(path.value); if (!ExternalSource.isPath(t)) return UI.toast('Enter a full path like X:\\folder\\file.csv or \\\\server\\share\\file.csv.', 'err'); take([], [t]); } });
-    };
-    // picked files: only .csv / .tsv / .txt
-    function take(files, paths) {
-      const bad = [...files.map(f => f.name), ...paths].filter(t => !INPUT_EXT.test(t));
-      if (bad.length) UI.toast(`Only .csv, .tsv or .txt files: ${bad.map(t => ExternalSource.name(t)).join(', ')} left out.`, 'err');
-      pend.files = files.filter(f => INPUT_EXT.test(f.name)); pend.paths = paths.filter(t => INPUT_EXT.test(t));
-      picked.splice(0, picked.length, ...pend.files.map(f => f.name), ...pend.paths.map(t => ExternalSource.name(t)));
+  // ---- Node window (double-click a node): looks like the node (title, selected border; no ports, no wires), on top of
+  // everything, 28 x 28 grid cells (screen px), centred in the window; drag by the title, resize from any edge / corner.
+  // The grid and nodes fade, blurred, behind it. X or Esc closes it. ----
+  function openNodeWin(n) {
+    closeNodeWin();
+    const bd = document.createElement('div'); bd.className = 'nwin-bd'; bd.id = 'nodeWinBd';
+    const w = document.createElement('div'); w.className = `node sel nwin t-${n.type}`; w.id = 'nodeWin';
+    w.innerHTML = `<div class="nh"><svg viewBox="0 0 24 24">${ICONS[n.type]}</svg><b>Settings - ${UI.esc(n.title)}</b><button type="button" class="nx" title="Close">×</button></div>`
+      + `<div class="drawer nwin-in t-${n.type}"><div class="dr-b"></div></div>` + DIRS.map(d => `<span class="rz ${d}" data-dir="${d}"></span>`).join('');
+    document.body.append(bd, w);
+    const S = 28 * G, vw = innerWidth, vh = innerHeight;
+    let r = { w: Math.min(S, vw - 16), h: Math.min(S, vh - 16) }; r.x = (vw - r.w) / 2; r.y = (vh - r.h) / 2;
+    const put = () => Object.assign(w.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.w}px`, height: `${r.h}px` });
+    put();
+    const box = w.querySelector('.dr-b');
+    if (n.type === 'import') inputSettings(n, box);   // input nodes: no Name box (the Table Name is at the top)
+    else {
+      box.innerHTML = `<div class="optrow"><span>Name</span><input type="text" data-k="title" value="${UI.esc(n.title)}" spellcheck="false"></div>`;
+      box.querySelector('[data-k="title"]').oninput = e => {
+        n.title = e.target.value; elOf(n.id).querySelector('.nh b').textContent = n.title; w.querySelector('.nh b').textContent = `Settings - ${n.title}`; save();
+      };
+      typeSettings(n, box);
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => { bd.classList.add('in'); w.classList.add('in'); }));
+    w.addEventListener('wheel', e => e.stopPropagation());
+    w.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      if (e.button !== 0) return;
+      if (e.target.closest('.nx')) return closeNodeWin();
+      const rz = e.target.closest('.rz'), head = !rz && e.target.closest('.nh');
+      if (!rz && !head) return;
+      e.preventDefault(); w.setPointerCapture(e.pointerId);
+      const x0 = e.clientX, y0 = e.clientY, s = { ...r }, d = rz?.dataset.dir || '', MIN = 8 * G;
+      const move = ev => {
+        const dx = ev.clientX - x0, dy = ev.clientY - y0;
+        if (head) { r.x = s.x + dx; r.y = s.y + dy; }
+        else {
+          if (d.includes('e')) r.w = Math.max(MIN, s.w + dx);
+          if (d.includes('s')) r.h = Math.max(MIN, s.h + dy);
+          if (d.includes('w')) { r.w = Math.max(MIN, s.w - dx); r.x = s.x + s.w - r.w; }
+          if (d.includes('n')) { r.h = Math.max(MIN, s.h - dy); r.y = s.y + s.h - r.h; }
+        }
+        put();
+      };
+      const up = () => { w.removeEventListener('pointermove', move); w.removeEventListener('pointerup', up); w.removeEventListener('pointercancel', up); };
+      w.addEventListener('pointermove', move); w.addEventListener('pointerup', up); w.addEventListener('pointercancel', up);
+    });
+  }
+  function closeNodeWin() {
+    for (const id of ['nodeWin', 'nodeWinBd']) {
+      const el = document.getElementById(id); if (!el) continue;
+      el.removeAttribute('id'); el.classList.remove('in'); el.style.pointerEvents = 'none'; setTimeout(() => el.remove(), 200);
+    }
+  }
+  on(window, 'keydown', e => { if (e.key === 'Escape') closeNodeWin(); });
+
+  // ---- Settings of the other node types (under the Name box). Every change saves the pipeline, which re-runs the
+  // node on the first 1000 rows (and what is downstream of it). The fields offered are its inputs' (their last run). ----
+  const insOf = n => (pipe ? DSPipeline.inputs(pipe, n) : []);
+  async function fieldsOf(m) {
+    try { return (await Engine.describe(`SELECT * FROM read_dataset(${Engine.lit(DSPipeline.outDir(ctx, pipe, m, 'preview'))})`)).map(c => c.name); }
+    catch { return []; }
+  }
+  const opt = (v, cur, label = v) => `<option value="${UI.esc(v)}" ${v === cur ? 'selected' : ''}>${UI.esc(label)}</option>`;
+  function typeSettings(n, box) {
+    const s = n.cfg ||= {}, esc = UI.esc, ins = insOf(n);
+    const add = html => box.insertAdjacentHTML('beforeend', html);
+    const inputsNote = () => ins.length ? ins.map((m, i) => `<code>INPUT${i + 1}</code> = ${esc(m.title)} (<code>${esc(DSPipeline.viewName(m))}</code>)`).join(', ') : 'Nothing is wired into this node yet.';
+    const changed = () => save();
+    if (n.type === 'transform' || n.type === 'sql') {
+      // Oracle SQL, as in Transform: a query on the inputs (INPUT = the first one). Its result is the node's output.
+      s.sql ??= 'SELECT *\nFROM INPUT';
+      add(`<div class="tm-sep"></div><div class="dr-sec">SQL</div><div class="dr-full"><div class="in-hint">Inputs: ${inputsNote()}</div><div class="ns-sql"></div></div>`);
+      const ed = SqlEditor.mount(box.querySelector('.ns-sql'), {
+        onChange: t => { s.sql = t; changed(); },
+        words: () => ({ tables: ['INPUT', ...ins.flatMap((m, i) => [`INPUT${i + 1}`, DSPipeline.viewName(m)])], columns: [], fields: {} }),
+        check: t => Engine.check(t, DSPipeline.viewsOf(ctx, pipe, n, 'preview')).catch(() => []),
+      });
+      ed.value = s.sql;
+    } else if (n.type === 'function') {
+      // New fields from expressions (Oracle SQL on the input's fields): NAME = expression. Add / Delete rows.
+      s.cols ??= [];
+      add(`<div class="tm-sep"></div><div class="dr-sec">CALCULATED FIELDS</div><div class="dr-full"><div class="in-hint">Each row adds a field to the input's. Expressions are Oracle SQL on its fields, e.g. <code>PRICE * QTY</code>.</div><div class="ns-rows"></div><div class="in-row"><button type="button" data-f="add">Add</button></div></div>`);
+      const draw = () => {
+        box.querySelector('.ns-rows').innerHTML = s.cols.map((c, i) => `<div class="in-row ns-fn" data-i="${i}"><input type="text" data-f="name" value="${esc(c.name || '')}" placeholder="FIELD_NAME" spellcheck="false"><input type="text" data-f="expr" value="${esc(c.expr || '')}" placeholder="Expression" spellcheck="false"><button type="button" class="ghost" data-f="del">Delete</button></div>`).join('');
+      };
       draw();
+      box.addEventListener('click', e => {
+        const b = e.target.closest('[data-f]')?.dataset.f;
+        if (b === 'add') { s.cols.push({ name: '', expr: '' }); draw(); }
+        else if (b === 'del') { s.cols.splice(+e.target.closest('.ns-fn').dataset.i, 1); draw(); changed(); }
+      });
+      box.addEventListener('input', e => {
+        const row = e.target.closest('.ns-fn'); if (!row) return;
+        const k = e.target.dataset.f, c = s.cols[+row.dataset.i];
+        if (k === 'name') { const el = e.target, p = el.selectionStart; el.value = el.value.toUpperCase().replace(/\s/g, '_'); el.setSelectionRange(p, p); }
+        c[k] = e.target.value; changed();
+      });
+    } else if (n.type === 'join') {
+      // The first input is the left side, the second the right; join type and the field pairs to match.
+      s.type ??= 'INNER'; s.keys ??= [{ l: '', r: '' }];
+      add(`<div class="tm-sep"></div><div class="dr-sec">JOIN</div><div class="dr-full"><div class="in-hint">Left: ${esc(ins[0]?.title || '(wire a node in)')} · Right: ${esc(ins[1]?.title || '(wire a second node in)')}</div></div>
+        <div class="optrow"><span>Join Type</span><select data-j="type">${[['INNER', 'inner'], ['LEFT', 'left'], ['RIGHT', 'right'], ['FULL', 'full outer'], ['CROSS', 'cross']].map(([v, t]) => opt(v, s.type, t)).join('')}</select></div>
+        <div class="tm-sep"></div><div class="dr-sec">MATCH FIELDS</div><div class="dr-full"><div class="ns-keys"></div><div class="in-row"><button type="button" data-j="add">Add</button></div></div>`);
+      let lf = [], rf = [];
+      const draw = () => {
+        box.querySelector('.ns-keys').innerHTML = s.keys.map((k, i) => `<div class="in-row ns-key" data-i="${i}"><select data-j="l"><option value=""></option>${lf.map(f => opt(f, k.l)).join('')}</select><span>=</span><select data-j="r"><option value=""></option>${rf.map(f => opt(f, k.r)).join('')}</select><button type="button" class="ghost" data-j="del">Delete</button></div>`).join('');
+      };
+      draw();
+      Promise.all([ins[0] ? fieldsOf(ins[0]) : [], ins[1] ? fieldsOf(ins[1]) : []]).then(([a, b]) => { lf = a; rf = b; draw(); });
+      box.addEventListener('click', e => {
+        const b = e.target.closest('button[data-j]')?.dataset.j;
+        if (b === 'add') { s.keys.push({ l: '', r: '' }); draw(); }
+        else if (b === 'del') { s.keys.splice(+e.target.closest('.ns-key').dataset.i, 1); draw(); changed(); }
+      });
+      box.addEventListener('change', e => {
+        const k = e.target.dataset.j; if (!k) return;
+        if (k === 'type') s.type = e.target.value; else s.keys[+e.target.closest('.ns-key').dataset.i][k] = e.target.value;
+        changed();
+      });
+    } else if (n.type === 'append') {
+      // Every input's rows one after another, fields matched by name (a field one input lacks is empty there).
+      add(`<div class="tm-sep"></div><div class="dr-sec">APPEND</div><div class="dr-full"><div class="in-hint">Inputs, in order: ${ins.map(m => esc(m.title)).join(', ') || 'none yet'}. Fields are matched by name.</div></div>
+        <div class="optrow"><span>Remove Duplicate Rows</span><span class="seg"><button type="button" data-a="0" class="${s.distinct ? '' : 'on'}">OFF</button><button type="button" data-a="1" class="${s.distinct ? 'on' : ''}">ON</button></span></div>`);
+      box.addEventListener('click', e => {
+        const b = e.target.closest('[data-a]'); if (!b) return;
+        s.distinct = b.dataset.a === '1'; b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); changed();
+      });
+    } else if (n.type === 'output') {
+      // The dataset Execute saves (data/clean/CLEAN_<NAME>): what Dashboard Studio and Publish use.
+      s.name ??= DSPipeline.viewName(n);
+      add(`<div class="tm-sep"></div><div class="dr-sec">OUTPUT DATASET</div>
+        <div class="optrow"><span>Dataset Name</span><input type="text" data-o="name" value="${esc(s.name)}" spellcheck="false"></div>
+        <div class="dr-full"><div class="in-hint">Execute saves it as <code class="ns-ds">CLEAN_${esc(s.name.replace(/^CLEAN_/i, ''))}</code> in data/clean.</div></div>`);
+      box.querySelector('[data-o="name"]').oninput = e => {
+        const el = e.target, p = el.selectionStart; el.value = el.value.toUpperCase().replace(/\s/g, '_'); el.setSelectionRange(p, p);
+        s.name = el.value; box.querySelector('.ns-ds').textContent = `CLEAN_${s.name.replace(/^CLEAN_/i, '')}`; changed();
+      };
+    } else if (n.type === 'archive') {
+      // Execute takes a zipped snapshot of the project in archives/ (as Archive and Update do).
+      add(`<div class="tm-sep"></div><div class="dr-sec">ARCHIVE</div>
+        <div class="optrow"><span>Snapshot Note</span><input type="text" data-r="note" value="${esc(s.note || '')}" placeholder="Pipeline ${esc(pipe?.name || '')}" spellcheck="false"></div>
+        <div class="dr-full"><div class="in-hint">Execute takes a zipped snapshot of the project (settings, datasets, pipelines, dashboard) in archives/.</div></div>`);
+      box.querySelector('[data-r="note"]').oninput = e => { s.note = e.target.value; changed(); };
+    } else if (n.type === 'publish') {
+      // As Publish: the dashboard in the ticked formats, and datasets exported as files (publish/).
+      s.targets ??= []; s.data ??= []; s.fmt ??= 'csv';
+      const tick = (k, v, label, on) => `<label class="ns-tick"><input type="checkbox" data-p="${k}" value="${esc(v)}" ${on ? 'checked' : ''}> ${esc(label)}</label>`;
+      add(`<div class="tm-sep"></div><div class="dr-sec">DASHBOARD</div>
+        <div class="optrow"><span>Dashboard Name</span><input type="text" data-p="name" value="${esc(s.name || '')}" spellcheck="false"></div>
+        <div class="dr-full">${Publisher.TARGETS.map(t => tick('targets', t.id, t.label, s.targets.includes(t.id))).join('')}</div>
+        <div class="tm-sep"></div><div class="dr-sec">DATASETS</div>
+        <div class="optrow"><span>File Format</span><select data-p="fmt">${['csv', 'parquet', 'sqlite'].map(f => opt(f, s.fmt)).join('')}</select></div>
+        <div class="dr-full ns-data"><div class="in-hint">Reading the project's datasets…</div></div>`);
+      Projects.get(ctx.folder).then(cfg => {
+        const ds = (cfg.datasets || []).filter(d => /^CLEAN_/.test(d.name)).map(d => d.name).sort();
+        box.querySelector('.ns-data').innerHTML = ds.length ? ds.map(d => tick('data', d, d, s.data.includes(d))).join('') : '<div class="in-hint">No CLEAN_ datasets yet: Execute a pipeline with an Output node first.</div>';
+      });
+      box.addEventListener('change', e => {
+        const k = e.target.dataset.p; if (!k) return;
+        if (k === 'targets' || k === 'data') s[k] = [...box.querySelectorAll(`[data-p="${k}"]:checked`)].map(x => x.value);
+        else s[k] = e.target.value;
+        changed();
+      });
+      box.querySelector('[data-p="name"]').oninput = e => { s.name = e.target.value; changed(); };
+    } else if (n.type === 'chart') {
+      add('<div class="tm-sep"></div><div class="dr-full"><div class="in-hint">Chart nodes come later.</div></div>');
     }
-    const status = t => { const el = box.querySelector('.in-st'); if (el) el.textContent = t; };
+  }
+
+  // ---- Input node settings: the Import module (ui/html/import.html) in the node window, without its preview. Browse /
+  // drop / From Path pick a raw source (Copy: into data/raw; Link: read where it is, From Path only), its schema shows
+  // (Keep, Source Field, Detected Type, Change Type, New Field Name), and Import / Update writes the Arrow dataset to
+  // data/imported and records it, exactly as the Import module does. The node keeps n.src = { mode, path, label, ext,
+  // from, table, ds, name, cols }; the reader, SQL source and row count live only while the page is open. ----
+  const { TYPES, TYPE_NEED, typeLabel, tryCast, unquote } = ImportCore;
+  const live_ = new Map();   // node id -> { reader, src, rows }
+  const dsSlug = s => s.toUpperCase().replace(/\.[^.]+$/, '').replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'DATASET';
+  function inputSettings(n, box) {
+    const s = n.src && 'label' in n.src ? n.src : (n.src = { mode: 'copy', label: null });
+    const L = live_.get(n.id) || {}; live_.set(n.id, L);
+    const esc = UI.esc, q = sel => box.querySelector(sel);
+    let importing = false;
+    box.insertAdjacentHTML('beforeend', `<div class="dr-full im">
+        <div class="dr-sec">TABLE NAME <span class="req" title="Required">*</span></div>
+        <div><input type="text" class="im-name" placeholder="UPPER_CASE_NAME" spellcheck="false"><span class="im-nmsg" hidden></span></div>
+      </div>
+      <div class="tm-sep"></div>
+      <div class="dr-sec">RAW SOURCE FILES</div>
+      <div class="dr-full im">
+        <div class="in-mode">
+          <label title="Browse, drop and From Path put a copy of the file in the project's data/raw folder"><input type="radio" name="imode-${n.id}" value="copy"> Copy raw files to project</label>
+          <label title="From Path reads the file where it is (nothing is copied); Update reads it there again"><input type="radio" name="imode-${n.id}" value="link"> Link to raw file's location</label>
+        </div>
+        <div class="in-row"><button type="button" class="ghost" data-in="browse">Browse</button><input type="text" class="in-path" placeholder="X:\\folder\\file.csv or \\\\snnsvrXXX\\folder\\file.csv" spellcheck="false" autocomplete="off"><button type="button" data-in="go">GO</button></div>
+        <div class="in-drop">Drop CSV, Parquet, Arrow or SQLite files here</div>
+        <div class="table-wrap dt-wrap im-src" hidden><table class="grid schema im-files"></table></div>
+        <span class="in-st"></span>
+      </div>
+      <div class="dr-full im im-ed" hidden>
+        <div class="dr-sec">SCHEMA</div>
+        <div class="im-host"><div class="pgrid im-box">
+          <div class="dt-bar"><input class="search im-q" type="search" placeholder="Search" spellcheck="false"><span class="muted dt-n im-n"></span><span style="flex:1"></span>
+            <button type="button" class="ghost small" data-in="all" title="Keep every column">Select All</button><button type="button" class="ghost small" data-in="none" title="Keep no columns">Select None</button>
+            <button type="button" class="ghost small dt-pop" data-in="pop" title="Open the schema in its own window">Pop-out</button></div>
+          <div class="table-wrap dt-wrap"><table class="grid schema im-schema"></table></div>
+        </div></div>
+        <div class="row"><label class="field im-tl" hidden>Table<select class="im-table"></select></label>
+          <div class="stats"><div class="stat"><label>Rows</label><b class="im-rows">-</b></div><div class="stat"><label>Columns</label><b class="im-cols">-</b></div></div></div>
+        <div class="row"><button type="button" data-in="validate" hidden>Check Type Changes</button><button type="button" class="ghost" data-in="reset" hidden title="Set every Change Type back to the detected type">Reset to Detected Types</button></div>
+      </div>`);
+    const status = (t, cls = '') => { const el = q('.in-st'); el.className = `in-st ${cls}`; el.textContent = t; };
+    const RAW = () => `${ctx.dir}/data/raw`;
+    const showMode = () => { box.querySelectorAll(`[name="imode-${n.id}"]`).forEach(r => r.checked = r.value === (s.mode || 'copy')); };
+    const showSrc = () => {
+      // every attached file, A-Z by name: File Name, Full Path (where it was attached from)
+      const fs = (s.files || []).slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+      q('.im-src').hidden = !fs.length;
+      q('.im-files').innerHTML = `<thead><tr><th class="fit">File Name</th><th>Full Path</th></tr></thead><tbody>${fs.map(f => `<tr><td class="mono fit">${esc(f.name)}</td><td class="mono">${esc(f.path)}</td></tr>`).join('')}</tbody>`;
+    };
+    const cols = () => s.cols || [];
+    // The Table Name is the node's title (the node on the grid and this window's title).
+    const nameNode = () => { n.title = s.name || n.title; elOf(n.id).querySelector('.nh b').textContent = n.title; const h = document.querySelector('#nodeWin .nh b'); if (h) h.textContent = `Settings - ${n.title}`; };
+    // Opens a source as the Import module does: reader, table list, schema (saved choices matched by source field), row count.
+    async function openSrc(c) {
+      Object.assign(s, { path: c.path ?? null, label: c.label, ext: c.ext || null, from: c.from || null });
+      if (!c.keep) Object.assign(s, { ds: null, name: null, cols: null, table: null });
+      save(); showSrc(); status('Reading source…');
+      L.reader = await ImportCore.reader(s.ext ? s.ext.src : s.path);
+      q('.im-ed').hidden = false; q('.im-tl').hidden = L.reader.kind !== 'sqlite';
+      q('.im-table').innerHTML = L.reader.tables.map(t => `<option>${esc(t)}</option>`).join('');
+      if (s.table && L.reader.tables.includes(s.table)) q('.im-table').value = s.table;
+      await loadTable(s.table && L.reader.tables.includes(s.table) ? s.table : L.reader.tables[0], !!c.keep);
+    }
+    async function loadTable(table, keep) {
+      L.src = await L.reader.sql(table); L.rows = null; s.table = table;
+      const desc = await Engine.describe(`SELECT * FROM ${L.src}`), by = new Map(keep ? cols().map(x => [x.name, x]) : []);
+      s.cols = desc.map(c => { const d = ImportCore.defName(c.name), o = by.get(c.name);
+        return o ? { ...c, defName: d, keep: o.keep, newName: o.newName, newType: o.newType } : { ...c, newName: d, defName: d, newType: c.type, keep: !by.size }; });
+      q('.im-name').value = s.name || s.ds || dsSlug(table || s.label); s.name = q('.im-name').value; nameNode();
+      save(); checkName(); renderSchema(); status('');
+      q('.im-cols').textContent = desc.length; q('.im-rows').textContent = '…';
+      const st = ctx.step('Counting rows…');
+      try { L.rows = Number(await Engine.countLive(L.src, undefined, j => { q('.im-rows').textContent = `${UI.num(j.rowsProcessed || 0)}…`; })); }
+      catch (e) { st.fail(`Counting rows failed: ${e.message}`); throw e; }
+      q('.im-rows').textContent = UI.num(L.rows); st.done(`Counted ${UI.num(L.rows)} rows`);
+    }
+    function renderSchema() {
+      const t = q('.im-schema');
+      t.innerHTML = `<thead><tr><th class="fit">Keep</th><th>Source Field</th><th class="fit">Detected Type</th><th class="fit">Change Type</th><th>New Field Name</th></tr></thead><tbody>` +
+        cols().map((c, i) => [c, i]).sort((a, b) => a[0].name.localeCompare(b[0].name, undefined, { sensitivity: 'base', numeric: true })).map(([c, i]) => `<tr><td class="fit"><input type="checkbox" data-i="${i}" data-k="keep" ${c.keep ? 'checked' : ''}></td><td class="mono src">${esc(c.name)}</td><td class="muted fit">${esc(c.type)}</td>
+          <td class="fit"><select data-i="${i}" data-k="newType">${[...new Set([c.type, ...TYPES])].map(x => `<option value="${esc(x)}" ${x === c.newType ? 'selected' : ''}>${esc(typeLabel(x))}</option>`).join('')}</select></td>
+          <td class="nn"><input type="text" data-i="${i}" data-k="newName" value="${esc(c.newName)}" title="${esc(c.newName)}"></td></tr>`).join('') + '</tbody>';
+      const fitAll = (els, w0, pad) => {   // every box as wide as its longest choice / value (as in the Import module)
+        if (!els.length) return () => {};
+        const cs = getComputedStyle(els[0]), g = document.createElement('canvas').getContext('2d'); g.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+        const side = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth) + pad;
+        const fit = () => { const w = Math.ceil(Math.max(w0, ...els.flatMap(el => el.tagName === 'SELECT' ? [g.measureText(el.selectedOptions[0]?.text || '').width] : [g.measureText(el.value).width])) + side);
+          els.forEach(el => Object.assign(el.style, { width: w + 'px', minWidth: w + 'px', maxWidth: 'none' })); };
+        fit(); return fit;
+      };
+      fitAll([...t.querySelectorAll('select[data-k="newType"]')], 0, 28);
+      showValidate(); filterSchema();
+    }
+    const showValidate = () => { const h = !cols().some(c => c.newType !== c.type); q('[data-in="validate"]').hidden = h || !cols().some(c => c.keep && c.newType !== c.type); q('[data-in="reset"]').hidden = h; };
+    function filterSchema() {
+      const v = q('.im-q').value.trim().toLowerCase(); let k = 0;
+      q('.im-schema').querySelectorAll('tbody tr').forEach(tr => { const c = cols()[+tr.querySelector('[data-i]').dataset.i], ok = !v || c.name.toLowerCase().includes(v) || c.newName.toLowerCase().includes(v); tr.hidden = !ok; if (ok) k++; });
+      q('.im-n').textContent = `${UI.num(k)}${v ? ' matching' : ''} of ${UI.num(cols().length)} fields`;
+    }
+    function checkName() {
+      const v = q('.im-name').value.trim(), msg = !v ? 'A name is required.' : /^[0-9]/.test(v) ? "The name can't start with a number." : '';
+      q('.im-name').classList.toggle('bad', !!msg); q('.im-nmsg').textContent = msg; q('.im-nmsg').hidden = !msg;
+      const b = q('[data-in="import"]'); if (b) { b.disabled = importing || !!msg; b.textContent = s.ds ? 'Update' : 'Import'; }
+      return !msg;
+    }
+    async function checkTypes() {
+      const changed = cols().filter(c => c.keep && c.newType !== c.type);
+      if (!changed.length) { ctx.log('No type changes to check.'); return 0; }
+      const st = ctx.step(`Checking ${changed.length} type change${changed.length > 1 ? 's' : ''}…`);
+      let r;
+      try { r = await Engine.query(`SELECT ${changed.map((c, i) => `COUNT(CASE WHEN ${Engine.q(c.name)} IS NOT NULL AND ${tryCast(c.name, c.newType)} IS NULL THEN 1 END) AS c${i}`).join(', ')} FROM ${L.src}`); }
+      catch (e) { st.fail(`Type check failed: ${e.message}`); throw e; }
+      const bad = changed.map((c, i) => [c, Number(r.rows[0][i])]).filter(([, k]) => k > 0), badSet = new Set(bad.map(([c]) => c));
+      q('.im-schema').querySelectorAll('select[data-k="newType"]').forEach(el => el.classList.toggle('bad', badSet.has(cols()[+el.dataset.i])));
+      if (!bad.length) st.done('Type check: all changes convert cleanly');
+      for (let k = 0; k < bad.length; k++) {
+        const [c, m] = bad[k]; let ex = [];
+        try { ex = (await Engine.query(`SELECT DISTINCT CAST(${Engine.q(c.name)} AS VARCHAR2(4000)) FROM ${L.src} WHERE ${Engine.q(c.name)} IS NOT NULL AND ${tryCast(c.name, c.newType)} IS NULL FETCH FIRST 3 ROWS ONLY`)).rows.map(x => `"${x[0]}"`); } catch {}
+        const msg = `Type check: ${c.name} → ${c.newType}: ${UI.num(m)} value(s) cannot convert${ex.length ? `, e.g. ${ex.join(', ')}` : ''}. ${TYPE_NEED[c.newType] || ''} They would become null.`;
+        if (k === bad.length - 1) st.done(msg, 'warn'); else ctx.log(msg, 'warn');
+      }
+      return bad.reduce((a, [, m]) => a + m, 0);
+    }
+    // Import / Update: the Import module's runImport (column choices applied, Arrow in data/imported, checks, dataset record).
     async function runImport() {
-      const RAW = `${ctx.dir}/data/raw`, out = [];
-      box.querySelector('[data-in="import"]').disabled = true;
+      const name = q('.im-name').value.trim();
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) throw new Error(/^[0-9]/.test(name) ? "Dataset name: it can't start with a number." : 'Dataset name: use letters, digits and _ only.');
+      if (L.rows == null) throw new Error('Still counting rows; try again in a moment.');
+      const keep = cols().filter(c => c.keep);
+      if (!keep.length) throw new Error('Keep at least one column.');
+      const dup = keep.map(c => c.newName).find((x, i, a) => a.indexOf(x) !== i);
+      if (dup) throw new Error(`Column name "${dup}" is used twice.`);
+      const bad = await checkTypes();
+      if (bad && !await UI.confirm(`${UI.num(bad)} value(s) cannot be converted and will be imported as null. Continue?`, { ok: 'Import anyway' })) return;
+      const select = ImportCore.selectList(cols()), want = keep.map(c => c.newName);
+      const folder = 'imported', dest = `${ctx.dir}/data/${folder}/${name}`;
+      const cfg = await ctx.reload();
+      if (cfg.datasets?.some(d => d.name === name) && s.ds !== name && !await UI.confirm(`Dataset "${name}" already exists. Replace it?`, { danger: true, ok: 'Replace' })) return;
+      const t0 = performance.now();
+      importing = true; checkName();
       try {
-        for (const f of pend.files) {   // browsed / dropped: always a copy
-          status(`Copying ${f.name}…`); await DNFS.upload(f, RAW);
-          out.push({ name: f.name, path: `${RAW}/${f.name}`, origin: null, size: f.size, modified: new Date(f.lastModified).toISOString() });
+        const wst = ctx.step('Writing Arrow…');
+        const w = await Engine.write({ sql: `SELECT ${select} FROM ${L.src}`, dest, meta: { source: s.ext?.src || s.path } }, j => {
+          const t = `${j.stage || 'Working'}… ${UI.num(j.rowsProcessed)} of ${UI.num(L.rows)} rows${j.progress != null ? ` (${Math.round(100 * j.progress)}%)` : ''}`;
+          wst.set(t); status(t);
+        }).catch(e => { wst.fail(`Write failed: ${e.message}`); throw e; });
+        wst.done('Written'); ctx.log('Checking columns and row count…');
+        const rows = w.rowCount, columns = Engine.columnsOf(w), parts = w.files, got = columns.map(c => c.name), diff = want.findIndex((x, i) => x !== got[i]);
+        const checks = [
+          { name: 'Column count', ok: want.length === got.length, detail: `${want.length} expected, ${got.length} written` },
+          { name: 'Column names and order', ok: diff < 0 && want.length === got.length, detail: diff < 0 ? 'match' : `#${diff + 1}: "${want[diff]}" expected, "${got[diff]}" written` },
+          { name: 'Row count', ok: rows === L.rows, detail: `${UI.num(L.rows)} in source, ${UI.num(rows)} written in ${parts.length} part${parts.length > 1 ? 's' : ''}` },
+        ];
+        checks.forEach(c => ctx.log(`${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`, c.ok ? 'ok' : 'err'));
+        if (checks.some(c => !c.ok)) {
+          await DNFS.remove(w.path, { recursive: true }).catch(() => {});
+          throw new Error(`Import check failed (${checks.filter(c => !c.ok).map(c => c.name).join(', ')}); the output was removed.`);
         }
-        for (const p of pend.paths) {
-          const name = ExternalSource.name(p);
-          status(`Checking ${name}…`); const info = await ExternalSource.probe(p);
-          if (src.mode === 'link') out.push({ name, path: null, origin: p, size: info.size, modified: info.modified });
-          else {
-            status(`Copying ${name}…`); await ExternalSource.copy(p, `${RAW}/${name}`, (d, t) => status(`Copying ${name}: ${UI.bytes(d)} of ${UI.bytes(t)}`));
-            out.push({ name, path: `${RAW}/${name}`, origin: null, from: p, size: info.size, modified: info.modified });
-          }
+        const st = s.ext ? { size: s.ext.size, modified: s.ext.modified } : await DNFS.stat(s.path);
+        await Projects.upsertDataset(ctx.folder, {
+          name, path: w.path, parts, stage: folder, direct: false, rows, bytes: w.bytes, columns, version: w.version, imported: new Date().toISOString(),
+          source: { mode: s.ext ? 'link' : 'copy', path: s.ext ? null : s.path, origin: s.ext?.src || null, from: s.from || null,
+            table: s.table || null, kind: L.reader.kind, select, direct: false, size: st.size, modified: st.modified,
+            columns: cols().map(c => ({ name: c.name, type: c.type, keep: c.keep, newName: c.newName, newType: c.newType })) },
+        });
+        const old = s.ds && s.ds !== name ? (await ctx.reload()).datasets.find(d => d.name === s.ds) : null;
+        if (old) {
+          await Projects.update(ctx.folder, { datasets: (await ctx.reload()).datasets.filter(d => d.name !== old.name) });
+          if (old.path && old.path !== w.path) await DNFS.remove(old.path, { recursive: true }).catch(() => {});
+          ctx.log(`Renamed dataset ${old.name} → ${name}`, 'ok');
         }
-        status('Reading the schema…');
-        const first = out[0], where = first.path || first.origin;
-        const r = await ImportCore.reader(where);
-        const cols = await Engine.describe(`SELECT * FROM ${await r.sql(r.tables[0])}`);
-        const old = new Map(src.cols.map(c => [c.name, c]));   // choices already made for a field carry over
-        src.files = out;
-        src.cols = cols.map(c => { const o = old.get(c.name); return { name: c.name, type: c.type, newName: o?.newName || colName(c.name), newType: o && o.type === c.type ? o.newType : c.type }; });
-        pend.files = []; pend.paths = []; picked.length = 0;
-        ctx.log(`${n.title}: ${out.length} file${out.length > 1 ? 's' : ''} ${src.mode === 'link' ? 'linked' : 'copied'} (${out.map(f => f.name).join(', ')}), ${src.cols.length} fields`, 'ok');
-        save(); draw();
-      } catch (e) { status(''); UI.toast(e.message, 'err'); box.querySelector('[data-in="import"]').disabled = false; }
+        await Projects.touchModule(ctx.folder, 'import');
+        ctx.log(`Imported ${s.label}${s.table ? `:${s.table}` : ''} → data/${folder}/${name}/ (${parts.length} part${parts.length > 1 ? 's' : ''}): ${UI.num(rows)} rows, ${columns.length} columns, ${UI.bytes(w.bytes)} in ${UI.ms(performance.now() - t0)}`, 'ok');
+        UI.toast(`Imported ${name}`, 'ok');
+        s.ds = name; s.name = name; save(); showSrc(); status('');
+      } finally { importing = false; checkName(); }
     }
-    box.onclick = e => {
-      const b = e.target.closest('[data-in]');
-      if (b?.dataset.in === 'browse') return box.querySelector('.in-file').click();
-      if (b?.dataset.in === 'import') return runImport();
-      const f = e.target.closest('.sc-h');   // a field: expand it (another one, or a click off it, collapses)
-      if (f) { const i = +f.parentElement.dataset.i; open = open === i ? null : i; return draw(); }
-      if (open != null && !e.target.closest('.sc-b')) { open = null; draw(); }
-    };
-    box.onchange = e => {
-      if (e.target.name === `imode-${n.id}`) { src.mode = e.target.value; save(); return draw(); }
-      if (e.target.dataset.sc && open != null) { src.cols[open][e.target.dataset.sc] = e.target.value.trim(); save(); }
-    };
-    box.oninput = e => { if (e.target.dataset.sc === 'newName') { const el = e.target, p = el.selectionStart; el.value = el.value.toUpperCase().replace(/\s/g, '_'); el.setSelectionRange(p, p); } };   // as the Import module: upper case, spaces become _
-    draw();
+    // Attaches files by full path (Browse = the server's Windows dialog, drop = found by the server in Explorer, or the path
+    // box). Copy: each file is copied into data/raw; Link: it stays where it is and only its path is kept. Every attached
+    // file is listed (n.src.files); the last one attached is the one the schema shows.
+    const onWait = d => { status(`Waiting on drive ${d}: no response for 10 s. Giving up at 30 s.`, 'warn'); UI.toast(`Waiting on drive ${d}…`, ''); };
+    async function attach(paths) {
+      const Xs = ExternalSource, ok = paths.filter(p => Engine.kind(p));
+      if (ok.length < paths.length) UI.toast('Unsupported file type. Use CSV, Parquet, Arrow or SQLite.', 'err');
+      let last = null;
+      for (const src of ok) {
+        const name = Xs.name(src), fail = e => { status(e.message, 'err'); ctx.log(`Import from ${src} failed${e.drive ? ` (drive ${e.drive})` : ''}: ${e.message}`, 'err'); throw e; };
+        status(`Checking ${name}…`);
+        const info = await Xs.probe(src, { onWait }).catch(fail);
+        let copy = null;
+        if (s.mode !== 'link') {
+          copy = `${RAW()}/${name}`;
+          await Xs.copy(src, copy, (d, t) => status(`Copying ${name}: ${UI.bytes(d)} of ${UI.bytes(t)}`), { onWait }).catch(fail);
+          ctx.log(`Copied ${src} → ${copy} (${UI.bytes(info.size)})`, 'ok');
+        } else ctx.log(`Linked ${src}`, 'ok');
+        s.files = (s.files || []).filter(f => f.path.toLowerCase() !== src.toLowerCase());
+        s.files.push(last = { name, path: src, copy, size: info.size, modified: info.modified });
+      }
+      save(); showSrc();
+      if (last) await openFile(last);
+    }
+    const openFile = f => f.copy ? openSrc({ path: f.copy, label: f.name, from: { src: f.path, size: f.size, modified: f.modified } })
+      : openSrc({ path: null, label: f.name, ext: { src: f.path, size: f.size, modified: f.modified } });
+    async function browse() {
+      status('Pick the files in the Windows dialog…');
+      const r = await ExternalSource.pick();
+      status(''); if (r.length) await attach(r);
+    }
+    async function dropped(files) {
+      if (!files.length) return;
+      status('Finding the dropped files…');
+      const r = await ExternalSource.locate(files.map(f => ({ name: f.name, size: f.size })));
+      status('');
+      if (r.missing.length) UI.toast(`Could not find where ${r.missing.join(', ')} ${r.missing.length > 1 ? 'are' : 'is'}: use Browse or type the full path.`, 'err');
+      if (r.paths.length) await attach(r.paths);
+    }
+    async function fromPath() {
+      const src = q('.in-path').value = unquote(q('.in-path').value);
+      if (!ExternalSource.isPath(src)) throw new Error('Enter a full path like X:\folder\file.csv or \\server\share\file.csv.');
+      await attach([src]); q('.in-path').value = '';
+    }
+    const G_ = fn => UI.guard(async (...a) => { try { await fn(...a); } catch (e) { status(''); throw e; } });
+    const drop = q('.in-drop');
+    drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+    drop.ondragleave = () => drop.classList.remove('over');
+    drop.ondrop = G_(async e => { e.preventDefault(); drop.classList.remove('over'); await dropped([...e.dataTransfer.files]); });
+    const path = q('.in-path');
+    path.addEventListener('paste', e => { const t = unquote(e.clipboardData?.getData('text/plain') || ''); if (t) { e.preventDefault(); path.value = t; } });
+    path.addEventListener('keydown', e => { if (e.key === 'Enter') G_(fromPath)(); });
+    q('.im-name').addEventListener('input', e => { const el = e.target, p = el.selectionStart, u = el.value.toUpperCase().replace(/\s/g, '_'); if (u !== el.value) { el.value = u; el.setSelectionRange(p, p); } s.name = el.value; nameNode(); save(); checkName(); });
+    q('.im-q').oninput = filterSchema;
+    q('.im-table').onchange = G_(() => loadTable(q('.im-table').value));
+    box.addEventListener('click', G_(async e => {
+      const b = e.target.closest('[data-in]')?.dataset.in; if (!b) return;
+      if (b === 'browse') await browse();
+      else if (b === 'go') await fromPath();
+      else if (b === 'all' || b === 'none') { cols().forEach(c => c.keep = b === 'all'); save(); renderSchema(); }
+      else if (b === 'reset') { cols().forEach(c => c.newType = c.type); save(); renderSchema(); ctx.log('Change types reset to the detected types.'); }
+      else if (b === 'pop') DataTable.popOut(q('.im-host'), q('.im-box'), `${q('.im-name').value || s.label} schema`);
+      else if (b === 'validate') await checkTypes();
+      else if (b === 'import') await runImport();
+    }));
+    box.addEventListener('change', e => {
+      const el = e.target;
+      if (el.name === `imode-${n.id}`) { s.mode = el.value; save(); showMode(); return; }
+      const c = cols()[+el.dataset.i]; if (!c || !el.closest('.im-schema')) return;
+      if (el.dataset.k === 'newType') el.classList.remove('bad');
+      c[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim(); save(); if (el.dataset.k === 'newType') renderSchema(); else showValidate();
+    });
+    box.addEventListener('input', e => { if (e.target.dataset.k === 'newName' && e.target.closest('.im-schema')) { const el = e.target, p = el.selectionStart, u = el.value.toUpperCase(); if (u !== el.value) { el.value = u; el.setSelectionRange(p, p); } } });
+    showMode(); showSrc(); q('.im-name').value = s.name || ''; checkName();
+    if (s.label) G_(() => openSrc({ path: s.path, label: s.label, ext: s.ext, from: s.from, keep: true }))();   // reopened: the same source and choices
   }
 
   // Search (top of the drawer): only the settings' names, live; matching text in gold (the app's gold, #d4a72c). A group with no match hides
@@ -502,7 +821,7 @@
       const dx = snap(at.x - (L + R) / 2), dy = snap(at.y - (T + B) / 2), stamp = Date.now().toString(36), map = new Map();
       $('nodes').querySelectorAll('.node.sel').forEach(x => x.classList.remove('sel'));
       clip.nodes.forEach((m, i) => {
-        const c = JSON.parse(JSON.stringify(m)); c.id = `n${stamp}${i}`; c.x = m.x + dx; c.y = m.y + dy; map.set(m.id, c.id);
+        const c = JSON.parse(JSON.stringify(m)); c.id = DSPipeline.uuid(); c.x = m.x + dx; c.y = m.y + dy; map.set(m.id, c.id);
         nodes.push(c); drawNode(c); elOf(c.id).classList.add('sel');   // drawn last: on top
       });
       links.push(...clip.links.map(l => ({ from: map.get(l.from), to: map.get(l.to) })));
@@ -518,13 +837,12 @@
     // Done here, not with 'dblclick': the pointer capture below sends the clicks to the stage.
     const now = performance.now(), dbl = lastDown.id === n.id && now - lastDown.t < 400 && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 6;
     lastDown = dbl ? { id: null, t: 0, x: 0, y: 0 } : { id: n.id, t: now, x: e.clientX, y: e.clientY };
-    if (dbl && !e.target.closest('.port, .rz')) { openSettings(n); return; }
+    if (dbl && !e.target.closest('.port, .rz')) { openNodeWin(n); return; }
     // Selection: Ctrl + click adds / removes a node; a plain click on an unselected node selects only it (on a selected
     // one it keeps the group, to drag it).
     if (e.ctrlKey || e.metaKey) el.classList.toggle('sel');
     else if (!el.classList.contains('sel')) $('nodes').querySelectorAll('.node.sel').forEach(x => x.classList.remove('sel'));
     if (!e.ctrlKey && !e.metaKey) el.classList.add('sel');
-    if (drawer.on && el.classList.contains('sel') && drawer.id !== n.id) openSettings(n);   // the open drawer follows the selected node
     save();
     st.setPointerCapture(e.pointerId);
     if (e.target.closest('.nx')) { askDelete([n]); return; }   // the red X (shown on hover): this node, after asking
@@ -731,18 +1049,8 @@
   // node: its files with the schema choices applied); Input = what comes in (the output of the node wired to it). Rows
   // come 100 at a time as the table scrolls (DataTable, as in Import). ----
   // A node's output as SQL (null = nothing yet). Input nodes: every file, the same fields, one after another.
-  async function outSql(n, seen = new Set()) {
-    if (!n || seen.has(n.id)) return null;
-    seen.add(n.id);
-    if (n.type === 'import') {
-      const src = n.src; if (!src?.files?.length || !src.cols?.length) return null;
-      const list = ImportCore.selectList(src.cols);
-      const parts = await Promise.all(src.files.map(async f => `SELECT ${list} FROM ${await Engine.src(f.path || f.origin)}`));
-      return parts.join(' UNION ALL ');
-    }
-    const up = ins(n)[0];   // other nodes, for now: what comes in goes out
-    return up ? outSql(nodeOf(up.from), seen) : null;
-  }
+  // what the node's last run wrote (its first 1000 rows while the pipeline is built)
+  async function outSql(n) { return n && pipe ? `SELECT * FROM read_dataset(${Engine.lit(DSPipeline.outDir(ctx, pipe, n, 'preview'))})` : null; }
   const inSql = async n => { const up = n && ins(n)[0]; return up ? outSql(nodeOf(up.from)) : null; };
   const pvNode = () => nodeOf(drawer.id) || nodeOf($('nodes').querySelector('.node.sel')?.dataset.id);
   let pvSeq = 0, pvKey = '';
@@ -864,23 +1172,160 @@
   });
   drawTabs();
 
-  // ---- State: <project>/data-studio/studio.json = { version, view: { zoom, offX, offY }, nodes, links, sel }, written as it
-  // changes (every move, wire, resize, zoom, scroll, selection), so the window reopens exactly as it was left. ----
+  // ---- State: the open pipeline (<project>/pipelines/<name>.pipeline, DSPipeline) holds the view, nodes and wires;
+  // <project>/data-studio/studio.json = { pipeline: the one open, preview, drawer } (this window, per project). Written as
+  // it changes (every move, wire, resize, zoom, scroll, selection), so the window reopens exactly as it was left. ----
   const FILE = () => `${ctx.dir}/data-studio/studio.json`;
-  const state = () => ({ version: 1, view: { zoom, offX, offY }, drawer, preview, nodes, links, sel: [...$('nodes').querySelectorAll('.node.sel')].map(x => x.dataset.id), updated: new Date().toISOString() });
+  let pipe = null;   // the open pipeline
   function save() {
     showDataSoon();   // anything that is saved may change what the preview shows
-    if (!ctx) return;
+    if (!ctx || !pipe) return;
     dirty = true; clearTimeout(saveT);
     saveT = setTimeout(flush, 150);
+    runSoon();
   }
-  function flush() {
-    if (!dirty || !ctx) return;
+  async function flush() {
+    if (!dirty || !ctx || !pipe) return;
     dirty = false; clearTimeout(saveT);
-    return DNFS.writeJSON(FILE(), state()).catch(e => UI.toast(`Data Studio not saved: ${e.message}`, 'err'));
+    Object.assign(pipe, { view: { zoom, offX, offY }, nodes, links, sel: [...$('nodes').querySelectorAll('.node.sel')].map(x => x.dataset.id) });
+    try {
+      await DSPipeline.save(ctx, pipe);
+      await DNFS.writeJSON(FILE(), { version: 2, pipeline: pipe.name, preview, drawer, updated: new Date().toISOString() });
+    } catch (e) { UI.toast(`Data Studio not saved: ${e.message}`, 'err'); }
   }
   on(window, 'pagehide', flush);
   on(document, 'visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+
+  // ---- Pipelines: open one (its nodes on the grid), make a new one, delete one. ----
+  async function openPipe(name) {
+    await flush();
+    const p = await DSPipeline.load(ctx, name);
+    if (!p) return UI.toast(`Pipeline ${name} not found.`, 'err');
+    pipe = p; closeNodeWin();
+    $('nodes').querySelectorAll('.node').forEach(el => el.remove()); vis.clear();
+    nodes = p.nodes; links = p.links.filter(l => { const t = nodes.find(m => m.id === l.to), f = nodes.find(m => m.id === l.from); return t && f && hasIn(t) && hasOut(f); });
+    nodes.forEach(n => { n.w ??= W0; n.h ??= H0; });
+    ({ zoom = 1, offX = 0, offY = 0 } = p.view || {});
+    nodes.forEach(drawNode); drawLinks();
+    [].concat(p.sel || []).forEach(id => elOf(id)?.classList.add('sel'));
+    $('pipeName').textContent = p.name; document.title = `${p.name} · Data Studio`;
+    applyView(); lastSig = ''; dirty = true; await flush();
+    runSoon(true);
+  }
+  // The Pipelines window: New + a name box, then every pipeline of the project (A-Z); a click opens one, the red X
+  // (on hover) deletes it after asking.
+  async function openPipeWin() {
+    closePipeWin();
+    const bd = document.createElement('div'); bd.className = 'nwin-bd'; bd.id = 'pipeWinBd';
+    const w = document.createElement('div'); w.className = 'node sel nwin pwin'; w.id = 'pipeWin';
+    w.innerHTML = `<div class="nh"><svg viewBox="0 0 24 24">${ICON_PIPE}</svg><b>Pipelines</b><button type="button" class="nx" title="Close">×</button></div>
+      <div class="drawer nwin-in"><div class="dr-b"><div class="dr-full">
+        <div class="in-row"><button type="button" data-p="new">New</button><input type="text" class="pw-name" placeholder="Pipeline name" spellcheck="false"></div>
+        <div class="pw-list"></div></div></div></div>`;
+    document.body.append(bd, w);
+    const W = 16 * G, H = 16 * G;
+    Object.assign(w.style, { width: `${W}px`, height: `${H}px`, left: `${(innerWidth - W) / 2}px`, top: `${(innerHeight - H) / 2}px` });
+    const draw = async () => {
+      const names = await DSPipeline.list(ctx);
+      w.querySelector('.pw-list').innerHTML = names.length ? names.map(nm => `<div class="pw-row${pipe?.name === nm ? ' on' : ''}" data-name="${UI.esc(nm)}"><span>${UI.esc(nm)}</span><button type="button" class="pw-x" title="Delete this pipeline">×</button></div>`).join('')
+        : '<div class="in-hint">No pipelines yet: type a name and click New.</div>';
+    };
+    const make = UI.guard(async () => {
+      const nm = DSPipeline.safe(w.querySelector('.pw-name').value);
+      if (!nm) throw new Error('Type a name for the new pipeline.');
+      if ((await DSPipeline.list(ctx)).some(x => x.toLowerCase() === nm.toLowerCase())) throw new Error(`There is already a pipeline named ${nm}.`);
+      await DSPipeline.save(ctx, DSPipeline.blank(nm));
+      closePipeWin(); await openPipe(nm);
+      ctx.log(`Pipeline ${nm} created`, 'ok');
+    });
+    w.querySelector('.pw-name').addEventListener('keydown', e => { if (e.key === 'Enter') make(); });
+    w.addEventListener('pointerdown', e => e.stopPropagation());
+    w.addEventListener('click', UI.guard(async e => {
+      if (e.target.closest('.nh .nx')) return pipe ? closePipeWin() : UI.toast('Open or make a pipeline first.', 'err');
+      if (e.target.closest('[data-p="new"]')) return make();
+      const row = e.target.closest('.pw-row'); if (!row) return;
+      const nm = row.dataset.name;
+      if (e.target.closest('.pw-x')) {
+        if (!await UI.confirm(`Delete the pipeline ${nm} and everything its nodes made?`, { danger: true, ok: 'Delete' })) return;
+        if (pipe?.name === nm) { pipe = null; nodes = []; links = []; $('nodes').querySelectorAll('.node').forEach(el => el.remove()); drawLinks(); $('pipeName').textContent = ''; }
+        await DSPipeline.remove(ctx, nm); ctx.log(`Pipeline ${nm} deleted`); return draw();
+      }
+      closePipeWin(); await openPipe(nm);
+    }));
+    requestAnimationFrame(() => requestAnimationFrame(() => { bd.classList.add('in'); w.classList.add('in'); }));
+    await draw(); w.querySelector('.pw-name').focus();
+  }
+  function closePipeWin() {
+    for (const id of ['pipeWin', 'pipeWinBd']) { const el = document.getElementById(id); if (el) { el.removeAttribute('id'); el.classList.remove('in'); el.style.pointerEvents = 'none'; setTimeout(() => el.remove(), 200); } }
+  }
+  on(window, 'keydown', e => { if (e.key === 'Escape' && pipe) closePipeWin(); });
+
+  // ---- Running: as the pipeline is built, every node whose settings, SQL or inputs changed runs on the first 1000 rows
+  // (with what is downstream of it); Execute runs every node on the full data. A node shows its state: orange flashing
+  // dot = running, green = done (its border flashes green 3 times as it finishes), red = failed (hover: why). ----
+  let runT = 0, running = false, again = false, lastSig = '';
+  function runSoon(force) { clearTimeout(runT); runT = setTimeout(() => runPreview(force), 600); }
+  function nodeState(n, st, info = {}, cached) {
+    const el = elOf(n.id); if (!el) return;
+    el.dataset.st = st === 'idle' ? '' : st;
+    el.querySelector('.nst').title = st === 'failed' ? info.error || 'Failed' : st === 'running' ? 'Running…' : st === 'done' ? `${UI.num(info.rows ?? 0)} rows${info.at ? `, ${new Date(info.at).toLocaleString()}` : ''}` : '';
+    if (st === 'done' && !cached) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1900); }
+  }
+  async function runPreview(force) {
+    if (!pipe || !ctx) return;
+    const sig = JSON.stringify([nodes.map(n => [n.id, n.type, n.title, n.cfg, n.src]), links]);
+    if (!force && sig === lastSig) return;
+    if (running) { again = true; return; }
+    lastSig = sig; running = true;
+    try { await flush(); await DSPipeline.run(ctx, pipe, { mode: 'preview', onNode: nodeState, onJob: jobBar }); }
+    finally { running = false; jobBar(null); showDataSoon(); }
+    if (again) { again = false; runPreview(true); }
+  }
+  async function execute() {
+    if (!pipe) return UI.toast('Open or make a pipeline first.', 'err');
+    if (running) return UI.toast('A run is in progress; try again when it ends.');
+    running = true; $('exec').disabled = true;
+    const t0 = performance.now();
+    try {
+      await flush();
+      ctx.log(`Executing pipeline ${pipe.name} on the full data…`);
+      const r = await DSPipeline.run(ctx, pipe, { mode: 'data', onNode: nodeState, onJob: jobBar, log: (m, l) => ctx.log(m, l === 'error' ? 'err' : l) });
+      if (r.ok) { UI.toast(`${pipe.name} executed in ${UI.ms(performance.now() - t0)}`, 'ok'); ctx.log(`Pipeline ${pipe.name} executed in ${UI.ms(performance.now() - t0)}`, 'ok'); }
+      else UI.toast(r.error, 'err');
+    } finally { running = false; $('exec').disabled = false; jobBar(null); }
+  }
+  $('exec').onclick = execute;
+  $('exec').addEventListener('pointerdown', e => e.stopPropagation());
+
+  // ---- Memory and Workers cards (top right): the engine's memory in use, 0-100% of what it may use (past 100%
+  // spill to disk takes over); one light per worker (grey idle, green reading / computing, red writing) and a bar for
+  // the job running now. ----
+  function jobBar(j, n) {
+    const bar = $('wkBar'), txt = $('wkJob');
+    if (!j) { bar.style.width = '0'; bar.classList.remove('busy'); txt.textContent = 'Idle'; return; }
+    const pct = j.progress != null ? Math.round(100 * j.progress) : null;
+    bar.style.width = pct != null ? `${pct}%` : '100%'; bar.classList.toggle('busy', pct == null);
+    txt.textContent = `${n?.title || ''}: ${j.stage || 'Working'}${j.rowsProcessed ? ` · ${UI.num(j.rowsProcessed)} rows` : ''}${pct != null ? ` · ${pct}%` : ''}`;
+  }
+  let cardBusy = false;
+  setInterval(async () => {
+    if (cardBusy || document.hidden || !ctx) return;
+    cardBusy = true;
+    try {
+      const [w, st] = await Promise.all([Engine.call('workers'), Engine.status()]);
+      const s = w.states.slice(); let extra = w.writers || 0;
+      for (let i = 0; i < s.length && extra > 0; i++) if (s[i] === 0) { s[i] = 2; extra--; }
+      const host = $('wkLights');
+      if (host.children.length !== s.length) host.innerHTML = s.map((_, i) => `<i title="Worker ${i + 1}"></i>`).join('');
+      s.forEach((v, i) => { const c = `l${v}`; if (host.children[i].className !== c) host.children[i].className = c; });
+      // in use = the budget less what is still free above the floor Windows keeps
+      const m = st.memory, free = Math.max(0, m.availPhys - m.freeFloor), used = Math.max(0, m.budget - free), pct = m.budget ? Math.min(100, Math.round(100 * used / m.budget)) : 0;
+      $('memPct').textContent = `${pct}%`; $('memBar').style.width = `${pct}%`;
+      $('memCard').classList.toggle('spill', pct >= 100);
+      $('memCard').title = `${UI.bytes(used)} of ${UI.bytes(m.budget)} the engine may use${pct >= 100 ? ': spilling to disk' : ''}`;
+    } catch {}
+    finally { cardBusy = false; }
+  }, 300);
 
   // A start-up failure stays on screen (not only a notification that fades), so it can be read and fixed.
   const fail = e => { console.error(e); $('stage').insertAdjacentHTML('beforeend', `<div class="ds-fail">Data Studio could not start: ${UI.esc(e?.message || e)}</div>`); };
@@ -889,16 +1334,16 @@
   try { ctx = await ModulePage.init('data_studio', 'Data Studio'); }
   catch (e) { return fail(e); }
   const saved = await DNFS.readJSONOr(FILE(), null).catch(() => null);
-  if (saved?.nodes) {
-    nodes = saved.nodes; links = (saved.links || []).filter(l => { const t = nodes.find(m => m.id === l.to); return t && hasIn(t); });   // no wires into input nodes
-    nodes.forEach(n => { n.w ??= W0; n.h ??= H0; });
-    ({ zoom = 1, offX = 0, offY = 0 } = saved.view || {});
+  if (saved?.preview) { preview = { ...preview, ...saved.preview }; drawTabs(); }
+  if (saved?.drawer?.id === STUDIO) { drawer = { ...drawer, ...saved.drawer }; openStudioSettings(); }
+  let names = await DSPipeline.list(ctx);
+  if (!names.length && saved?.nodes?.length) {   // before pipelines: the nodes kept in studio.json become the first pipeline
+    await DSPipeline.save(ctx, { ...DSPipeline.blank('Pipeline 1'), view: saved.view, nodes: saved.nodes, links: saved.links || [] });
+    names = await DSPipeline.list(ctx);
   }
-  nodes.forEach(drawNode); drawLinks();
-  [].concat(saved?.sel || []).forEach(id => elOf(id)?.classList.add('sel'));
-  if (saved?.preview) { preview = { ...preview, ...saved.preview }; drawTabs(); if (prefs.preview) showDataSoon(); }
-  if (saved?.drawer) { drawer = { ...drawer, ...saved.drawer }; const n = nodeOf(drawer.id); if (drawer.id === STUDIO) openStudioSettings(); else if (n) openSettings(n); else drawer.id = null; }
-  applyView();
+  const first = names.find(x => x === saved?.pipeline) || names[0];
+  if (first) await openPipe(first); else { applyView(); openPipeWin(); }
+  if (prefs.preview) showDataSoon();
   $('types').onclick = e => {
     const t = e.target.closest('.type'); if (!t) return;
     const act = t.dataset.act;
@@ -907,5 +1352,6 @@
     if (act !== 'settings' && drawer.id === STUDIO) closeSettings();
     if (act === 'settings') drawer.id === STUDIO ? closeSettings() : openStudioSettings();
     else if (act === 'nodes') document.getElementById('nodeMenu') ? closeNodeMenu() : openNodeMenu(t);
+    else if (act === 'pipeline') openPipeWin();
   };
 })();
