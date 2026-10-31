@@ -136,6 +136,7 @@
 <script src="../js/dn-fs.js"></script>
 <script src="../js/core/engine-client.js"></script>
 <script src="../js/core/ui.js"></script>
+<script src="../js/core/menus.js"></script>
 <script src="../js/core/project-log.js"></script>
 <script src="../js/core/projects.js"></script>
 <script src="../js/core/module-page.js"></script>
@@ -398,13 +399,10 @@ function filterSchema() {
 }
 $('schemaSearch').oninput = () => filterSchema();
 $('schemaPop').onclick = () => DataTable.popOut($('schemaHost'), $('schemaBox'), `${$('dsName').value || cur.label} schema`);
-$('schemaExpBtn').onclick = e => { e.stopPropagation(); $('schemaExp').classList.toggle('open'); };
-document.addEventListener('click', () => $('schemaExp').classList.remove('open'));
-$('schemaExp').onclick = e => {
-  const f = e.target.closest('[data-fmt]')?.dataset.fmt; if (!f) return; $('schemaExp').classList.remove('open');
+Menus.bind($('schemaExpBtn'), $('schemaExp'), f => {
   if (f !== 'csv') return UI.toast(`Export to .${f}: not built yet.`);
   DataTable.csv(document, SCHEMA_COLS, schemaRows(), `${$('dsName').value || 'schema'}_schema.csv`);
-};
+});
 $('preview').addEventListener('grid-export', e => UI.toast(`Export to .${e.detail.format}: not built yet.`));
 $('keepAll').onclick = () => { cur.cols.forEach(c => c.keep = true); renderSchema(); };
 $('keepNone').onclick = () => { cur.cols.forEach(c => c.keep = false); renderSchema(); };
