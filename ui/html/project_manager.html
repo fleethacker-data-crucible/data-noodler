@@ -91,6 +91,14 @@
   .app { flex: 1; min-height: 0; height: auto; }
   .main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
   .main > .table-wrap { flex: 1; min-height: 0; overflow-x: hidden; }   /* never scrolls sideways */
+  .fleet-welcome { display: flex; align-items: center; gap: 24px; flex: none; margin-bottom: 16px; }
+  .fleet-welcome img { width: clamp(96px, 18vh, 160px); height: auto; flex: none; }
+  .fleet-welcome h2 { margin: 0 0 8px; }
+  .fleet-welcome p { margin: 0; color: var(--text-2); }
+  @media (max-width: 600px), (max-height: 650px) {
+    .fleet-welcome { gap: 12px; margin-bottom: 12px; }
+    .fleet-welcome img { width: 96px; }
+  }
 </style>
 </head>
 <body>
@@ -102,6 +110,10 @@
     </div>
   </header>
   <div class="main">
+    <section class="fleet-welcome" aria-labelledby="fleet-welcome-title">
+      <img src="../../assets/brand/emblem-transparent.png" width="160" height="160" alt="Data Noodler: an octopus navigator arranging charts and data sheets">
+      <div><h2 id="fleet-welcome-title">Make sense of your data.</h2><p>Open a project or create one to import, explore and chart your files on this computer.</p></div>
+    </section>
     <div class="row" style="align-items:flex-end;margin-bottom:8px"><h2 style="margin:0">Projects</h2></div>
     <div class="row" style="margin-bottom:12px">
       <input id="q" class="search" type="search" placeholder="Search name, owner, description, tags">

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/brand/emblem-transparent.png" width="280" alt="Data Noodler fleet emblem: an octopus navigator arranging charts and data sheets, in navy, brass and ivory">
+</p>
+
 # Data Noodler
 
 > self-contained flat-file analytics (CSV/Parquet/Arrow/SQLite) with dashboards.
