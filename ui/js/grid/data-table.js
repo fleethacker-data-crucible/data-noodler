@@ -49,13 +49,16 @@ const DataTable = (() => {
     let t; search.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { st.q = search.value.trim().toLowerCase(); draw(); if (st.q) next(); }, 150); });
     // Export
     const ex = box.querySelector('.dt-exp'), menu = ex.querySelector('.dd-menu');
-    ex.querySelector('button').onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); };
-    doc.addEventListener('click', () => menu.classList.remove('open'));
-    menu.onclick = e => {
-      const f = e.target.closest('[data-fmt]')?.dataset.fmt; if (!f) return; menu.classList.remove('open');
+    const pickFmt = f => {
       if (f === 'csv') return csv(doc, cols, st.rows.filter(match), (o.title || 'data').replace(/[^\w-]+/g, '_') + '.csv');
       el.dispatchEvent(new CustomEvent('grid-export', { bubbles: true, detail: { format: f } }));
     };
+    doc.addEventListener('click', () => (typeof Menus !== 'undefined' ? Menus.close(menu) : menu.classList.remove('open')));
+    if (typeof Menus !== 'undefined') Menus.bind(ex.querySelector('button'), menu, pickFmt);   // keyboard: arrows, Home / End, Enter, Escape
+    else {
+      ex.querySelector('button').onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); };
+      menu.onclick = e => { const f = e.target.closest('[data-fmt]')?.dataset.fmt; if (!f) return; menu.classList.remove('open'); pickFmt(f); };
+    }
     // Pop-out: the rows loaded so far go along; the window asks for more itself.
     box.querySelector('.dt-pop')?.addEventListener('click', () => popOut(el, box, o.title || doc.title.split(' · ')[0]));
     draw();
