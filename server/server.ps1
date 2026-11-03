@@ -1452,7 +1452,7 @@ try {
         }
         if ($staticJobs.Count) { Complete-StaticJobs }
         Read-EngineLog
-        if ($importJobs.Count) { Watch-ImportJobs }
+        if ($importJobs.Count -or $pickJobs.Count) { Watch-ImportJobs }
         $now = Get-Date
         if ($lastBeat -and ($now - $lastBeat).TotalSeconds -gt 120) { break }   # throttled/minimized tabs poll slowly
         if (-not $lastBeat -and $now -gt $deadline) { break }

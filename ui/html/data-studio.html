@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- no white flash while the window opens: dark from the first paint (light once theme.js says so) -->
+<meta name="color-scheme" content="dark light">
+<style>html { background: #1a1a19; color-scheme: dark; } html[data-theme="light"] { background: #fcfcfb; color-scheme: light; }</style>
+<title>Data Studio</title>
+<script src="../js/core/embed.js"></script>
+<script src="../js/core/theme.js"></script>
+<script src="../js/core/no-autofill.js"></script>
+<link rel="stylesheet" href="../css/theme.css">
+<link rel="stylesheet" href="../css/data-studio.css">
+</head>
+<body>
+<div class="dst">
+  <main class="stage" id="stage">
+    <div class="typebar" id="types"><div class="type" data-act="pipeline" title="Pipelines: open, make or delete"><svg viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="19" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7.5 6h9M6.5 8l4 8M17.5 8l-4 8" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Pipeline</span></div><div class="type" data-act="nodes" title="Nodes"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="7" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><rect x="15" y="15" width="7" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 6h3a2 2 0 0 1 2 2v8a2 2 0 0 0 2 2" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Nodes</span></div><div class="type" data-act="settings" title="Data Studio settings"><svg viewBox="0 0 24 24"><path d="M10.23,4.61 L10.28,2.15 L13.72,2.15 L13.77,4.61 L15.97,5.52 L17.75,3.82 L20.18,6.25 L18.48,8.03 L19.39,10.23 L21.85,10.28 L21.85,13.72 L19.39,13.77 L18.48,15.97 L20.18,17.75 L17.75,20.18 L15.97,18.48 L13.77,19.39 L13.72,21.85 L10.28,21.85 L10.23,19.39 L8.03,18.48 L6.25,20.18 L3.82,17.75 L5.52,15.97 L4.61,13.77 L2.15,13.72 L2.15,10.28 L4.61,10.23 L5.52,8.03 L3.82,6.25 L6.25,3.82 L8.03,5.52Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/></svg><span>Settings</span></div></div>
+    <div id="nodes"></div>
+    <div class="pipe-name" id="pipeName"></div>
+    <div class="cards" id="cards">
+      <div class="card" id="memCard"><label>Memory</label><b id="memPct">0%</b><div class="cbar"><i id="memBar"></i></div></div>
+      <div class="card wk" id="wkCard"><label>Workers</label><div id="wkLights"></div><div class="cbar"><i id="wkBar"></i></div><small id="wkJob">Idle</small></div>
+    </div>
+    <button type="button" class="exec" id="exec" title="Run every node of the pipeline on the full data"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" fill="currentColor"/></svg>Execute</button>
+    <div class="vbar">
+      <button class="ghost vreset" id="zReset" title="Back to 100%">Reset Zoom<small id="zPct">100%</small></button>
+      <button class="ghost vreset" id="sReset" title="Centre all the nodes in the window (no nodes: grid 0, 0)">Re-center<small id="sPos">X 0  Y 0</small></button>
+    </div>
+  </main>
+  <!-- Data Preview drawer: up from the bottom (Settings > Data Preview) -->
+  <section class="preview" id="preview" hidden><div class="pv-grip" id="pvGrip" title="Drag to resize"></div>
+    <div class="pv-tabs" id="pvTabs"><button type="button" data-tab="input">Input</button><button type="button" data-tab="output">Output</button></div>
+    <div class="pv-b" id="pvBody"></div>
+  </section>
+  <!-- Node Settings drawer: slides out from the right -->
+  <aside class="drawer" id="drawer">
+    <div class="dr-h"><b id="drTitle">Settings</b><button type="button" class="dr-x" id="drX" title="Close">×</button></div>
+    <div class="dr-q"><input type="search" id="drQ" placeholder="Search settings" spellcheck="false"></div>
+    <div class="dr-b" id="drBody"></div>
+  </aside>
+</div>
+<script src="../js/dn-fs.js"></script>
+<script src="../js/core/engine-client.js"></script>
+<script src="../js/import/external-source.js"></script>
+<script src="../js/grid/data-table.js"></script>
+<script src="../js/grid/data-grid.js"></script>
+<script src="../js/grid/grid-remote.js"></script>
+<script src="../js/import/import-core.js"></script>
+<script src="../js/core/ui.js"></script>
+<script src="../js/core/menus.js"></script>
+<script src="../js/core/project-log.js"></script>
+<script src="../js/core/projects.js"></script>
+<script src="../js/core/module-page.js"></script>
+<script src="../js/pipeline/sql-editor.js"></script>
+<script src="../js/publish/publisher.js"></script>
+<script src="../js/data-studio/pipeline.js"></script>
+<script src="../js/data-studio/studio.js"></script>
+</body>
+</html>
