@@ -582,6 +582,15 @@ function Test-FsRequest($req) {
     return $hostOk -and $originOk -and $tokenOk
 }
 
+# Control panel (port $uiPort): same Host and no foreign Origin. A web page open in the browser can POST to localhost, and a rebound DNS name can reach it,
+# so a request that names another host or comes from another site is refused. Requests with no Origin (curl, scripts on this PC) still work.
+function Test-PanelRequest($req) {
+    $hostOk = $req.Headers['Host'] -in "localhost:$uiPort", "127.0.0.1:$uiPort"
+    $origin = $req.Headers['Origin']
+    $originOk = -not $origin -or $origin -in "http://localhost:$uiPort", "http://127.0.0.1:$uiPort"
+    return $hostOk -and $originOk
+}
+
 function Get-Entry($item) {
     $rel = $item.FullName.Substring($root.Length).TrimStart('\') -replace '\\', '/'
     @{ name = $item.Name; path = $rel; dir = $item.PSIsContainer; size = $(if ($item.PSIsContainer) { 0 } else { $item.Length }); modified = $item.LastWriteTimeUtc.ToString('o') }
@@ -1437,6 +1446,7 @@ try {
                 }
                 $rel = [Uri]::UnescapeDataString($req.Url.AbsolutePath).TrimStart('/')
                 if ($req.Url.Port -eq $uiPort) {
+                    if (-not (Test-PanelRequest $req)) { $res.StatusCode = 403; Add-Log 'err' "Control panel: refused $($req.HttpMethod) /$rel (wrong Host or another site's Origin)."; continue }
                     if ($rel -eq 'api/log') { $lastBeat = $script:panelBeat = Get-Date }
                     Handle-Ui $req $res $rel
                 } else {
