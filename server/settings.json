@@ -2,9 +2,9 @@
     "fileThreads":  16,
     "engineWorkers":  64,
     "engineFreeMb":  1024,
-    "port":  24618,
+    "port":  47823,
     "browser":  "edge",
-    "portMode":  "random",
+    "portMode":  "manual",
     "theme":  "dark",
     "engineSpill":  true
 }
