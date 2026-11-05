@@ -60,6 +60,8 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
 | Transform | `ui/html/transform.html` | Named SQL queries (SELECT or scripts); the active one builds `data/clean/CLEAN_*`. |
 | Dashboard Studio | `ui/html/dashboard-studio.html` | Widgets (line, bar, table, custom D3) on a grid; click a widget's Settings > Data and pick table fields; queries run in the engine. |
 | Publish | `ui/html/publish.html` | Web app / PDF / PowerPoint / images of a dashboard; dataset export (CSV / Parquet / SQLite). |
+| Data Studio | `ui/html/data-studio.html` | The project's workflow as draggable, connectable nodes (Import, Transform, Dashboard, Publish, Archive, Update schedule) (in development). |
+| New App | `ui/html/new_app.html` | New home page: workspaces, projects, bookmarks, trash and the Help menu (Server Control, Get Help); opens without a project. |
 | Archives | Project Manager > Archives | Zipped project snapshots: take, restore, delete. |
 | Benchmark | `ui/html/benchmark.html` (Utilities menu) | Engine speed: imports, exports, reads / writes, heavy queries by rows, batch size and workers. |
 
