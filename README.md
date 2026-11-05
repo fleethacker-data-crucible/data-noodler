@@ -30,14 +30,14 @@ The server compiles the engine (`server/data-engine/**/*.cs`, cached as a DLL in
 ## How data flows
 
 ```
-raw file (CSV / Parquet / Arrow / SQLite, in data/raw or read in place from X:\ or \\server\share)
+raw file (CSV / Parquet / Arrow / SQLite, copied to data/raw or read in place from X:\ or \\server\share)
    │ Import: column choices applied
    ▼
 data/imported/<NAME>/        part-NNNNNN.arrow + dataset.json      ← Arrow IPC: the working format
    │ Transform ── SQL query / script
    ▼
-data/source/CLEAN_<NAME>/  part-NNNNNN.arrow + dataset.json
-   │ Dashboard · D3 Studio · Publish
+data/clean/CLEAN_<NAME>/   part-NNNNNN.arrow + dataset.json
+   │ Dashboard Studio · Publish
    ▼
 Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export, archives for distribution)
 ```
@@ -57,9 +57,8 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
 |---|---|---|
 | Project Manager | `ui/html/project_manager.html` | Projects (create, edit, rename, trash), module buttons, Update workflow. Entry point. |
 | Import | `ui/html/import.html` | Pick or link a raw file, set column names / types, Import it as an Arrow dataset. |
-| Transform | `ui/html/transform.html` | Named SQL queries (SELECT or scripts); the active one builds `data/source/CLEAN_*`. |
-| Dashboard | `ui/html/dashboard.html` | Charts from D3 Studio + Data Grids on a grid layout; queries run in the engine. |
-| D3 Studio | `ui/html/d3-studio.html` | Build D3 charts (code + inputs linked to TABLE.FIELD); Publish to the Dashboard. |
+| Transform | `ui/html/transform.html` | Named SQL queries (SELECT or scripts); the active one builds `data/clean/CLEAN_*`. |
+| Dashboard Studio | `ui/html/dashboard-studio.html` | Widgets (line, bar, table, custom D3) on a grid; click a widget's Settings > Data and pick table fields; queries run in the engine. |
 | Publish | `ui/html/publish.html` | Web app / PDF / PowerPoint / images of a dashboard; dataset export (CSV / Parquet / SQLite). |
 | Archives | Project Manager > Archives | Zipped project snapshots: take, restore, delete. |
 | Benchmark | `ui/html/benchmark.html` (Utilities menu) | Engine speed: imports, exports, reads / writes, heavy queries by rows, batch size and workers. |
@@ -67,17 +66,16 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
 ## Tests and benchmarks
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\sql-cheatsheet.ps1    # SQL dialect: 158 checks
-powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\arrow-format.ps1      # Arrow = Parquet answers, memory, exports
-powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\spill.ps1             # GROUP BY / sort / window / join spill to disk
-powershell -NoProfile -ExecutionPolicy Bypass -File .claude/tests\bench-compare.ps1     # old vs new engine, rows/s per step
-node --test tests/                                                                       # project classification migration (needs Node 18+)
+Invoke-Pester -Path .\tests -Output Detailed   # Pester 5: parse check, loopback bind, settings, port block, classification
+node --test tests/*.mjs                         # classification migration and menu keyboard tests (Node 18+)
+# Engine speed and heavy queries: the Benchmark page (Utilities menu). The engine check scripts that older notes
+# mention (.claude/tests) are not in this repository.
 ```
 
 ## Rules for working on it
 
-See `CLAUDE.md` (project rules) and `.claude/docs/`: `ARCHITECTURE.md` (how the server, file API and engine work),
-`CODE_INDEX.md` (file map), `PROJECT_PLAN.md`, `THEME_GUIDE.md`. Changes are listed in `CHANGELOG.md`.
+Changes are listed in `CHANGELOG.md`; open review items are in `NEXT-PASS.md`. The repository does not carry
+`CLAUDE.md` or `.claude/docs/` (they are gitignored on the maintainer's machine).
 
 - Windows PowerShell 5.1 only on the server; engine code is C# 5 (compiled by `Add-Type`).
 - `.ps1` files are ASCII only.
