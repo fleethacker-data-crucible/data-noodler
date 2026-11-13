@@ -103,7 +103,19 @@ const ColorPicker = (() => {
   function swatch(value, opts = {}) {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'cp-sw';
-    const show = v => { b.innerHTML = `<span class="cp-chip" style="background:${v || 'transparent'}"></span><span class="cp-val">${v || 'Theme'}</span>`; b.classList.toggle('theme', !v); };
+    // Text and the chip colour are DOM properties, not an HTML string: a colour typed or stored
+    // in settings cannot be reinterpreted as markup. style.background sets only that property.
+    const show = v => {
+      b.replaceChildren();
+      const chip = document.createElement('span');
+      chip.className = 'cp-chip';
+      chip.style.background = v || 'transparent';
+      const val = document.createElement('span');
+      val.className = 'cp-val';
+      val.textContent = v || 'Theme';
+      b.append(chip, val);
+      b.classList.toggle('theme', !v);
+    };
     show(value);
     b.onclick = () => {
       if (pop && pop._for === b) return close();
