@@ -51,16 +51,19 @@ test('settings rows escape labels, values, and slider bounds before innerHTML', 
   const ctx = domContext();
   const Settings = load('../ui/js/widgets/settings-panel.js', ctx, 'SettingsPanel');
   const el = { innerHTML: '', closest() { return null; }, querySelectorAll() { return []; } };
-  const get = p => ({ n: '<script>', t: 'hello"world', s: 25 }[p]);
+  const get = p => ({ n: '<script>', t: 'hello"world<SCRIPT>', s: 25 }[p]);
   Settings.settings(el, [
     { path: 'n', label: '<b>Label</b>', type: 'number', min: '"><img>', max: 10, step: 1 },
     { path: 't', label: "it's", type: 'text' },
     { path: 's', label: 'Size', type: 'number', min: 0, max: 100, step: 5 },
   ], get, () => {});
-  assert.doesNotMatch(el.innerHTML, /<script>|<img|<b>/);
+  assert.equal(el.innerHTML.includes('<script>'), false);
+  assert.equal(el.innerHTML.includes('<SCRIPT>'), false);
+  assert.equal(el.innerHTML.includes('<img'), false);
+  assert.equal(el.innerHTML.includes('<b>'), false);
   assert.match(el.innerHTML, /&lt;script&gt;/);
   assert.match(el.innerHTML, /&quot;&gt;&lt;img&gt;/);
-  assert.match(el.innerHTML, /hello&quot;world/);
+  assert.equal(el.innerHTML.includes('hello&quot;world&lt;SCRIPT&gt;'), true);
   assert.match(el.innerHTML, /&lt;b&gt;Label&lt;\/b&gt;/);
   assert.match(el.innerHTML, /it&#39;s/);
   assert.match(el.innerHTML, /style="--p:25%;--pf:0\.25"/);
@@ -117,7 +120,8 @@ test('project table headers escape DOM text before it is written as HTML', () =>
   assert.equal(headers[0].html, 'Project Name <span class="arrow">▲</span>');
   assert.equal(headers[1].html, 'Created <span class="arrow off">▼</span>');
   assert.equal(headers[2].html, '&lt;img src=x onerror=alert(1)&gt;');
-  assert.doesNotMatch(headers[2].html, /<img/);
+  assert.equal(headers[2].html.includes('<img'), false);
+  assert.equal(headers[2].html.includes('<IMG'), false);
 });
 
 test('SQL comment toggle removes the mark without building a regex from it', () => {
