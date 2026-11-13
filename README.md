@@ -71,7 +71,7 @@ Export only: Parquet (Snappy) · CSV · SQLite        (Publish, Data Grid export
 Invoke-Pester -Path .\tests -Output Detailed   # Pester 5: parse check, loopback bind, settings, port block, classification
 node --test tests/*.mjs                         # classification migration and menu keyboard tests (Node 18+)
 # Engine speed and heavy queries: the Benchmark page (Utilities menu). The engine check scripts that older notes
-# mention (.claude/tests) are not in this repository.
+# mention (older local engine-check scripts) are not in this repository.
 ```
 
 ## Rules for working on it

@@ -1,4 +1,4 @@
-// Client for the native C# data engine (runs inside the local server; see .claude/docs/ARCHITECTURE.md). Global: Engine.
+// Client for the native C# data engine (runs inside the local server). Global: Engine.
 // The browser never crunches data: it sends SQL (or a declarative query) and gets compact results back.
 //   await Engine.query(sql, { views, limit, workers })   -> { cols, types, rows, rowCount, truncated, ms }
 //   await Engine.describe(sql, views)                    -> [{ name, type }]

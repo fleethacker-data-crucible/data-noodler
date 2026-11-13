@@ -1,4 +1,4 @@
-// SQL parser. User SQL is Oracle SQL (.claude/docs/SQL_DIALECT.md): Parser.Oracle = true (ParseScript, views) rejects
+// SQL parser. User SQL is Oracle SQL: Parser.Oracle = true (ParseScript, views) rejects
 // non-Oracle syntax with a hint. SQL the engine builds for itself is parsed lenient (Oracle = false): every Oracle form
 // plus the older grammar it uses internally (LIMIT, TRY_CAST, ::, * EXCLUDE, t AS a(cols), FILTER, [names] ...).
 // Oracle forms: OFFSET n ROWS FETCH FIRST n ROWS ONLY, ROWNUM, DUAL, MINUS, DECODE / NVL / NVL2, LISTAGG and

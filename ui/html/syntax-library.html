@@ -44,8 +44,8 @@
   <main class="main" id="list"></main>
 </div>
 <script>
-// Oracle SQL: everything the engine (server/data-engine/Query/*.cs, server/data-engine/Core/Script.cs) understands, per
-// .claude/docs/SQL_DIALECT.md. [name, category, syntax, description, example]
+// Oracle SQL: everything the engine (server/data-engine/Query/*.cs, server/data-engine/Core/Script.cs) understands.
+// [name, category, syntax, description, example]
 const L = [
 // ---- query clauses ----
 ['SELECT', 'Clause', 'SELECT [DISTINCT | UNIQUE | ALL] expr [[AS] alias], ... FROM source', 'Returns columns or computed values. * selects every column; t.* every column of one table.', 'SELECT EMP_ID, HOURS * RATE AS PAY FROM EMPLOYEE_HOURS'],

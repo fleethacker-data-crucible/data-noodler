@@ -97,7 +97,7 @@ namespace NativeDataEngine
             "COMMIT", "ROLLBACK", "THROW", "RAISERROR", "GO", "PRINT", "SET", "USE", "DESCRIBE", "END", "REPLACE",
             "DECLARE", "EXECUTE", "RENAME", "PROMPT", "DESC", "RAISE", "RAISE_APPLICATION_ERROR", "EXCEPTION", "DBMS_OUTPUT" };
 
-        // User scripts: Oracle SQL (see .claude/docs/SQL_DIALECT.md).
+        // User scripts: Oracle SQL.
         public static List<Stmt> ParseScript(string sql) { return ParseScript(sql, true); }
         public static List<Stmt> ParseScript(string sql, bool oracle)
         {
