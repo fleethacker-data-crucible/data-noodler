@@ -179,7 +179,7 @@ function render() {
     .filter(p => (!fp || p.phase === fp) && (!fs || String(p.status) === fs) && (!fc || p.classification === fc))
     .filter(p => !q || [p.name, p.owner, p.description, ...(p.tags || [])].join(' ').toLowerCase().includes(q))
     .sort((a, b) => { const x = val(a, sortKey), y = val(b, sortKey); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
-  document.querySelectorAll('th.sort').forEach(th => th.innerHTML = th.textContent.replace(/[▲▼]/g, '').trim() + (th.dataset.k === sortKey ? ` <span class="arrow">${sortDir > 0 ? '▲' : '▼'}</span>` : DATES.includes(th.dataset.k) ? ' <span class="arrow off">▼</span>' : ''));
+  document.querySelectorAll('th.sort').forEach(th => th.innerHTML = esc(th.textContent.replace(/[▲▼]/g, '').trim()) + (th.dataset.k === sortKey ? ` <span class="arrow">${sortDir > 0 ? '▲' : '▼'}</span>` : DATES.includes(th.dataset.k) ? ' <span class="arrow off">▼</span>' : ''));
   const body = $('tbl').querySelector('tbody');
   if (!list.length) { body.innerHTML = `<tr><td colspan="${COLS}" class="empty">${projects.length ? 'No projects match the filters.' : 'No projects yet. Click <b>New project</b> to create one.'}</td></tr>`; return; }
   body.innerHTML = list.map(p => `

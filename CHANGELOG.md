@@ -2,6 +2,13 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-11-13: GHAS DOM fixes
+
+- Widget settings escape every value written as HTML, including slider min, max, and step.
+- The colour swatch sets its label with text and its chip with the CSS background property.
+- Project table sort headers escape the label read from the cell before drawing the arrow.
+- The SQL editor's comment toggle no longer builds a regular expression from the comment mark.
+
 ## 2026-10-25: Shortcut made on each computer
 
 - `Data Noodler.lnk` is no longer tracked (`*.lnk` in `.gitignore`): it recorded the computer name, the user's SID and

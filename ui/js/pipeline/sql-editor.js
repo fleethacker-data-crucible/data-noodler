@@ -34,6 +34,17 @@ const SqlEditor = (() => {
   // Words that can follow a table name but are not its alias.
   const NOT_ALIAS = new Set([...KW, 'natural', 'unpivot', 'set', 'values', 'start', 'connect', 'model']);
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Drop a leading comment mark and the one space after it, keeping the indent. String checks, not a
+  // regular expression built from the mark: the mark is only "//" or "--", and a regex escape of "/"
+  // would leave a backslash in the mark unescaped.
+  function uncommentLine(line, mark) {
+    const lead = line.match(/^[ \t]*/)[0];
+    let rest = line.slice(lead.length);
+    if (!rest.startsWith(mark)) return line;
+    rest = rest.slice(mark.length);
+    if (rest.startsWith(' ')) rest = rest.slice(1);
+    return lead + rest;
+  }
   const IND = '    ';
   const isW = c => /[A-Za-z0-9_]/.test(c || '');
 
@@ -221,7 +232,7 @@ const SqlEditor = (() => {
       const lines = v.slice(a, b).split('\n'), used = lines.filter(l => l.trim());
       const off = used.length && used.every(l => l.trimStart().startsWith(mark));
       const ind = Math.min(...used.map(l => l.match(/^[ \t]*/)[0].length), Infinity);
-      const done = lines.map(l => !l.trim() ? l : off ? l.replace(new RegExp(`^([ \\t]*)${mark.replace(/\//g, '\\/')} ?`), '$1') : l.slice(0, ind) + mark + ' ' + l.slice(ind)).join('\n');
+      const done = lines.map(l => !l.trim() ? l : off ? uncommentLine(l, mark) : l.slice(0, ind) + mark + ' ' + l.slice(ind)).join('\n');
       const d = done.length - (b - a);
       ta.setSelectionRange(a, b); insert(done);
       if (e > s) ta.setSelectionRange(a, a + done.length); else { const p = Math.max(a, s + (lines.length === 1 ? d : 0)); ta.setSelectionRange(p, p); }
@@ -471,5 +482,5 @@ const SqlEditor = (() => {
       insert, focus: () => ta.focus(), refresh: paint,
     };
   }
-  return { mount };
+  return { mount, uncommentLine };
 })();

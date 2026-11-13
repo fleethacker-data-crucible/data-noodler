@@ -1,7 +1,8 @@
 // The widget settings panel (Dashboard Studio > Widget Editor): the X / Y slots beside the widget and the settings,
 // built from the widget's settings.json (inputs, settings). Global: SettingsPanel. Look: ui/css/dashboard-studio.css.
 const SettingsPanel = (() => {
-  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // HTML text and attributes. The quote characters are included so a value cannot break out of an attribute.
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const NUMERIC = /INT|DOUBLE|FLOAT|DECIMAL|REAL|NUMERIC/i, DATE = /DATE|TIME/i;
   const kindOf = t => NUMERIC.test(t) ? 'num' : DATE.test(t) ? 'date' : 'text';
   const AGG_TXT = { sum: 'Sum', avg: 'Average', count: 'Count', count_distinct: 'Count distinct', median: 'Median', min: 'Min', max: 'Max', none: 'Each row' };
@@ -105,10 +106,13 @@ const SettingsPanel = (() => {
         return `<label class="optrow${other ? '' : o.sep ? ' sep' : ''}"><span>${esc(o.label)}</span><select class="pick fmt" ${id}>${groups}${kind === 'number' ? `<optgroup label="Custom"><option value="__other" ${other ? 'selected' : ''}>Other…</option></optgroup>` : ''}</select></label>`
           + `<label class="optrow fmt-other${o.sep ? ' sep' : ''}" ${other ? '' : 'hidden'}><span>Example</span><input type="text" ${id} data-other="1" value="${esc(other ? v : '')}" placeholder="e.g. 1,234 units" spellcheck="false"></label>`;
       }
+      // min / max / step and the knob position come from the setting (typed in this panel, or from settings.json).
+      // They are escaped too: a number is unchanged, and a string cannot be read back as HTML.
+      const pct = o.type === 'number' && o.min != null && o.max != null ? (v - o.min) / (o.max - o.min || 1) : 0;
       const ctl = o.type === 'select' ? `<select ${id}>${(o.choices || []).map(c => `<option ${c === v ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>`
         : o.type === 'number' && o.min != null && o.max != null   // a slider: value bubble above the knob, min / max under the ends
-          ? `<span class="slide" style="--p:${((v - o.min) / (o.max - o.min || 1)) * 100}%;--pf:${(v - o.min) / (o.max - o.min || 1)}"><span class="sl-tip">${esc(v)}</span><input type="range" ${id} min="${o.min}" max="${o.max}" step="${o.step ?? 1}" value="${esc(v)}"><span class="sl-mm"><i>${o.min}</i><i>${o.max}</i></span></span>`
-        : o.type === 'number' ? `<input type="number" ${id} ${o.min != null ? `min="${o.min}"` : ''} ${o.max != null ? `max="${o.max}"` : ''} ${o.step != null ? `step="${o.step}"` : ''} value="${esc(v)}">`
+          ? `<span class="slide" style="--p:${esc(pct * 100)}%;--pf:${esc(pct)}"><span class="sl-tip">${esc(v)}</span><input type="range" ${id} min="${esc(o.min)}" max="${esc(o.max)}" step="${esc(o.step ?? 1)}" value="${esc(v)}"><span class="sl-mm"><i>${esc(o.min)}</i><i>${esc(o.max)}</i></span></span>`
+        : o.type === 'number' ? `<input type="number" ${id} ${o.min != null ? `min="${esc(o.min)}"` : ''} ${o.max != null ? `max="${esc(o.max)}"` : ''} ${o.step != null ? `step="${esc(o.step)}"` : ''} value="${esc(v)}">`
         : `<input type="text" ${id} value="${esc(v)}" spellcheck="false">`;
       return `<label class="optrow${o.sep ? ' sep' : ''}"><span>${esc(o.label)}</span>${ctl}</label>`;
     }
