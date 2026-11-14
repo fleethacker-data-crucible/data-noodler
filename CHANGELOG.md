@@ -2,6 +2,10 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-11-14: Reduced motion for workflow flashes
+
+- Project Manager and the new home page stop the dialog flash, the running pulse, and the done flash when the user prefers reduced motion. The stage colour, the status word, and a failed stage stay visible.
+
 ## 2026-11-13: GHAS DOM fixes
 
 - Widget settings escape every value written as HTML, including slider min, max, and step.
