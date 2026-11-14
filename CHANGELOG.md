@@ -2,6 +2,10 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-11-14: Reduced motion for workflow flashes
+
+- Project Manager and the new home page stop the dialog flash, the running pulse, and the done flash when the user prefers reduced motion. The stage colour, the status word, and a failed stage stay visible.
+
 ## 2026-11-14: Persistent failure toasts
 
 - Notifications keep a status region and an alert region for the life of the page. Routine results are announced politely. An error is announced once and stays until it is dismissed.

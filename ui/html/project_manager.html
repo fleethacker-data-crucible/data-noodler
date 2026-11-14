@@ -24,7 +24,8 @@
   .detail .log { margin-top: 10px; }
   .detail .log-more-row { margin-top: 10px; }
   .detail .log-more-row + .log { margin-top: 2px; }   /* Show More sits just above the log */
-  /* Update workflow (compact): one circle per step joined by arrows; running = gold flashing, done = green check. */
+  /* Update workflow (compact): one circle per step joined by arrows; running = gold, done = green check.
+     Reduced motion keeps that colour and the status word, and does not flash. */
   /* Workflow on the left, project stat cards right aligned, centred on it and no taller than it (circles to step names). */
   .wfrow { display: flex; align-items: center; gap: 16px; margin-top: 25px; }
   .wfrow .wf { margin-top: 0; }
@@ -73,6 +74,12 @@
   .wf .st.done .note { color: var(--green); }
   .wf .st.done.flash .c { animation: wf-done .3s ease-in-out 6 alternate; }
   @keyframes wf-done { from { background: color-mix(in srgb, var(--green) 14%, var(--bg)); box-shadow: none; } to { background: color-mix(in srgb, var(--green) 65%, var(--bg)); box-shadow: 0 0 14px var(--green); } }
+  /* Reduced motion: steady stage colour and the status word. No dialog flash, no running pulse, no done flash. */
+  @media (prefers-reduced-motion: reduce) {
+    dialog.flash { animation: none; box-shadow: 0 0 0 4px var(--err); border-color: var(--err); }
+    .wf .st.running .c { animation: none; background: color-mix(in srgb, var(--gold) 45%, var(--bg)); box-shadow: none; }
+    .wf .st.done.flash .c { animation: none; }
+  }
   .wf .st.failed .c { border-color: var(--red); color: var(--red); } .wf .st.failed .note { color: var(--red); }
   .wf .st.stale .c { border-color: #ff9e9e; border-style: solid; color: #ff9e9e; background: color-mix(in srgb, #ff9e9e 14%, var(--bg)); }
   .wf .st.stale .note { color: #ff9e9e; font-weight: 600; }
