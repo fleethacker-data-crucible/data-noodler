@@ -209,7 +209,7 @@ dialog header { padding: 18px 24px 0; font-size: 16px; font-weight: 600; }
 dialog .body { padding: 14px 24px; display: grid; gap: 12px; }
 dialog footer { padding: 4px 24px 20px; display: flex; justify-content: flex-end; gap: 5px; }
 /* Notifications (UI.toast), every window: the Server Control panel's drop-down look. The newest 10px from the top,
-   the rest 5px apart below it; ok = green, warn = orange, err = red, info = white. 5 s or X. Server events stay in the panel. */
+   the rest 5px apart below it; ok = green, warn = orange, err = red, info = white. Errors stay until X; the rest leave after 5 s or X. Server events stay in the panel. */
 .toasts { position: fixed; inset: 10px auto auto 50%; transform: translateX(-50%); width: min(520px, 90vw); z-index: 2147483647; display: flex; flex-direction: column; gap: 5px; pointer-events: none;
   margin: 0; padding: 0; border: 0; background: none; overflow: visible; color: inherit; }   /* also a top-layer popover: no popover box of its own */
 .toast { pointer-events: auto; position: relative; box-sizing: border-box; padding: 10px 34px 10px 14px; border-radius: 4px; box-shadow: 0 4px 14px #0006;

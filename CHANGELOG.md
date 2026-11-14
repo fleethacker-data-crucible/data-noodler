@@ -2,6 +2,10 @@
 
 Newest first. Dates are commit dates.
 
+## 2026-11-14: Persistent failure toasts
+
+- Notifications keep a status region and an alert region for the life of the page. Routine results are announced politely. An error is announced once and stays until it is dismissed.
+
 ## 2026-11-13: GHAS DOM fixes
 
 - Widget settings escape every value written as HTML, including slider min, max, and step.

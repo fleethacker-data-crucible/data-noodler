@@ -1,5 +1,5 @@
 // Shared UI helpers. Global: UI.
-//   UI.toast('Saved', 'ok')                      bottom-right message (kind: '', 'ok', 'err')
+//   UI.toast('Saved', 'ok')                      message (kind: '', 'ok', 'warn', 'err'). An error stays until it is dismissed.
 //   await UI.confirm('Delete?', { danger: true, ok, cancel }) true / false (styled dialog; the browser's confirm() is not used)
 //   await UI.form('New project', fields)         { values } or null; fields = [{ name, label, type, value, options, required }]
 //   UI.dataTable(el, cols, rows)                 query results as a table
@@ -8,8 +8,48 @@ const UI = (() => {
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // Notifications, every window (look: ui/css/theme.css .toast, as in the Server Control panel): the newest drops in at the
-  // top, older ones move down. kind: 'ok' green, 'warn' orange, 'err' / 'error' red, anything else white (info). 5 s or X.
-  let toasts;
+  // top, older ones move down. kind: 'ok' green, 'warn' orange, 'err' / 'error' red, anything else white (info).
+  // Info, ok and warn leave after ms (default 5 s) or X. An error stays until X, so a failed import is still there after 5 s.
+  let toasts, statusLive, alertLive;
+  const liveGen = { status: 0, alert: 0 };
+  // Off screen, still in the accessibility tree (not display:none, not aria-hidden). Kept for the life of the page.
+  function srOnly(el) {
+    Object.assign(el.style, {
+      position: 'absolute', left: '0', top: '0', width: '1px', height: '1px', padding: '0', margin: '-1px',
+      overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: '0', pointerEvents: 'none',
+    });
+  }
+  // Persistent live regions, created before any message so the first one is announced once.
+  // role=status is polite (routine results). role=alert is assertive (failures).
+  function ensureLive() {
+    if (!document.body) return;
+    if (!statusLive?.isConnected) {
+      statusLive = document.body.appendChild(document.createElement('div'));
+      statusLive.className = 'toast-sr';
+      statusLive.setAttribute('role', 'status');
+      statusLive.setAttribute('aria-live', 'polite');
+      statusLive.setAttribute('aria-atomic', 'true');
+      srOnly(statusLive);
+    }
+    if (!alertLive?.isConnected) {
+      alertLive = document.body.appendChild(document.createElement('div'));
+      alertLive.className = 'toast-sr';
+      alertLive.setAttribute('role', 'alert');
+      alertLive.setAttribute('aria-live', 'assertive');
+      alertLive.setAttribute('aria-atomic', 'true');
+      srOnly(alertLive);
+    }
+  }
+  function announce(which, text) {
+    ensureLive();
+    const region = which === 'alert' ? alertLive : statusLive;
+    if (!region) return;
+    const gen = ++liveGen[which];
+    const write = () => { if (gen === liveGen[which]) region.textContent = text; };
+    // The same text already in the region is not read again. Clear it, then write once on the next turn.
+    if (region.textContent === text) { region.textContent = ''; setTimeout(write, 50); }
+    else write();
+  }
   // Notifications are always the top layer: a manual popover sits in the browser's top layer (above open dialogs, which
   // no z-index can beat), and is shown again whenever a notification appears or any dialog / popover opens later.
   function raise() {
@@ -29,12 +69,15 @@ const UI = (() => {
     // Always on top: a manual popover lives in the browser's top layer (above open dialogs, which no z-index can beat);
     // shown again on every notification so it is the newest top-layer item, above any dialog opened since.
     raise();
+    const sticky = kind === 'err';
     const t = Object.assign(document.createElement('div'), { _at: now, _kind: kind, _msg: m }); t.className = `toast ${kind}`;
-    t.innerHTML = `<span>${esc(msg)}</span><button class="x" title="Dismiss">&times;</button>`;
+    t.innerHTML = `<span>${esc(msg)}</span><button type="button" class="x" aria-label="Dismiss" title="Dismiss">&times;</button>`;
     t.querySelector('.x').onclick = () => t.remove();
     toasts.prepend(t);
-    setTimeout(() => t.remove(), ms);
+    announce(sticky ? 'alert' : 'status', m);   // once: the visible toast is not itself a live region
+    if (!sticky) setTimeout(() => t.remove(), ms);   // errors stay until Dismiss
   }
+  ensureLive();
 
   // A modal <dialog>. body = HTML string; buttons = [{ label, value, kind }]. Resolves with the clicked value (null on Esc).
   function dialog(title, body, buttons) {
