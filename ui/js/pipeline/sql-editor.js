@@ -14,7 +14,7 @@
 //     vars() -> Set of the page's own variable names (purple), d3names() -> Set of D3 exports (d3.<name> blue).
 //   readOnly: shown and coloured, not editable (D3 Studio's generated variables).
 const SqlEditor = (() => {
-  // Oracle SQL (.claude/docs/SQL_DIALECT.md): keywords, functions and types.
+  // Oracle SQL: keywords, functions and types.
   const KW = ('select distinct unique all from where group by having order asc desc nulls first last offset fetch next rows row only ' +
     'join inner left right full outer cross on using as and or not in is null between like escape exists any some case when then else end ' +
     'union intersect minus with rollup cube grouping sets pivot for over partition dual rownum true false interval year month day hour ' +
